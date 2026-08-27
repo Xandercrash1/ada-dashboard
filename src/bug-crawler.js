@@ -60,6 +60,7 @@ ONLY OUTPUT VALID JSON OR "NO_ERROR". Do not include markdown fences around the 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'llama3.2:3b',
+        format: 'json',
         prompt: prompt,
         stream: false,
         options: {
