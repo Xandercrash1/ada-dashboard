@@ -182,6 +182,14 @@
           <span id="home-stat-bugs">0</span>
           <span id="home-stat-ram">0</span>
           <span id="home-stat-ram_percent">0</span>
+          <span id="home-stat-ram_total">0</span>
+          <span id="home-stat-cpu_5m">0</span>
+          <span id="home-stat-cpu_15m">0</span>
+          <span id="home-stat-cpu_cores">0</span>
+          <span id="home-stat-disk_used">0</span>
+          <span id="home-stat-disk_percent">0</span>
+          <span id="home-stat-disk_free">0</span>
+          <span id="home-stat-uptime">0</span>
       </div>
 
     </section>
@@ -3127,7 +3135,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       syncHomeStatMirrors();
     }
 
-    // Widgets can embed <span data-home-stat="todo|jobs|cpu|bugs|ram|ram_percent"></span> to
+    // Widgets can embed <span data-home-stat="todo|jobs|cpu|cpu_5m|cpu_15m|cpu_cores|bugs|ram|ram_percent|ram_total|disk_used|disk_percent|disk_free|uptime"></span> to
     // show live values. We mirror from the built-in stat spans (which keep
     // updating even when the stats section is hidden) instead of hooking every
     // update site — one dumb copy loop beats four fragile integration points.
