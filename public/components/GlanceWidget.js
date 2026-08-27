@@ -26,6 +26,9 @@ class AdaGlance extends HTMLElement {
     }
   }
 
+  static get observedAttributes() { return ['theme', 'accent']; }
+  attributeChangedCallback() { this.render(); this.fetchGlance(); }
+
   _getGreeting() {
     const hour = new Date().getHours();
     let timeGreeting = 'afternoon';
@@ -139,8 +142,16 @@ class AdaGlance extends HTMLElement {
     const greeting = this._getGreeting();
     const colors = this._getColorClasses('indigo');
 
+    const theme = this.getAttribute('theme') || 'glass';
+    const accent = this.getAttribute('accent') || 'indigo';
+    let bgClass = 'bg-white/5 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-sm';
+    
+    if (theme === 'neon') bgClass = `bg-${accent}-500/10 backdrop-blur-md border border-${accent}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accent}-500/30 text-${accent}-100`;
+    else if (theme === 'gradient') bgClass = `bg-gradient-to-br from-${accent}-600/80 to-${accent}-900/80 backdrop-blur-md border border-${accent}-400/30 shadow-lg text-white`;
+    else if (theme === 'transparent') bgClass = '';
+
     this.innerHTML = `
-      <div class="bg-white/5 backdrop-blur-md border border-white/10 dark:border-white/5 rounded-xl p-4 flex items-center gap-3 shadow-sm transition-all duration-300">
+      <div class="${bgClass} rounded-xl p-4 flex items-center gap-3 transition-all duration-300">
         <div data-glance-icon-wrapper class="flex-shrink-0 w-8 h-8 rounded-lg ${colors.bg} ${colors.text} flex items-center justify-center transition-colors duration-300">
           <i data-glance-icon class="fa-solid fa-cloud-sun"></i>
         </div>

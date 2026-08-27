@@ -2993,6 +2993,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     function renderHomepage() {
       if (!homepageDoc) return;
       
+      const gt = homepageDoc.glanceTheme || { theme: 'glass', accent: 'indigo' };
+      const glance = document.getElementById('home-glance-banner');
+      if (glance) {
+        glance.setAttribute('theme', gt.theme || 'glass');
+        glance.setAttribute('accent', gt.accent || 'indigo');
+      }
+      
 
       // Built-in sections the designer may switch off to replace with widgets.
       const sections = homepageDoc.sections || {};

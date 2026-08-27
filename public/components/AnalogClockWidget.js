@@ -23,15 +23,22 @@ class AnalogClockWidget extends HTMLElement {
 
   render() {
     const theme = this.getAttribute('theme') || 'transparent';
+    const accentColor = this.getAttribute('accent') || 'indigo';
     let bgClass = '';
     let styleBg = '';
     let face = 'rgba(255,255,255,0.05)';
     let marks = 'rgba(255,255,255,0.3)';
     let hands = '#e2e8f0';
-    const accent = '#6366f1'; // indigo
+    let accent = '#6366f1'; 
     
     if (theme === 'glass') {
         bgClass = 'bg-white/5 dark:bg-black/20 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-lg';
+    } else if (theme === 'neon') {
+        bgClass = `bg-${accentColor}-500/10 backdrop-blur-md border border-${accentColor}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accentColor}-500/30 text-${accentColor}-100`;
+        accent = '#38bdf8';
+    } else if (theme === 'gradient') {
+        bgClass = `bg-gradient-to-br from-${accentColor}-600/80 to-${accentColor}-900/80 backdrop-blur-md border border-${accentColor}-400/30 shadow-lg text-white`;
+        face = 'rgba(0,0,0,0.2)';
     } else if (theme === 'light') {
         styleBg = 'background: #fff;';
         face = '#f3f4f6';
