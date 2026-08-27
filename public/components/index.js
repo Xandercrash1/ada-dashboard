@@ -1,3 +1,8 @@
 import './ClockWidget.js';
 import './StatBoxWidget.js';
 import './GreetingWidget.js';
+import './AnalogClockWidget.js';
+import './CountdownWidget.js';
+import './StopwatchWidget.js';
+import './TimerWidget.js';
+import './ScriptRunnerWidget.js';
