@@ -159,19 +159,6 @@
       <ada-glance id="home-glance-banner" class="block mb-6"></ada-glance>
 
       <!-- Agent-designed widget cards (homepage.json .widgets). Hidden when empty. -->
-            <div class="flex items-center justify-between mb-4">
-        <h2 class="text-gray-200 font-semibold text-lg flex items-center gap-2">
-          <i class="fa-solid fa-layer-group text-indigo-400"></i> Dashboard
-        </h2>
-        <div class="flex items-center gap-2">
-          <button onclick="toggleEditLayout()" id="edit-layout-btn" class="px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs font-medium flex items-center gap-2 transition-all">
-            <i class="fa-solid fa-pen-ruler"></i> <span>Edit Layout</span>
-          </button>
-          <button onclick="openHomepageDesigner()" title="Summon a Homepage Designer agent" class="px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 hover:text-white text-xs font-medium flex items-center gap-2 transition-all">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> <span>AI Designer</span>
-          </button>
-        </div>
-      </div>
       <div id="home-widgets" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
 
       <!-- Hidden state store for live stats so Designer widgets can safely mirror them -->
@@ -990,18 +977,236 @@
         const cards = groups[eng].map(m => {
           const checked = m.id === selectedId ? 'checked' : '';
           const disabledClass = m.unavailable ? 'opacity-50 grayscale cursor-not-allowed pointer-events-none' : 'cursor-pointer hover:border-gray-600';
-  const overlay = window.isEditingLayout ? `
-          <div class="absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center gap-3 z-20 backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
-             <button onclick="editWidget('${w.id}')" class="px-4 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-palette"></i> Style</button>
-             <button onclick="deleteWidget('${w.id}')" class="px-4 py-1.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-trash"></i> Remove</button>
-          </div>
-        ` : '';
+          return `
+            <label class="border ${checked ? 'border-indigo-500 bg-indigo-950/20' : 'border-dark-border bg-dark-bg'} p-2.5 rounded-xl flex items-start gap-2 transition-all ${disabledClass}">
+              <input type="radio" name="${radioName}" value="${m.id}" ${checked} ${m.unavailable ? 'disabled' : ''} class="mt-1 text-indigo-600 focus:ring-0" onchange="onModelPickerChange('${radioName}', this.value)">
+              <div class="min-w-0">
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                  <i class="fa-solid ${tierIcons[m.tier] || 'fa-microchip'} text-[10px] text-indigo-400"></i>
+                  ${escapeHtml(m.label)}
+                  <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-dark-card border border-dark-border text-gray-400">${tierLabels[m.tier] || m.tier}</span>
+                  ${m.default ? '<span class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-950 border border-emerald-800 text-emerald-400">default</span>' : ''}
+                </div>
+                <div class="text-[10px] text-gray-400 mt-0.5">${escapeHtml(m.description || '')}</div>
+              </div>
+            </label>`;
+        }).join('');
+        return `<div class="space-y-1.5"><div class="text-[10px] font-bold uppercase tracking-wide text-gray-500 mt-1.5 mb-1">${engineLabels[eng] || eng}</div>${cards}</div>`;
+      });
+      return sections.join('');
+    }
 
+    // Simple dispatcher so the shared picker markup can report selection
+    // changes back without inlining a different handler per call site.
+    let newAgentSelectedModel = null;
+    function onModelPickerChange(radioName, value) {
+      if (radioName === 'new-agent-model') newAgentSelectedModel = value;
+      else if (radioName === 'queue-switch-model') { if (queueContext) queueContext.selectedModel = value; }
+    }
+
+    // --- MAIN TAB SWITCHING ---
+    function switchTab(tab) {
+      ['home', 'todo', 'tools', 'server'].forEach(t => {
+        document.getElementById(`view-${t}`).classList.add('hidden');
+        const deskBtn = document.getElementById(`tab-btn-${t}`);
+        const mobBtn = document.getElementById(`mob-btn-${t}`);
+
+        if (deskBtn) {
+          deskBtn.classList.remove('border-indigo-500', 'text-indigo-400', 'font-semibold');
+          deskBtn.classList.add('border-transparent', 'text-gray-400');
+        }
+        if (mobBtn) {
+          mobBtn.classList.remove('text-indigo-400', 'font-semibold');
+          mobBtn.classList.add('text-gray-400');
+        }
+      });
+
+      document.getElementById(`view-${tab}`).classList.remove('hidden');
+      const activeDeskBtn = document.getElementById(`tab-btn-${tab}`);
+      const activeMobBtn = document.getElementById(`mob-btn-${tab}`);
+
+      if (activeDeskBtn) {
+        activeDeskBtn.classList.add('border-indigo-500', 'text-indigo-400', 'font-semibold');
+        activeDeskBtn.classList.remove('border-transparent', 'text-gray-400');
+      }
+      if (activeMobBtn) {
+        activeMobBtn.classList.add('text-indigo-400', 'font-semibold');
+        activeMobBtn.classList.remove('text-gray-400');
+      }
+
+      // Designer is page-bound: leaving a page closes its bubble and the FAB
+      // only shows where a page document exists (defined with the bubble code).
+      onDesignerTabSwitch(tab);
+    }
+
+    // --- SERVER SUB-TAB SWITCHING ---
+    function switchServerSubTab(sub) {
+      ['health', 'agents', 'feedback'].forEach(s => {
+        document.getElementById(`server-sub-${s}`).classList.add('hidden');
+        const btn = document.getElementById(`subtab-btn-${s}`);
+        if (btn) {
+          btn.className = 'flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all';
+        }
+      });
+
+      document.getElementById(`server-sub-${sub}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`subtab-btn-${sub}`);
+      if (activeBtn) {
+        activeBtn.className = 'flex-shrink-0 px-4 py-2 rounded-lg bg-indigo-600 text-white shadow flex items-center gap-2 transition-all font-semibold';
+      }
+
+      if (sub === 'agents' && agentSessions.length === 0) {
+        loadAgentSessions();
+      }
+      if (sub === 'feedback') {
+        loadFeedback();
+      }
+    }
+
+    // ===================== TODO (ported vault_todo.py system) =====================
+    // Built against `Antigravity/TODO Migration — Contract.md` §7. The backend
+    // (todo-backend, dashboard/src/) is built against the same contract but did
+    // not exist while this was written — every fetch below degrades to an
+    // "unavailable" banner instead of breaking, per the contract's boundary rules.
+    //
+    // Emoji use explicit \u{...} escapes (not pasted literals) so the load-bearing
+    // variation selectors (spec §4.4 — 🗓️ needs U+FE0F, ⚠️ needs U+FE0F, 🔁/📅/
+    // 📌/📋 do not) survive byte-exact regardless of editor/encoding.
+    const TODO_EMOJI = {
+      cycle: '\u{1F501}',        // 🔁 recurring Daily/Weekdays
+      weekly: '\u{1F4C5}',       // 📅 recurring, frequency startswith "Weekly"
+      otherRecurring: '\u{1F5D3}\u{FE0F}', // 🗓️ any other recurring
+      scheduled: '\u{1F4CC}',    // 📌
+      backlog: '\u{1F4CB}',      // 📋
+      warn: '\u{26A0}\u{FE0F}'   // ⚠️ PAST DUE header
+    };
+
+    let todoView = null;             // last successful GET /api/todo result
+    let todoApiUnavailable = false;  // true once any /api/todo* call has failed
+    let todoAllTasks = [];           // GET /api/todo/tasks (Manage sub-view)
+    let todoProjects = [];           // GET /api/todo/projects
+    let todoManageTypeFilter = 'all';
+    let todoManageProjectFilter = 'all';
+    let todoEditingId = null;        // non-null while the modal is editing, not creating
+    let todoSubTab = 'daily';
+
+    // Never throws — every caller gets {ok, status, data} and decides what to
+    // show. This is what makes "the endpoints will not exist while you work"
+    // survive: a 404 or a dead connection both land here, not in a console error
+    // the phone user never sees.
+    async function todoApiFetch(url, opts) {
+      try {
+        const res = await fetch(url, opts);
+        let data = null;
+        try { data = await res.json(); } catch (_) { /* empty/non-JSON body */ }
+        return { ok: res.ok, status: res.status, data };
+      } catch (err) {
+        return { ok: false, status: 0, data: null, networkError: true };
+      }
+    }
+
+    function todoMarkUnavailable(unavailable) {
+      todoApiUnavailable = unavailable;
+      const banner = document.getElementById('todo-unavailable-banner');
+      if (banner) banner.classList.toggle('hidden', !unavailable);
+    }
+
+    // --- SUB-TAB SWITCHING ---
+    function switchTodoSubTab(sub) {
+      todoSubTab = sub;
+      ['daily', 'manage'].forEach(s => {
+        document.getElementById(`todo-sub-${s}`).classList.add('hidden');
+        const btn = document.getElementById(`todo-subtab-btn-${s}`);
+        if (btn) btn.className = 'px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all';
+      });
+      document.getElementById(`todo-sub-${sub}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`todo-subtab-btn-${sub}`);
+      if (activeBtn) activeBtn.className = 'px-4 py-2 rounded-lg bg-indigo-600 text-white shadow flex items-center gap-2 transition-all font-semibold';
+      if (sub === 'manage' && todoAllTasks.length === 0) loadTodoManage();
+    }
+
+    async function loadTodoDaily() {
+      const result = await todoApiFetch('/api/todo');
+      if (!result.ok) {
+        todoView = null;
+        todoMarkUnavailable(true);
+      } else {
+        todoView = result.data;
+        todoMarkUnavailable(false);
+      }
+      renderTodoDaily();
+      updateTodoBadge();
+    }
+    function updateTodoBadge() {
+      const count = todoView ? (todoView.pastDue || []).length + (todoView.today || []).length : 0;
+      const homeStatEl = document.getElementById('home-stat-todo');
+      if (homeStatEl) homeStatEl.textContent = count;
+      [['badge-todo-count', false], ['mob-badge-todo-count', true]].forEach(([id, isMob]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = isMob ? (count > 9 ? '9+' : count) : count;
+        el.classList.toggle('hidden', count === 0);
+      });
+    }
+
+    function todoEmoji(t) {
+      if (t.type === 'recurring') {
+        if (t.frequency === 'Daily' || t.frequency === 'Weekdays') return TODO_EMOJI.cycle;
+        if (typeof t.frequency === 'string' && t.frequency.startsWith('Weekly')) return TODO_EMOJI.weekly;
+        return TODO_EMOJI.otherRecurring;
+      }
+      if (t.type === 'scheduled') return TODO_EMOJI.scheduled;
+      if (t.type === 'backlog') return TODO_EMOJI.backlog;
+      return '';
+    }
+
+    // ISO "YYYY-MM-DD" -> "Fri, May 29" — parsed/rendered as UTC-anchored so a
+    // local-timezone Date() doesn't roll the calendar day backward (the same
+    // hazard contract §1.4 pins server-side; here it's display-only but the
+    // failure mode is identical, so it gets the same treatment).
+    function todoFormatDateLabel(iso) {
+      if (!iso) return '';
+      const [y, m, d] = iso.split('-').map(Number);
+      if (!y || !m || !d) return '';
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      const wd = dt.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+      const mo = dt.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+      return `${wd}, ${mo} ${d}`; // day deliberately not zero-padded — spec §4.2 / §4.15
+    }
+
+    // Spec §4.2: same-day rows show time only ("(8:00am)"); other-day rows show
+    // the full date, plus time if present ("(Fri, May 29 8:00pm)"); no date at
+    // all for the backlog-guarantee item (due is null).
+    function todoDateLabel(t, sameDay) {
+      const due = t.nextDue || t.dueDate || t.added || null;
+      if (sameDay) return t.dueTime ? `(${t.dueTime})` : '';
+      if (!due) return '';
+      const label = todoFormatDateLabel(due);
+      return t.dueTime ? `(${label} ${t.dueTime})` : `(${label})`;
+    }
+
+    function todoPriorityBadgeClass(p) {
+      return p === 'High' ? 'text-rose-400 bg-rose-950/70 border-rose-800/80' :
+             p === 'Medium' ? 'text-amber-400 bg-amber-950/70 border-amber-800/80' :
+             'text-blue-400 bg-blue-950/70 border-blue-800/80'; // Low, and anything unrecognized — matches contract §2 rule
+    }
+
+    // A flagged row (contract §1.3 — failed validation, surfaced not dropped)
+    // may not carry the normal fields. Render it distinctly and non-actionably
+    // rather than let a missing field throw mid-render and blank the whole list.
+    function todoIsFlagged(t) {
+      return !!(t.flagged || t.error || t.invalid);
+    }
+
+    function todoRowHtml(t, sameDay) {
+      if (todoIsFlagged(t)) {
         return `
-          <div class="relative w-full h-full ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}>
-            ${w.html || ''}
-            ${w.link && w.link.label && !window.isEditingLayout ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
-            ${overlay}
+          <div id="todo-row-${escapeHtml(t.id || '')}" class="bg-amber-950/20 border border-amber-800/50 rounded-2xl p-3.5 flex items-start gap-3">
+            <i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5"></i>
+            <div class="flex-1 min-w-0 text-xs">
+              <div class="text-amber-300 font-semibold">${escapeHtml(t.name || t.id || 'Unrecognized task')}</div>
+              <div class="text-amber-400/80">${escapeHtml(t.error || 'This row could not be parsed. Edit or delete it in Manage.')}</div>
+            </div>
           </div>`;
       }
       const emoji = todoEmoji(t);
@@ -1590,18 +1795,864 @@
         const icon = roleIcons[s.role] || '<i class="fa-solid fa-robot"></i>';
         const modelInfo = getModelInfo(s.model);
 
-const overlay = window.isEditingLayout ? `
-          <div class="absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center gap-3 z-20 backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
-             <button onclick="editWidget('${w.id}')" class="px-4 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-palette"></i> Style</button>
-             <button onclick="deleteWidget('${w.id}')" class="px-4 py-1.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-trash"></i> Remove</button>
-          </div>
-        ` : '';
-
         return `
-          <div class="relative w-full h-full ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}>
-            ${w.html || ''}
-            ${w.link && w.link.label && !window.isEditingLayout ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
-            ${overlay}
+          <div onclick="selectSession('${s.id}')" class="group cursor-pointer p-3 rounded-xl border transition-all flex items-center justify-between ${isActive ? 'bg-purple-950/40 border-purple-500 shadow-sm' : 'bg-dark-bg border-dark-border hover:border-gray-700'}">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-7 h-7 rounded-lg ${isActive ? 'bg-purple-600 text-white' : 'bg-dark-card text-purple-400'} flex items-center justify-center text-xs flex-shrink-0">
+                ${icon}
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-bold ${isActive ? 'text-white' : 'text-gray-300'} truncate">${escapeHtml(s.name)}</h4>
+                <p class="text-[10px] text-gray-500 truncate">${s.role} • ${escapeHtml(modelInfo.label)}</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="event.stopPropagation(); deleteAgentSession('${s.id}')" class="text-gray-600 hover:text-rose-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <i class="fa-solid fa-trash-can text-xs"></i>
+              </button>
+              <div class="w-2 h-2 rounded-full ${isActive ? 'bg-purple-400 animate-pulse' : 'bg-gray-600'}"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+    function selectSession(id) {
+      activeSessionId = id;
+      
+      const leftPane = document.getElementById('agent-left-pane');
+      const rightPane = document.getElementById('agent-right-pane');
+      
+      if (!id) {
+        if (leftPane) leftPane.className = 'lg:col-span-12 bg-dark-card border border-dark-border rounded-2xl p-4 space-y-3.5 shadow-md transition-all';
+        if (rightPane) rightPane.classList.add('hidden');
+        renderSessionsList();
+        return;
+      }
+      
+      if (leftPane) leftPane.className = 'hidden lg:block lg:col-span-4 bg-dark-card border border-dark-border rounded-2xl p-4 space-y-3.5 shadow-md transition-all';
+      if (rightPane) rightPane.className = 'lg:col-span-8 bg-dark-card border border-dark-border rounded-2xl flex flex-col h-[650px] shadow-lg overflow-hidden transition-all';
+
+      renderSessionsList();      const session = agentSessions.find(s => s.id === id);
+      if (!session) return;
+
+      document.getElementById('active-agent-name').innerText = session.name;
+      document.getElementById('active-agent-icon').innerHTML = roleIcons[session.role] || '<i class="fa-solid fa-robot"></i>';
+      document.getElementById('active-agent-role-desc').innerText = roleDescs[session.role] || 'Autonomous Assistant';
+
+      const modelInfo = getModelInfo(session.model);
+      const badgeIcon = modelInfo.engine === 'claude' ? 'fa-brain text-amber-400' : 'fa-bolt';
+      document.getElementById('active-agent-model-badge').innerHTML =
+        `<i class="fa-solid ${badgeIcon} text-[9px]"></i> ${escapeHtml(modelInfo.label)}`;
+
+      renderChatMessages(session.messages);
+      // Rebase the async-chat change detector onto the session now on screen.
+      // Without this it still holds the PREVIOUS session's signature, so the
+      // next poll either redraws needlessly or (on a coincidental match) skips
+      // a real message.
+      lastMessagesSignature = messagesSignature(session.messages);
+
+      // §5 reconnect: if a poll for this session is already tracked in this
+      // page's JS state (tab-switch, not reload), just redraw it; otherwise
+      // ask the server whether one is running (covers a fresh page load).
+      if (jobPolls[id]) {
+        renderJobProgress(id, jobPolls[id].lastJob);
+      } else {
+        checkForRunningJob(id);
+      }
+    }
+
+    // Shared by the finished-message list and the live progress bubble so the
+    // two look identical as a job's tool calls finish and slide into history.
+    function renderToolExecutionsHtml(toolExecutions) {
+      if (!toolExecutions || toolExecutions.length === 0) return '';
+      return toolExecutions.map((t) => `
+        <details class="mt-2 bg-black/80 border border-dark-border rounded-xl text-[11px] font-mono overflow-hidden">
+          <summary class="cursor-pointer px-3 py-1.5 text-purple-300 font-semibold flex items-center justify-between hover:bg-dark-accent/30 select-none">
+            <span class="flex items-center gap-1.5">
+              <i class="fa-solid fa-terminal text-cyan-400"></i> Tool: ${escapeHtml(t.name)} ${t.args && t.args.command ? `(\`${escapeHtml(t.args.command)}\`)` : ''}
+            </span>
+            <span class="text-[10px] text-gray-500">Details & Output</span>
+          </summary>
+          <div class="p-3 border-t border-dark-border text-gray-300 bg-black whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto custom-scrollbar">
+${escapeHtml(JSON.stringify(t.result, null, 2))}
+          </div>
+        </details>
+      `).join('');
+    }
+
+    function renderChatMessages(messages) {
+      const container = document.getElementById('chat-messages-container');
+      if (!messages || messages.length === 0) {
+        container.innerHTML = `<div class="text-center py-20 text-gray-500 text-xs">No messages yet. Ask the agent anything!</div>`;
+        return;
+      }
+
+      container.innerHTML = messages.map(m => {
+        const isUser = m.role === 'user';
+        const toolHtml = renderToolExecutionsHtml(m.toolExecutions);
+        // Async chat: a message the agent pushed on its own initiative rather
+        // than as the answer to a prompt. Badged, because otherwise it reads as
+        // a reply to whatever happens to sit above it.
+        const asyncBadge = m.async ? `
+                <div class="flex items-center gap-1.5 text-[10px] text-cyan-400 font-semibold">
+                  <i class="fa-solid fa-tower-broadcast"></i> Sent on its own
+                </div>` : '';
+
+        // Promote button: when an agent message contains the canonical token, we
+        // strip the token from the displayed text and render a click-to-promote
+        // button. The button is human-clicked — the agent only surfaces it, it
+        // cannot press it. Keep this string in sync with PROMOTE_ACTION_TOKEN in server.js.
+        const PROMOTE_TOKEN = '[ACTION: PROMOTE_STAGING]';
+        // Own-line match ONLY (same rule as containsPromoteToken in server.js
+        // — keep in sync). A message merely *mentioning* the token in prose,
+        // even in backticks, must not render a live deploy button; a bare
+        // .includes() did exactly that on 2026-08-27.
+        const hasPromote = !isUser && typeof m.text === 'string' &&
+          m.text.split('\n').some(l => l.trim() === PROMOTE_TOKEN);
+        const promoteDisplayText = hasPromote
+          ? m.text.split('\n').filter(l => l.trim() !== PROMOTE_TOKEN).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+          : m.text;
+        const promoteBtnHtml = hasPromote ? `
+                <button onclick="triggerPromoteStaging(this)" class="mt-1 inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors shadow-sm">
+                  <i class="fa-solid fa-rocket"></i> Push Staging → Live
+                </button>` : '';
+
+        if (isUser) {
+          return `
+            <div class="flex justify-end">
+              <div class="bg-indigo-600 text-white text-xs rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-lg shadow-sm leading-relaxed">
+                ${escapeHtml(m.text)}
+              </div>
+            </div>
+          `;
+        } else {
+          return `
+            <div class="flex justify-start gap-2.5 items-start">
+              <div class="w-7 h-7 rounded-xl ${m.async ? 'bg-cyan-950 border-cyan-800 text-cyan-300' : 'bg-purple-950 border-purple-800 text-purple-300'} border flex items-center justify-center text-xs flex-shrink-0 mt-0.5">
+                <i class="fa-solid ${m.async ? 'fa-tower-broadcast' : 'fa-robot'}"></i>
+              </div>
+              <div class="bg-dark-card border ${m.async ? 'border-cyan-900' : 'border-dark-border'} text-gray-200 text-xs rounded-2xl rounded-tl-sm px-4 py-3 max-w-xl shadow-sm leading-relaxed space-y-2">
+                ${asyncBadge}
+                <div class="whitespace-pre-wrap leading-relaxed">${escapeHtml(promoteDisplayText)}</div>
+                ${promoteBtnHtml}
+                ${toolHtml}
+              </div>
+            </div>
+          `;
+        }
+      }).join('');
+
+      setTimeout(() => container.scrollTop = container.scrollHeight, 10);
+    }
+
+    async function submitAgentMessage(e) {
+      if (e) e.preventDefault();
+      if (!activeSessionId) return;
+
+      const input = document.getElementById('agent-chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      input.value = '';
+      // Optimistically show the user message only on the initial send —
+      // a switch-and-retry reuses the same prompt and it's already on screen.
+      const session = agentSessions.find(s => s.id === activeSessionId);
+      if (session) {
+        session.messages.push({ role: 'user', text, timestamp: new Date().toISOString() });
+        renderChatMessages(session.messages);
+      }
+
+      await sendAgentTurn(activeSessionId, text);
+    }
+
+    // Shared by the normal send path and the "switch model & retry" action in
+    // the exhaustion popup. overrideModel/persistModel map straight onto the
+    // optional POST /chat fields from the contract (§2) — both absent means
+    // today's behavior exactly.
+    //
+    // Contract §3: POST /chat now returns 202 + { jobId, status: "running" }
+    // immediately, or 409 + the already-running job's id if one exists for
+    // this session. Either way we attach to the job and start polling.
+    // §4 backward-compat / degrade-gracefully: an old-style synchronous 200
+    // body (data.session, no jobId) is still handled directly, in case the
+    // two halves of this change ever land out of order.
+    async function triggerPromoteStaging(btn) {
+      // Cosmetic heads-up: how many staged tickets this deploy will auto-close.
+      // Best-effort — a fetch failure must never block the promote itself.
+      let stagedNote = '';
+      try {
+        const items = await (await fetch('/api/feedback?status=in-progress')).json();
+        const n = (Array.isArray(items) ? items : []).filter(i => i.stagedAt).length;
+        if (n) stagedNote = ` ${n} staged feedback ticket${n === 1 ? '' : 's'} will be auto-closed.`;
+      } catch (e) { /* count unavailable — proceed without it */ }
+      if (!confirm("Are you sure you want to push Staging to Live? This will restart the dashboard." + stagedNote)) return;
+      
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Promoting...';
+      
+      try {
+        // X-Promote-Confirm marks this as a genuine button click (see the
+        // endpoint's security note in server.js). Same-origin fetch sends the
+        // session cookie automatically.
+        const res = await fetch('/api/staging/promote', {
+          method: 'POST',
+          headers: { 'X-Promote-Confirm': '1' }
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(()=>({}));
+          throw new Error(err.error || 'Promotion API failed');
+        }
+        btn.classList.replace('bg-emerald-600', 'bg-gray-600');
+        btn.classList.replace('hover:bg-emerald-500', 'hover:bg-gray-500');
+        btn.classList.replace('border-emerald-500', 'border-gray-500');
+        btn.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> Promotion started — restarting…';
+      } catch (e) {
+        alert(e.message);
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        btn.innerHTML = originalHtml;
+      }
+    }
+
+    async function sendAgentTurn(sessionId, text, overrideModel, persistModel) {
+      const session = agentSessions.find(s => s.id === sessionId);
+
+      // Placeholder shown only until we know whether this is a job (202/409)
+      // or an old-style synchronous reply — startJobPolling() replaces it.
+      const container = document.getElementById('chat-messages-container');
+      if (sessionId === activeSessionId) {
+        const thinkingBubble = document.createElement('div');
+        thinkingBubble.id = 'thinking-indicator';
+        thinkingBubble.className = 'flex justify-start gap-2.5 items-start';
+        thinkingBubble.innerHTML = `
+          <div class="w-7 h-7 rounded-xl bg-purple-950 border border-purple-800 text-purple-300 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 animate-spin">
+            <i class="fa-solid fa-circle-notch"></i>
+          </div>
+          <div class="bg-dark-card border border-dark-border text-purple-300 text-xs rounded-2xl px-4 py-2.5 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+            <span>Starting…</span>
+          </div>
+        `;
+        container.appendChild(thinkingBubble);
+        setTimeout(() => container.scrollTop = container.scrollHeight, 10);
+      }
+
+      const body = { prompt: text };
+      if (overrideModel) body.model = overrideModel;
+      if (persistModel) body.persistModel = true;
+
+      try {
+        const res = await fetch(`/api/agent/sessions/${sessionId}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+
+        const tb = document.getElementById('thinking-indicator');
+        if (tb) tb.remove();
+
+        // Async job path — covers both 202 (new job) and 409 (one was
+        // already running for this session; attach rather than error).
+        if (data && data.jobId) {
+          if (overrideModel && persistModel) {
+            // The model-switch retry still needs to stick even though the
+            // turn itself is now async — apply it optimistically; the
+            // eventual session refresh will confirm it from the server.
+            if (session) session.model = overrideModel;
+            renderSessionsList();
+          }
+          startJobPolling(sessionId, data.jobId, data);
+          return;
+        }
+
+        // Fallback: old-style synchronous 200 body.
+        if (session && data.session) {
+          session.messages = data.session.messages;
+          renderChatMessages(session.messages);
+          if (overrideModel && persistModel) {
+            session.model = overrideModel;
+            renderSessionsList();
+            if (sessionId === activeSessionId) selectSession(activeSessionId);
+          }
+        }
+
+        // If the model errored (e.g. Gemini quota / expired token), offer to queue the prompt.
+        if (data.error && data.errorInfo && data.errorInfo.canQueue) {
+          openQueueModal(sessionId, text, data.errorInfo);
+        }
+      } catch (err) {
+        const tb = document.getElementById('thinking-indicator');
+        if (tb) tb.remove();
+        // Network / server failure — still let the user queue the prompt for later.
+        // Not a model-recoverable error, so no model picker (contract §3: recoverable: false).
+        openQueueModal(sessionId, text, { message: 'Could not reach the server: ' + err.message, recoverable: false });
+      }
+    }
+
+    // --- Async job polling (contract §5) ---
+
+    function formatElapsed(ms) {
+      const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    // On loading a session, ask the server whether it has a job in flight —
+    // this is the reconnect payoff: close the phone, come back, still there.
+    async function checkForRunningJob(sessionId) {
+      try {
+        const res = await fetch(`/api/agent/sessions/${sessionId}/job`);
+        if (res.status === 404) return;
+        const job = await res.json();
+        if (job && job.status === 'running') {
+          startJobPolling(sessionId, job.id, job);
+        }
+      } catch (err) {
+        console.error('Failed to check for a running job', err);
+      }
+    }
+
+    function startJobPolling(sessionId, jobId, initialJob) {
+      if (jobPolls[sessionId] && jobPolls[sessionId].timer) {
+        clearTimeout(jobPolls[sessionId].timer);
+      }
+      jobPolls[sessionId] = {
+        jobId,
+        timer: null,
+        startTime: Date.now(),
+        lastJob: (initialJob && initialJob.id) ? initialJob : null,
+        cancelling: false
+      };
+      if (sessionId === activeSessionId) renderJobProgress(sessionId, jobPolls[sessionId].lastJob);
+      pollJobOnce(sessionId, jobId);
+    }
+
+    async function pollJobOnce(sessionId, jobId) {
+      const poll = jobPolls[sessionId];
+      if (!poll || poll.jobId !== jobId) return; // superseded or cancelled out from under us
+
+      try {
+        const res = await fetch(`/api/agent/jobs/${jobId}`);
+        if (res.status === 404) {
+          // In-memory registry lost the job (e.g. server restart). Don't spin forever.
+          delete jobPolls[sessionId];
+          if (sessionId === activeSessionId) {
+            const bubble = document.getElementById('job-progress-bubble');
+            if (bubble) bubble.remove();
+          }
+          await refreshSessionMessages(sessionId);
+          return;
+        }
+        const job = await res.json();
+        poll.lastJob = job;
+
+        if (job.status === 'running') {
+          if (sessionId === activeSessionId) renderJobProgress(sessionId, job);
+          // §5: poll every 2s, backing off to 5s after 60s.
+          const elapsed = Date.now() - poll.startTime;
+          const delay = elapsed > 60000 ? 5000 : 2000;
+          poll.timer = setTimeout(() => pollJobOnce(sessionId, jobId), delay);
+        } else {
+          await finalizeJob(sessionId, job);
+        }
+      } catch (err) {
+        console.error('Job poll failed, retrying', err);
+        poll.timer = setTimeout(() => pollJobOnce(sessionId, jobId), 5000);
+      }
+    }
+
+    // Cancel is honest: mark cancelling, then show the cancelled message —
+    // never pretend nothing ran. A cancelled job is not an error and must
+    // never open the quota/overload/timeout modal.
+    async function cancelJob(sessionId, jobId) {
+      if (!jobId) return;
+      const poll = jobPolls[sessionId];
+      if (poll) {
+        poll.cancelling = true;
+        if (poll.timer) clearTimeout(poll.timer);
+      }
+      if (sessionId === activeSessionId) renderJobProgress(sessionId, poll ? poll.lastJob : null);
+
+      try {
+        const res = await fetch(`/api/agent/jobs/${jobId}`, { method: 'DELETE' });
+        const job = await res.json();
+        await finalizeJob(sessionId, job);
+      } catch (err) {
+        console.error('Cancel request failed', err);
+        // Don't strand the UI in "Cancelling…" forever — resume polling.
+        if (jobPolls[sessionId]) {
+          jobPolls[sessionId].cancelling = false;
+          pollJobOnce(sessionId, jobId);
+        }
+      }
+    }
+
+    // Terminal state (done/error/cancelled): drop the progress bubble, pull
+    // the real session messages (contract §3: the agent message — cancelled
+    // or not — is appended to the session exactly like a synchronous turn),
+    // and offer the queue modal only for a genuine, recoverable error.
+    async function finalizeJob(sessionId, job) {
+      const poll = jobPolls[sessionId];
+      if (poll && poll.timer) clearTimeout(poll.timer);
+      delete jobPolls[sessionId];
+
+      if (sessionId === activeSessionId) {
+        const bubble = document.getElementById('job-progress-bubble');
+        if (bubble) bubble.remove();
+      }
+
+      await refreshSessionMessages(sessionId);
+
+      if (job && job.status === 'error' && job.errorInfo && job.errorInfo.canQueue) {
+        if (sessionId === activeSessionId) {
+          openQueueModal(sessionId, job.prompt, job.errorInfo);
+        }
+      }
+    }
+
+    // Re-pulls the session list so the finished/cancelled agent message
+    // (with any toolExecutions) renders exactly as a synchronous turn would.
+    async function refreshSessionMessages(sessionId) {
+      try {
+        const res = await fetch('/api/agent/sessions');
+        const sessions = await res.json();
+        agentSessions = sessions;
+        renderSessionsList();
+        const session = agentSessions.find(s => s.id === sessionId);
+        if (session && sessionId === activeSessionId) {
+          renderChatMessages(session.messages);
+          // Keep the async poller in sync so it doesn't immediately redraw what
+          // was just drawn here.
+          lastMessagesSignature = messagesSignature(session.messages);
+        }
+        return session;
+      } catch (err) {
+        console.error('Failed to refresh session messages', err);
+        return null;
+      }
+    }
+
+    // --- Async chat poller (added 2026-08-26) ---------------------------------
+    // Messages can now arrive in a session with no prompt behind them (the
+    // agent's send_message tool, the scheduled-prompt queue, any server-side
+    // process). Nothing used to watch for that: the chat was only ever redrawn
+    // when a job the user started finished, so an unprompted message sat
+    // invisible in the store until the page was reloaded.
+    //
+    // This deliberately runs DURING a job as well as when idle — reporting
+    // progress mid-task is the main thing async chat is for, and gating it on
+    // idle would hide exactly the messages that matter most.
+    let lastMessagesSignature = '';
+
+    // Cheap change detector. Re-rendering unconditionally every few seconds
+    // would yank the scroll position to the bottom while Alex is reading back
+    // through a long chat, and collapse any open tool-output <details>.
+    function messagesSignature(messages) {
+      if (!messages || !messages.length) return '0';
+      const last = messages[messages.length - 1];
+      return `${messages.length}|${last.timestamp || ''}|${(last.text || '').length}`;
+    }
+
+    async function pollForAsyncMessages() {
+      if (!activeSessionId) return;
+      try {
+        const res = await fetch('/api/agent/sessions');
+        if (!res.ok) return;
+        const sessions = await res.json();
+        const session = sessions.find(s => s.id === activeSessionId);
+        if (!session) return;
+
+        const sig = messagesSignature(session.messages);
+        if (sig === lastMessagesSignature) return; // nothing new — leave the DOM alone
+        lastMessagesSignature = sig;
+
+        agentSessions = sessions;
+        renderSessionsList();
+        renderChatMessages(session.messages);
+
+        // renderChatMessages replaces the container's innerHTML, which destroys
+        // the in-flight job bubble. Put it back, or a job would appear to
+        // vanish (and take its Cancel button with it) the moment the agent
+        // posted a progress message.
+        const poll = jobPolls[activeSessionId];
+        if (poll) renderJobProgress(activeSessionId, poll.lastJob);
+      } catch (err) {
+        console.error('Async message poll failed', err);
+      }
+    }
+
+    setInterval(pollForAsyncMessages, 4000);
+
+    // Renders/updates the live progress bubble: elapsed time, tool
+    // executions as they arrive, and Cancel — or "Cancelling…" once fired.
+    function renderJobProgress(sessionId, job) {
+      if (sessionId !== activeSessionId) return;
+      const container = document.getElementById('chat-messages-container');
+      if (!container) return;
+
+      const oldThinking = document.getElementById('thinking-indicator');
+      if (oldThinking) oldThinking.remove();
+
+      const poll = jobPolls[sessionId];
+      const cancelling = !!(poll && poll.cancelling);
+      const jobId = (job && job.id) || (poll && poll.jobId) || '';
+      const elapsedMs = job && job.elapsedMs != null
+        ? job.elapsedMs
+        : (poll ? Date.now() - poll.startTime : 0);
+      const toolExecutions = job && job.toolExecutions ? job.toolExecutions : [];
+      // Live narration from the agent (added 2026-08-26). Tool calls alone read as
+      // machine noise; the agent's own running commentary is what makes a long job
+      // legible instead of looking like a hang.
+      const progress = job && Array.isArray(job.progress) ? job.progress : [];
+
+      let bubble = document.getElementById('job-progress-bubble');
+      if (!bubble) {
+        bubble = document.createElement('div');
+        bubble.id = 'job-progress-bubble';
+        bubble.className = 'flex justify-start gap-2.5 items-start';
+        container.appendChild(bubble);
+      }
+
+      bubble.innerHTML = `
+        <div class="w-7 h-7 rounded-xl bg-purple-950 border border-purple-800 text-purple-300 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 ${cancelling ? '' : 'animate-spin'}">
+          <i class="fa-solid ${cancelling ? 'fa-hourglass-half' : 'fa-circle-notch'}"></i>
+        </div>
+        <div class="bg-dark-card border border-dark-border text-purple-300 text-xs rounded-2xl px-4 py-3 max-w-xl shadow-sm leading-relaxed space-y-2 flex-1">
+          <div class="flex items-center justify-between gap-3">
+            <span class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full ${cancelling ? 'bg-amber-400' : 'bg-purple-400 animate-pulse'}"></span>
+              <span>${cancelling ? 'Cancelling…' : 'Agent is working…'}</span>
+              <span class="text-gray-500 font-mono text-[10px]">${formatElapsed(elapsedMs)}</span>
+            </span>
+            ${cancelling ? '' : `
+            <button onclick="cancelJob('${sessionId}', '${jobId}')" class="px-2.5 py-1 rounded-lg bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 text-[10px] font-semibold transition-colors flex items-center gap-1 flex-shrink-0">
+              <i class="fa-solid fa-stop"></i> Cancel
+            </button>`}
+          </div>
+          ${progress.length ? `
+          <div class="border-t border-dark-border pt-2 mt-1 space-y-1 max-h-40 overflow-y-auto custom-scrollbar">
+            ${progress.slice(-8).map((pg, i, arr) => `
+              <div class="flex items-start gap-2 text-[10px] ${i === arr.length - 1 ? 'text-purple-300' : 'text-gray-500'}">
+                <i class="fa-solid fa-angle-right mt-0.5 flex-shrink-0 opacity-60"></i>
+                <span class="font-mono break-all">${escapeHtml(pg.text || '')}</span>
+              </div>`).join('')}
+          </div>` : ''}
+          ${renderToolExecutionsHtml(toolExecutions)}
+        </div>
+      `;
+
+      setTimeout(() => container.scrollTop = container.scrollHeight, 10);
+    }
+
+    function sendQuickPrompt(promptText) {
+      document.getElementById('agent-chat-input').value = promptText;
+      submitAgentMessage();
+    }
+
+    async function clearCurrentChat() {
+      if (!activeSessionId) return;
+      if (!confirm('Clear message history for this agent session?')) return;
+      const res = await fetch(`/api/agent/sessions/${activeSessionId}/clear`, { method: 'POST' });
+      const updated = await res.json();
+      const session = agentSessions.find(s => s.id === activeSessionId);
+      if (session) session.messages = updated.messages;
+      renderChatMessages(updated.messages);
+    }
+
+    async function deleteAgentSession(id) {
+      if (!confirm('Delete this agent session?')) return;
+      await fetch(`/api/agent/sessions/${id}`, { method: 'DELETE' });
+      if (activeSessionId === id) activeSessionId = null;
+      loadAgentSessions();
+    }
+
+    async function deleteCurrentAgent() {
+      if (!activeSessionId) return;
+      await deleteAgentSession(activeSessionId);
+    }
+
+    function updateNewAgentModelPicker() {
+      const role = document.querySelector('input[name="agent-role"]:checked').value;
+      const requiresWrite = ['debugger', 'automator', 'architect'].includes(role);
+      
+      const availableModels = modelRegistry.map(m => {
+        let unavailable = m.unavailable;
+        let desc = m.description;
+        
+        if (requiresWrite && m.id.includes('-local')) {
+          unavailable = true;
+          desc += ' (Unavailable for ' + role + ' role)';
+        }
+        
+        if (role === 'architect' && !['claude-heavy', 'claude-opus'].includes(m.id)) {
+          unavailable = true;
+          desc = 'Architect role requires Opus or Fable.';
+        }
+        
+        return { ...m, unavailable, description: desc };
+      });
+
+      const selected = availableModels.find(m => m.id === newAgentSelectedModel);
+      if (selected && selected.unavailable) {
+        newAgentSelectedModel = availableModels.find(m => !m.unavailable && m.default)?.id || availableModels.find(m => !m.unavailable)?.id;
+      }
+
+      document.getElementById('new-agent-model-picker').innerHTML =
+        renderModelPickerHTML(availableModels, 'new-agent-model', newAgentSelectedModel);
+    }
+
+    function onRoleChange(radio) {
+      document.querySelectorAll('input[name="agent-role"]').forEach(r => {
+        const parent = r.closest('label');
+        if (r.checked) {
+          parent.classList.remove('border-dark-border', 'bg-dark-bg', 'hover:border-gray-600');
+          parent.classList.add('border-purple-500/80', 'bg-purple-950/20', 'hover:border-purple-400');
+        } else {
+          parent.classList.add('border-dark-border', 'bg-dark-bg', 'hover:border-gray-600');
+          parent.classList.remove('border-purple-500/80', 'bg-purple-950/20', 'hover:border-purple-400');
+        }
+      });
+      updateNewAgentModelPicker();
+    }
+    
+    let pendingAgentPrompt = null;
+    // Feedback lifecycle: carries the ticket id into session creation so the
+    // server can link session ↔ ticket and flip it to in-progress atomically.
+    let pendingAgentFeedbackId = null;
+    function openAgentForFeedback(id) {
+      const item = feedbackItems.find(f => f.id === id);
+      if (!item) return;
+      pendingAgentFeedbackId = id;
+      pendingAgentPrompt = `Please resolve this feedback item (${item.type}):\n\nTitle: ${item.title}\nDescription: ${item.body || 'None'}\n\nThe ticket (${id}) is already marked in-progress and linked to your session. If the fix is a code change: stage and verify it, then end your reply with the promote token per your workflow — the ticket will auto-close when Alex clicks deploy. If no code change is needed, set the ticket to 'done' yourself when you finish.`;
+
+      const el = document.getElementById('new-agent-name');
+      if (el) el.value = 'Fix ' + item.type + ' ' + id.split('-')[1].slice(-4);
+      openNewAgentModal();
+    }
+    
+    function openNewAgentModal() {
+      newAgentSelectedModel = getDefaultModelId();
+      updateNewAgentModelPicker();
+      document.getElementById('new-agent-modal').classList.remove('hidden');
+    }
+
+    function closeNewAgentModal() {
+      document.getElementById('new-agent-modal').classList.add('hidden');
+      document.getElementById('new-agent-form').reset();
+      // Clear pending feedback context on ANY close (submit captures what it
+      // needs first). Without this, cancelling a summon-from-feedback modal
+      // leaked the prompt/ticket into the next manually-created session.
+      pendingAgentPrompt = null;
+      pendingAgentFeedbackId = null;
+    }
+
+    async function submitNewAgent(e) {
+      e.preventDefault();
+      const name = document.getElementById('new-agent-name').value.trim();
+      const role = document.querySelector('input[name="agent-role"]:checked').value;
+      const model = newAgentSelectedModel || getDefaultModelId();
+      // Capture before closeNewAgentModal() wipes the pending state.
+      const feedbackId = pendingAgentFeedbackId;
+      const quickPrompt = pendingAgentPrompt;
+
+      const res = await fetch('/api/agent/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(feedbackId ? { name, role, model, feedbackId } : { name, role, model })
+      });
+      const newSession = await res.json();
+      closeNewAgentModal();
+      await loadAgentSessions();
+      selectSession(newSession.id);
+      if (quickPrompt) {
+        setTimeout(() => sendQuickPrompt(quickPrompt), 100);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    // ===================== SCHEDULED PROMPT QUEUE =====================
+    let scheduledItems = [];
+    // { sessionId, prompt, errorInfo, selectedModel, showingAll } captured from a failed send
+    let queueContext = null;
+
+    // --- Failure popup: offer to switch model & retry, queue, or cancel ---
+    // errorInfo follows the contract §3 shape: { errorType, engine, model, message,
+    // recoverable, suggestedModels }. Older/degraded callers may pass a partial
+    // object (e.g. a network failure) — handled defensively below.
+    function openQueueModal(sessionId, prompt, errorInfo) {
+      queueContext = { sessionId, prompt, errorInfo, selectedModel: null, showingAll: false };
+
+      const failedModelInfo = errorInfo && errorInfo.model ? getModelInfo(errorInfo.model) : null;
+      const reasonEl = document.getElementById('queue-modal-reason');
+      const switchSection = document.getElementById('queue-modal-switch-section');
+      const showAllBtn = document.getElementById('queue-modal-show-all-btn');
+
+      // 'overload' added 2026-08-26 — transient upstream capacity, and switching
+      // models is the fix, so it must offer the picker exactly like 'quota'.
+      // 'timeout' added 2026-08-26 — an upstream hang, same remedy as quota/overload:
+      // switch model (a Claude one bypasses Gemini entirely) or queue for later.
+      const isQuotaRecoverable = errorInfo && ['quota', 'overload', 'timeout'].includes(errorInfo.errorType) && errorInfo.recoverable !== false
+        && Array.isArray(errorInfo.suggestedModels) && errorInfo.suggestedModels.length > 0;
+
+      if (isQuotaRecoverable) {
+        const firstSuggested = getModelInfo(errorInfo.suggestedModels[0]);
+        reasonEl.textContent = (failedModelInfo ? `${failedModelInfo.label} ` : '') +
+          ((errorInfo.message || 'hit its quota.') + ` Switch to ${firstSuggested.label} and retry, or queue for later.`);
+        queueContext.selectedModel = errorInfo.suggestedModels[0];
+        renderQueueModelPicker();
+        switchSection.classList.remove('hidden');
+        showAllBtn.textContent = 'Show all models';
+        document.getElementById('queue-modal-persist').checked = false;
+      } else {
+        reasonEl.textContent = (errorInfo && errorInfo.message) || 'The agent could not answer this prompt.';
+        switchSection.classList.add('hidden');
+      }
+
+      document.getElementById('queue-modal-prompt').textContent = prompt;
+      document.getElementById('queue-prompt-modal').classList.remove('hidden');
+    }
+
+    function renderQueueModelPicker() {
+      if (!queueContext) return;
+      const errorInfo = queueContext.errorInfo || {};
+      const models = queueContext.showingAll
+        ? modelRegistry
+        : (errorInfo.suggestedModels || []).map(getModelInfo);
+      document.getElementById('queue-modal-model-picker').innerHTML =
+        renderModelPickerHTML(models, 'queue-switch-model', queueContext.selectedModel);
+    }
+
+    function toggleQueueModalShowAll() {
+      if (!queueContext) return;
+      queueContext.showingAll = !queueContext.showingAll;
+      document.getElementById('queue-modal-show-all-btn').textContent =
+        queueContext.showingAll ? 'Show suggested only' : 'Show all models';
+      renderQueueModelPicker();
+    }
+
+    function closeQueueModal() {
+      document.getElementById('queue-prompt-modal').classList.add('hidden');
+      queueContext = null;
+    }
+
+    async function confirmSwitchAndRetry() {
+      if (!queueContext) return;
+      const { sessionId, prompt, selectedModel } = queueContext;
+      const persist = document.getElementById('queue-modal-persist').checked;
+      closeQueueModal();
+      await sendAgentTurn(sessionId, prompt, selectedModel, persist);
+    }
+
+    async function confirmQueuePrompt() {
+      if (!queueContext) return closeQueueModal();
+      // §5: the queued item carries the model chosen in the switch picker (if the
+      // user picked one before deciding to queue instead), else the session's
+      // current model. Never chosen automatically — the human picked "queue", not "retry".
+      const session = agentSessions.find(s => s.id === queueContext.sessionId);
+      const model = queueContext.selectedModel || (session && session.model) || undefined;
+      try {
+        await fetch('/api/agent/scheduled', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: queueContext.sessionId,
+            prompt: queueContext.prompt,
+            model,
+            runAt: null,                 // hold for manual approval — don't auto re-burn quota
+            source: 'auto-recovery',
+            reason: 'Queued after a failed agent request.'
+          })
+        });
+        closeQueueModal();
+        document.getElementById('subtab-scheduled-badge')?.classList.remove('hidden');
+        await loadScheduled();
+      } catch (err) {
+        alert('Failed to queue prompt: ' + err.message);
+      }
+    }
+
+    // --- Queue management ---
+    async function loadScheduled() {
+      try {
+        const res = await fetch('/api/agent/scheduled');
+        scheduledItems = await res.json();
+      } catch (err) {
+        scheduledItems = [];
+      }
+      populateSchedSessions();
+      renderScheduled();
+    }
+
+    function populateSchedSessions() {
+      const select = document.getElementById('sched-session');
+      if (!select) return;
+      const prev = select.value;
+      if (!agentSessions.length) {
+        select.innerHTML = '<option value="">No agents — create one first</option>';
+        return;
+      }
+      select.innerHTML = agentSessions.map(s =>
+        `<option value="${s.id}">${escapeHtml(s.name)} (${escapeHtml(s.role)})</option>`
+      ).join('');
+      if (prev) select.value = prev;
+    }
+
+    function renderScheduled() {
+      const container = document.getElementById('scheduled-list');
+      const badge = document.getElementById('floating-sched-badge');
+      const pending = scheduledItems.filter(i => i.status === 'pending').length;
+      if (badge) {
+        badge.textContent = pending;
+        badge.classList.toggle('hidden', pending === 0);
+      }
+      if (!container) return;
+
+      if (!scheduledItems.length) {
+        container.innerHTML = '<div class="text-center py-10 text-gray-500 text-xs">No scheduled prompts yet.</div>';
+        return;
+      }
+
+      const statusStyles = {
+        pending: 'bg-amber-950 text-amber-300 border-amber-800',
+        running: 'bg-blue-950 text-blue-300 border-blue-800',
+        sent: 'bg-emerald-950 text-emerald-300 border-emerald-800',
+        failed: 'bg-rose-950 text-rose-300 border-rose-800'
+      };
+
+      container.innerHTML = scheduledItems.map(item => {
+        const badgeClass = statusStyles[item.status] || statusStyles.pending;
+        const when = item.runAt
+          ? `Auto-run: ${new Date(item.runAt).toLocaleString()}`
+          : 'Manual approval';
+        const freqText = item.frequencyMinutes ? `<span class="text-amber-400 ml-1"><i class="fa-solid fa-rotate text-[9px]"></i> every ${item.frequencyMinutes}m</span>` : '';
+        const src = { 'auto-recovery': '⚠️ retry', 'agent': '🤖 agent', 'manual': '✍️ manual' }[item.source] || item.source;
+        return `
+          <div class="bg-dark-bg border border-dark-border rounded-xl p-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border ${badgeClass} uppercase">${escapeHtml(item.status)}</span>
+                <span class="text-[11px] text-gray-400 truncate">→ ${escapeHtml(item.sessionName || item.sessionId)}</span>
+              </div>
+              <span class="text-[10px] text-gray-500 flex-shrink-0">${escapeHtml(src)}</span>
+            </div>
+            <p class="text-xs text-gray-200 break-words">${escapeHtml(item.prompt)}</p>
+            <div class="text-[10px] text-gray-500 flex items-center gap-2 flex-wrap">
+              <span><i class="fa-regular fa-clock"></i> ${escapeHtml(when)}${freqText}</span>
+              ${item.attempts ? `<span>· ${item.attempts} attempt(s)</span>` : ''}
+            </div>
+            ${item.result ? `<p class="text-[10px] text-gray-400 bg-dark-card border border-dark-border rounded-lg px-2 py-1 break-words">${escapeHtml(item.result)}</p>` : ''}
+            <div class="flex items-center justify-end gap-2 pt-1">
+              ${item.status !== 'sent' ? `<button onclick="runScheduled('${item.id}')" class="text-[11px] bg-emerald-700 hover:bg-emerald-600 text-white font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-play text-[10px]"></i> Run now</button>` : ''}
+              <button onclick="deleteScheduled('${item.id}')" class="text-[11px] bg-dark-card border border-dark-border text-gray-400 hover:text-rose-400 px-3 py-1.5 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-trash-can text-[10px]"></i> Delete</button>
+            </div>
           </div>`;
       }).join('');
     }
@@ -1826,18 +2877,150 @@ const overlay = window.isEditingLayout ? `
 
         const statusClass = FEEDBACK_STATUS_STYLES[f.status] || FEEDBACK_STATUS_STYLES['new'];
         const created = f.createdAt ? new Date(f.createdAt).toLocaleString() : '';
-const overlay = window.isEditingLayout ? `
-          <div class="absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center gap-3 z-20 backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
-             <button onclick="editWidget('${w.id}')" class="px-4 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-palette"></i> Style</button>
-             <button onclick="deleteWidget('${w.id}')" class="px-4 py-1.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-trash"></i> Remove</button>
-          </div>
-        ` : '';
-
         return `
-          <div class="relative w-full h-full ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}>
+          <div class="bg-dark-card border border-dark-border hover:border-gray-700 transition-all rounded-2xl p-4 space-y-2 shadow-sm">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-indigo-950/70 text-indigo-300 border-indigo-800/80 uppercase flex-shrink-0">${escapeHtml(feedbackTypeLabel(f.type))}</span>
+                ${f.urgency && f.urgency !== 'normal' ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${f.urgency === 'critical' ? 'bg-rose-950/70 text-rose-300 border-rose-800/80' : f.urgency === 'high' ? 'bg-amber-950/70 text-amber-300 border-amber-800/80' : 'bg-gray-800 text-gray-300 border-gray-700'} uppercase flex-shrink-0">${escapeHtml(f.urgency)}</span>` : ''}
+
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${statusClass} uppercase flex-shrink-0">${escapeHtml(f.status)}</span>
+                ${f.status === 'in-progress' && f.stagedAt ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-amber-950/70 text-amber-300 border-amber-800/80 flex-shrink-0" title="A linked agent staged and verified this fix; it auto-closes when Staging is pushed to Live">STAGED — CLOSES ON DEPLOY</span>` : ''}
+                ${f.status === 'in-progress' && f.sessionId ? `<button onclick="switchServerSubTab('agents'); selectSession('${escapeHtml(f.sessionId)}')" class="text-[10px] text-purple-400 hover:text-purple-300 underline decoration-dotted flex-shrink-0" title="Open the linked agent session"><i class="fa-solid fa-robot"></i> session</button>` : ''}
+              </div>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                <button onclick="openAgentForFeedback('${f.id}')" class="text-indigo-400 hover:text-indigo-300 text-xs p-1" title="Summon Agent to solve this">
+                  <i class="fa-solid fa-robot"></i>
+                </button>
+                <select onchange="updateFeedbackStatus('${f.id}', this.value)" class="bg-dark-bg border border-dark-border rounded-lg px-2 py-1 text-[10px] text-gray-300 focus:outline-none focus:border-indigo-500">
+                  <option value="new" ${f.status === 'new' ? 'selected' : ''}>new</option>
+                  <option value="in-progress" ${f.status === 'in-progress' ? 'selected' : ''}>in-progress</option>
+                  <option value="done" ${f.status === 'done' ? 'selected' : ''}>done</option>
+                  <option value="wont-do" ${f.status === 'wont-do' ? 'selected' : ''}>wont-do</option>
+                </select>
+                <button onclick="deleteFeedback('${f.id}')" class="text-gray-600 hover:text-rose-400 text-xs p-1" title="Delete (mistakes only)">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+            <h4 class="text-sm font-semibold text-gray-100">${escapeHtml(f.title)}</h4>
+            ${f.body ? `<p class="text-xs text-gray-400 leading-relaxed">${escapeHtml(f.body)}</p>` : ''}
+            ${f.notes ? `<div class="text-[11px] text-gray-400 bg-dark-bg border border-dark-border rounded-lg px-2.5 py-1.5 flex items-start gap-1.5"><i class="fa-solid fa-robot text-purple-400 mt-0.5"></i><span><span class="text-purple-300 font-semibold">${f.processedBy ? escapeHtml(f.processedBy) + ': ' : 'Agent note: '}</span>${escapeHtml(f.notes)}</span></div>` : ''}
+            <div class="text-[10px] text-gray-500">${escapeHtml(created)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function submitFeedback(e) {
+      e.preventDefault();
+      const type = document.getElementById('feedback-type').value;
+      const urgency = document.getElementById('feedback-urgency').value;
+      const title = document.getElementById('feedback-title').value.trim();
+      const body = document.getElementById('feedback-body').value.trim();
+      if (!title) return;
+
+      const payload = { type, title, urgency };
+      if (body) payload.body = body;
+
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const res = await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert(err.error || 'Failed to submit feedback.');
+          return;
+        }
+        document.getElementById('feedback-title').value = '';
+        document.getElementById('feedback-body').value = '';
+        document.getElementById('feedback-type').value = feedbackTypes.some(t => t.value === 'bug') ? 'bug' : feedbackTypes[0].value;
+        await loadFeedback();
+      } catch (err) {
+        alert('Failed to submit feedback: ' + err.message);
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    }
+
+    async function updateFeedbackStatus(id, status) {
+      try {
+        await fetch(`/api/feedback/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status })
+        });
+        await loadFeedback();
+      } catch (err) {
+        alert('Failed to update status: ' + err.message);
+      }
+    }
+
+    async function deleteFeedback(id) {
+      if (!confirm('Delete this feedback item? This is for mistakes only — processing normally uses status, not delete.')) return;
+      await fetch(`/api/feedback/${id}`, { method: 'DELETE' });
+      await loadFeedback();
+    }
+
+    // INITIALIZATION
+    loadTodoDaily();
+    loadTodoProjects();
+    loadScripts();
+    refreshTelemetry();
+    // ===================== HOMEPAGE LIVE DOCUMENT (fb-1787801162107) ==========
+    // The Home tab's banner + widgets render from GET /api/homepage, backed by
+    // data/homepage.json — a content layer OUTSIDE the deploy cycle (data/ is
+    // excluded from promote.sh both ways). Agents redesign the home screen by
+    // rewriting that one JSON file; a browser refresh shows it. If the fetch
+    // fails, the hardcoded banner fallback in the markup simply stays put.
+    let homepageDoc = null;
+
+    async function loadHomepage() {
+      try {
+        const res = await fetch('/api/homepage');
+        if (!res.ok) return;
+        homepageDoc = await res.json();
+        renderHomepage();
+      } catch (err) {
+        console.error('Homepage document failed to load; hardcoded fallback stays.', err);
+      }
+    }
+
+    function renderHomepage() {
+      if (!homepageDoc) return;
+      
+      const gt = homepageDoc.glanceTheme || { theme: 'glass', accent: 'indigo' };
+      const glance = document.getElementById('home-glance-banner');
+      if (glance) {
+        glance.setAttribute('theme', gt.theme || 'glass');
+        glance.setAttribute('accent', gt.accent || 'indigo');
+      }
+      
+
+      // Built-in sections the designer may switch off to replace with widgets.
+      const sections = homepageDoc.sections || {};
+      
+      document.getElementById('home-quicklinks').classList.toggle('hidden', sections.quickLinks === false);
+
+      // Widget cards. w.html is injected raw ON PURPOSE: it only enters through
+      // the authenticated PUT /api/homepage or the server filesystem, i.e. from
+      // Alex or his agents — the same trust level as the agents' bash access.
+      const grid = document.getElementById('home-widgets');
+      const widgets = (homepageDoc.widgets || []).filter(w => w && !w.hidden);
+      grid.classList.toggle('hidden', widgets.length === 0);
+      grid.innerHTML = widgets.map(w => {
+        const accent = w.accent || 'indigo';
+        const linkAttr = w.link ? (w.link.tab
+          ? `onclick="switchTab('${escapeHtml(w.link.tab)}')"`
+          : `onclick="window.open('${escapeHtml(w.link.href || '')}', '_blank')"`) : '';
+        return `
+          <div class="relative w-full h-full ${w.link ? 'cursor-pointer group' : ''}" ${linkAttr}>
             ${w.html || ''}
-            ${w.link && w.link.label && !window.isEditingLayout ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
-            ${overlay}
+            ${w.link && w.link.label ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
           </div>`;
       }).join('');
       
@@ -2340,46 +3523,6 @@ const overlay = window.isEditingLayout ? `
       apply();
     })();
   </script>
-
-
-  <!-- Widget Edit Modal -->
-  <div id="widget-edit-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
-      <div class="p-4 border-b border-dark-border flex justify-between items-center bg-dark-card">
-        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-palette text-indigo-400 mr-2"></i>Edit Widget Style</h3>
-        <button onclick="closeWidgetEditModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      <div class="p-5 space-y-4">
-        <input type="hidden" id="edit-widget-id">
-        <div>
-          <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Theme</label>
-          <select id="edit-widget-theme" class="w-full bg-dark-card border border-dark-border text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-            <option value="transparent">Transparent (Clean)</option>
-            <option value="glass">Glass (Frosted)</option>
-            <option value="solid">Solid (Card)</option>
-            <option value="neon">Neon (Glowing border)</option>
-            <option value="gradient">Gradient (Vibrant fill)</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Accent Color</label>
-          <div class="grid grid-cols-3 gap-2">
-            <button onclick="selectEditAccent('indigo')" id="accent-btn-indigo" class="accent-btn py-2 rounded border border-dark-border text-indigo-400 hover:bg-indigo-500/10 text-xs font-semibold">Indigo</button>
-            <button onclick="selectEditAccent('purple')" id="accent-btn-purple" class="accent-btn py-2 rounded border border-dark-border text-purple-400 hover:bg-purple-500/10 text-xs font-semibold">Purple</button>
-            <button onclick="selectEditAccent('rose')" id="accent-btn-rose" class="accent-btn py-2 rounded border border-dark-border text-rose-400 hover:bg-rose-500/10 text-xs font-semibold">Rose</button>
-            <button onclick="selectEditAccent('amber')" id="accent-btn-amber" class="accent-btn py-2 rounded border border-dark-border text-amber-400 hover:bg-amber-500/10 text-xs font-semibold">Amber</button>
-            <button onclick="selectEditAccent('emerald')" id="accent-btn-emerald" class="accent-btn py-2 rounded border border-dark-border text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold">Emerald</button>
-            <button onclick="selectEditAccent('sky')" id="accent-btn-sky" class="accent-btn py-2 rounded border border-dark-border text-sky-400 hover:bg-sky-500/10 text-xs font-semibold">Sky</button>
-          </div>
-          <input type="hidden" id="edit-widget-accent">
-        </div>
-      </div>
-      <div class="p-4 bg-dark-card border-t border-dark-border flex justify-end gap-3">
-        <button onclick="closeWidgetEditModal()" class="px-4 py-2 text-sm text-gray-300 hover:text-white">Cancel</button>
-        <button onclick="saveWidgetEdit()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg shadow-lg">Save Changes</button>
-      </div>
-    </div>
-  </div>
 
 </body>
 </html>
