@@ -21,7 +21,14 @@
   </script>
   <script type="module" src="/components/index.js"></script>
   <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    marked.setOptions({
+      breaks: true,
+      gfm: true
+    });
+  </script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -1945,7 +1952,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
               </div>
               <div class="bg-dark-card border ${m.async ? 'border-cyan-900' : 'border-dark-border'} text-gray-200 text-xs rounded-2xl rounded-tl-sm px-4 py-3 max-w-xl shadow-sm leading-relaxed space-y-2">
                 ${asyncBadge}
-                <div class="whitespace-pre-wrap leading-relaxed">${escapeHtml(promoteDisplayText)}</div>
+                <div class="prose prose-sm prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-dark-border prose-a:text-indigo-400 marker:text-indigo-400 prose-code:text-indigo-200 prose-headings:text-gray-100">${marked.parse(promoteDisplayText)}</div>
                 ${promoteBtnHtml}
                 ${toolHtml}
               </div>
