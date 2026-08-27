@@ -656,6 +656,41 @@ app.post('/api/scripts/run', (req, res) => {
 });
 
 // --- 4. INTERACTIVE SERVER TERMINAL CONSOLE API ---
+
+// GET /api/glance - Priority Scoring Engine for At-A-Glance
+app.get('/api/glance', (req, res) => {
+  try {
+    const os = require('os');
+    const loadAvg = os.loadavg()[0]; // 1 minute load average
+    const cpus = os.cpus().length;
+    const loadPercent = (loadAvg / cpus) * 100;
+    
+    if (loadPercent > 80) {
+      return res.json({ text: `System Load Critical (${loadPercent.toFixed(1)}%)`, icon: "fa-triangle-exclamation", color: "rose" });
+    }
+    
+    const todosPath = path.join(DATA_DIR, 'todo.json');
+    if (fs.existsSync(todosPath)) {
+      const todos = JSON.parse(fs.readFileSync(todosPath, 'utf8'));
+      const pending = todos.filter(t => !t.completed);
+      if (pending.length > 0) {
+        return res.json({ text: `Next up: ${pending[0].text}`, icon: "fa-calendar-check", color: "amber" });
+      }
+    }
+    
+    const hour = new Date().getHours();
+    let greeting = 'Good evening';
+    let icon = 'fa-moon';
+    let color = 'indigo';
+    if (hour < 12) { greeting = 'Good morning'; icon = 'fa-sun'; color = 'amber'; }
+    else if (hour < 18) { greeting = 'Good afternoon'; icon = 'fa-cloud-sun'; color = 'sky'; }
+    
+    return res.json({ text: `${greeting}, Alex. All systems nominal.`, icon, color });
+  } catch (err) {
+    return res.json({ text: "At a glance unavailable", icon: "fa-circle-exclamation", color: "gray" });
+  }
+});
+
 app.post('/api/terminal/exec', (req, res) => {
   const { command } = req.body;
   if (!command || !command.trim()) return res.status(400).json({ error: 'Command required' });

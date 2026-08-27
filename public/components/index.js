@@ -6,3 +6,4 @@ import './CountdownWidget.js';
 import './StopwatchWidget.js';
 import './TimerWidget.js';
 import './ScriptRunnerWidget.js';
+import './GlanceWidget.js';
