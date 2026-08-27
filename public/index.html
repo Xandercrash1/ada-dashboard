@@ -156,36 +156,7 @@
     
     <!-- TAB 0: HOME -->
     <section id="view-home" class="space-y-6">
-      <!-- News Banner — rendered from GET /api/homepage (data/homepage.json),
-           the agent-editable homepage live document (fb-1787801162107).
-           The hardcoded text below is only the pre-fetch / API-down fallback. -->
-      <div id="home-banner" class="bg-gradient-to-r from-indigo-900/60 to-purple-900/60 border border-indigo-700/50 rounded-2xl p-5 shadow-lg relative overflow-hidden">
-        <div class="absolute top-0 right-0 p-4 opacity-10">
-          <i class="fa-solid fa-bullhorn text-6xl"></i>
-        </div>
-        <div class="absolute top-3 right-3 flex items-center gap-1.5">
-          <button onclick="openAnnouncementModal()" title="Edit announcement" class="w-7 h-7 rounded-lg bg-black/25 hover:bg-black/50 text-indigo-300 hover:text-white text-xs flex items-center justify-center transition-colors">
-            <i class="fa-solid fa-pen"></i>
-          </button>
-          <button onclick="openHomepageDesigner()" title="Summon a Homepage Designer agent" class="w-7 h-7 rounded-lg bg-black/25 hover:bg-black/50 text-purple-300 hover:text-white text-xs flex items-center justify-center transition-colors">
-            <i class="fa-solid fa-wand-magic-sparkles"></i>
-          </button>
-        </div>
-        <h3 class="text-indigo-300 font-bold text-sm tracking-wider uppercase mb-1 flex items-center gap-2 pr-16">
-          <i id="home-banner-icon" class="fa-solid fa-sparkles text-indigo-400"></i> <span id="home-banner-title">House Updates & News</span>
-        </h3>
-        <p id="home-banner-text" class="text-gray-200 text-sm leading-relaxed">
-          Welcome to the new server dashboard! The Trip Planning hub is currently on the roadmap for collaborative packing lists and event scheduling.
-        </p>
-      </div>
-      <!-- Collapsed state when announcement.visible=false — keeps an entry
-           point back into the editor, otherwise hiding the banner would also
-           hide the only way to un-hide it. -->
-      <div id="home-banner-collapsed" class="hidden justify-end -mt-2 flex">
-        <button onclick="openAnnouncementModal()" class="text-[11px] text-gray-500 hover:text-indigo-300 flex items-center gap-1.5 transition-colors">
-          <i class="fa-solid fa-eye-slash"></i> Announcement hidden — edit
-        </button>
-      </div>
+      <ada-glance id="home-glance-banner" class="block mb-6"></ada-glance>
 
       <!-- Agent-designed widget cards (homepage.json .widgets). Hidden when empty. -->
       <div id="home-widgets" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
@@ -3021,13 +2992,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
     function renderHomepage() {
       if (!homepageDoc) return;
-      const a = homepageDoc.announcement || {};
-      document.getElementById('home-banner-title').textContent = a.title || 'House Updates & News';
-      document.getElementById('home-banner-text').textContent = a.text || '';
-      const iconEl = document.getElementById('home-banner-icon');
-      if (iconEl) iconEl.className = `fa-solid ${a.icon || 'fa-sparkles'} text-indigo-400`;
-      document.getElementById('home-banner').classList.toggle('hidden', a.visible === false);
-      document.getElementById('home-banner-collapsed').classList.toggle('hidden', a.visible !== false);
+      
 
       // Built-in sections the designer may switch off to replace with widgets.
       const sections = homepageDoc.sections || {};
