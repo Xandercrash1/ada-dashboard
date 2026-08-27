@@ -1754,6 +1754,18 @@
         if (homeCpu) homeCpu.innerText = `${sys.cpu.load1m}`;
         const homeJobs = document.getElementById('home-stat-jobs');
         if (homeJobs) homeJobs.innerText = sys.tmux ? sys.tmux.length.toString() : '0';
+
+        // Additional mirrors for Designer Widgets
+        if (document.getElementById('home-stat-ram')) document.getElementById('home-stat-ram').innerText = sys.memory.usedGB;
+        if (document.getElementById('home-stat-ram_percent')) document.getElementById('home-stat-ram_percent').innerText = sys.memory.percent;
+        if (document.getElementById('home-stat-ram_total')) document.getElementById('home-stat-ram_total').innerText = sys.memory.totalGB;
+        if (document.getElementById('home-stat-cpu_5m')) document.getElementById('home-stat-cpu_5m').innerText = sys.cpu.load5m;
+        if (document.getElementById('home-stat-cpu_15m')) document.getElementById('home-stat-cpu_15m').innerText = sys.cpu.load15m;
+        if (document.getElementById('home-stat-cpu_cores')) document.getElementById('home-stat-cpu_cores').innerText = sys.cpu.cores;
+        if (document.getElementById('home-stat-disk_used')) document.getElementById('home-stat-disk_used').innerText = sys.disk.usedGB;
+        if (document.getElementById('home-stat-disk_percent')) document.getElementById('home-stat-disk_percent').innerText = sys.disk.percent;
+        if (document.getElementById('home-stat-disk_free')) document.getElementById('home-stat-disk_free').innerText = sys.disk.freeGB;
+        if (document.getElementById('home-stat-uptime')) document.getElementById('home-stat-uptime').innerText = sys.uptimeFormatted;
       } catch (err) {
         console.error('Failed to fetch telemetry', err);
       }
