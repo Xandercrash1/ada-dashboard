@@ -2673,7 +2673,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
       // Built-in sections the designer may switch off to replace with widgets.
       const sections = homepageDoc.sections || {};
-      document.getElementById('home-stats').classList.toggle('hidden', sections.stats === false);
+      
       document.getElementById('home-quicklinks').classList.toggle('hidden', sections.quickLinks === false);
 
       // Widget cards. w.html is injected raw ON PURPOSE: it only enters through
