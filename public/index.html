@@ -1,0 +1,3575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Ada Operations Hub</title>
+  <meta name="color-scheme" content="light dark">
+  <!-- THEME RESOLVER — runs before paint to prevent a dark/light flash.
+       localStorage['ada_theme']: 'dark' | 'light' | 'auto' (default auto = follow OS). -->
+  <script>
+    (function () {
+      window.__adaResolveTheme = function (mode) {
+        if (mode === 'light' || mode === 'dark') return mode;
+        return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; // auto
+      };
+      var mode = 'auto';
+      try { mode = localStorage.getItem('ada_theme') || 'auto'; } catch (e) {}
+      try { document.documentElement.setAttribute('data-theme', window.__adaResolveTheme(mode)); }
+      catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    })();
+  </script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              900: '#1e1b4b'
+            },
+            dark: {
+              bg: 'var(--bg)',
+              card: 'var(--card)',
+              border: 'var(--border)',
+              accent: 'var(--accent)'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* Theme tokens. The Tailwind dark.* palette points at these vars, so every
+       bg-dark-* / border-dark-* utility flips automatically per theme. */
+    :root, [data-theme="dark"] {
+      --bg: #090d16; --card: #0f172a; --border: #1e293b; --accent: #334155; --text: #f8fafc;
+      --scroll-track: #0f172a; --scroll-thumb: #334155;
+    }
+    [data-theme="light"] {
+      --bg: #f1f5f9; --card: #ffffff; --border: #e2e8f0; --accent: #cbd5e1; --text: #0f172a;
+      --scroll-track: #e2e8f0; --scroll-thumb: #94a3b8;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      transition: background-color .2s ease, color .2s ease;
+    }
+    .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: var(--scroll-track); }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
+    /* Built-in Tailwind tokens assume a dark bg — remap the light-on-dark ones
+       for light theme. The [data-theme] prefix out-specifies a bare utility. */
+    [data-theme="light"] .text-white    { color: #0f172a; }
+    [data-theme="light"] .text-gray-100 { color: #1e293b; }
+    [data-theme="light"] .text-gray-200 { color: #334155; }
+    [data-theme="light"] .text-gray-300 { color: #475569; }
+    [data-theme="light"] .text-gray-400 { color: #64748b; }
+    [data-theme="light"] .text-gray-500 { color: #64748b; }
+    [data-theme="light"] .text-gray-600 { color: #94a3b8; }
+    [data-theme="light"] .placeholder-gray-500::placeholder { color: #94a3b8; }
+    /* Exceptions: text-white on a colored/gradient/dark element must STAY white. */
+    [data-theme="light"] [class*="bg-indigo-"].text-white,
+    [data-theme="light"] [class*="bg-purple-"].text-white,
+    [data-theme="light"] [class*="bg-violet-"].text-white,
+    [data-theme="light"] [class*="bg-rose-"].text-white,
+    [data-theme="light"] [class*="bg-red-"].text-white,
+    [data-theme="light"] [class*="bg-amber-"].text-white,
+    [data-theme="light"] [class*="bg-orange-"].text-white,
+    [data-theme="light"] [class*="bg-green-"].text-white,
+    [data-theme="light"] [class*="bg-emerald-"].text-white,
+    [data-theme="light"] [class*="bg-teal-"].text-white,
+    [data-theme="light"] [class*="bg-cyan-"].text-white,
+    [data-theme="light"] [class*="bg-blue-"].text-white,
+    [data-theme="light"] [class*="bg-sky-"].text-white,
+    [data-theme="light"] [class*="bg-black"].text-white,
+    [data-theme="light"] [class*="bg-gradient"].text-white { color: #ffffff; }
+    /* Terminal / code panes (bg-black*) intentionally stay dark in both themes. */
+    /* Minimalist theme cycle button (top bar) */
+    .theme-cycle {
+      display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+      border: 1px solid var(--border); border-radius: 9px; background: var(--bg);
+      color: #94a3b8; font-size: 11px; font-weight: 600; line-height: 1;
+      transition: color .15s ease, border-color .15s ease;
+    }
+    .theme-cycle:hover { color: var(--text); border-color: var(--accent); }
+    .theme-cycle i { font-size: 12px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col pb-24 md:pb-8 antialiased custom-scrollbar">
+
+  <!-- DESKTOP / TABLET TABS -->
+  <div class="bg-dark-card border-b border-dark-border hidden md:block relative z-[999]">
+    <div class="max-w-6xl mx-auto px-4 flex items-center justify-between">
+      <nav class="flex space-x-8">
+                <button onclick="switchTab('home')" id="tab-btn-home" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
+          <i class="fa-solid fa-house"></i> Home
+        </button>
+        <button onclick="switchTab('todo')" id="tab-btn-todo" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
+          <i class="fa-solid fa-calendar-check"></i> Tasks
+          <span id="badge-todo-count" class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800 hidden">0</span>
+        </button>
+        <button onclick="switchTab('tools')" id="tab-btn-tools" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
+          <i class="fa-solid fa-toolbox"></i> Tools & Projects
+        </button>
+        <button onclick="switchTab('server')" id="tab-btn-server" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
+          <i class="fa-solid fa-server"></i> Server
+          <span id="badge-feedback-count" class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-rose-950 text-rose-300 border border-rose-800 hidden">0</span>
+        </button>
+      </nav>
+      <!-- THEME TOGGLE — cycles dark → light → auto -->
+      <button onclick="cycleTheme()" class="theme-cycle" title="Theme" aria-label="Toggle theme">
+        <i class="fa-solid fa-circle-half-stroke"></i>
+        <span class="theme-cycle-label">Auto</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MAIN APP CONTAINER -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 py-4 md:py-6 space-y-6">
+    <!-- THEME TOGGLE (mobile) — desktop bar is hidden on small screens -->
+    <div class="md:hidden flex justify-end -mb-2">
+      <button onclick="cycleTheme()" class="theme-cycle" title="Theme" aria-label="Toggle theme">
+        <i class="fa-solid fa-circle-half-stroke"></i>
+        <span class="theme-cycle-label">Auto</span>
+      </button>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- Deliberately separate from "Daily Tasks & Planner" above  -->
+    <!-- (backed by the unrelated /api/tasks store) — see          -->
+    <!-- log-todo-ui.md for the reasoning and the recommendation   -->
+    <!-- to Alex on whether to eventually consolidate them.        -->
+    <!-- ======================================================== -->
+    
+    <!-- TAB 0: HOME -->
+    <section id="view-home" class="space-y-6">
+      <!-- News Banner — rendered from GET /api/homepage (data/homepage.json),
+           the agent-editable homepage live document (fb-1787801162107).
+           The hardcoded text below is only the pre-fetch / API-down fallback. -->
+      <div id="home-banner" class="bg-gradient-to-r from-indigo-900/60 to-purple-900/60 border border-indigo-700/50 rounded-2xl p-5 shadow-lg relative overflow-hidden">
+        <div class="absolute top-0 right-0 p-4 opacity-10">
+          <i class="fa-solid fa-bullhorn text-6xl"></i>
+        </div>
+        <div class="absolute top-3 right-3 flex items-center gap-1.5">
+          <button onclick="openAnnouncementModal()" title="Edit announcement" class="w-7 h-7 rounded-lg bg-black/25 hover:bg-black/50 text-indigo-300 hover:text-white text-xs flex items-center justify-center transition-colors">
+            <i class="fa-solid fa-pen"></i>
+          </button>
+          <button onclick="openHomepageDesigner()" title="Summon a Homepage Designer agent" class="w-7 h-7 rounded-lg bg-black/25 hover:bg-black/50 text-purple-300 hover:text-white text-xs flex items-center justify-center transition-colors">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+          </button>
+        </div>
+        <h3 class="text-indigo-300 font-bold text-sm tracking-wider uppercase mb-1 flex items-center gap-2 pr-16">
+          <i id="home-banner-icon" class="fa-solid fa-sparkles text-indigo-400"></i> <span id="home-banner-title">House Updates & News</span>
+        </h3>
+        <p id="home-banner-text" class="text-gray-200 text-sm leading-relaxed">
+          Welcome to the new server dashboard! The Trip Planning hub is currently on the roadmap for collaborative packing lists and event scheduling.
+        </p>
+      </div>
+      <!-- Collapsed state when announcement.visible=false — keeps an entry
+           point back into the editor, otherwise hiding the banner would also
+           hide the only way to un-hide it. -->
+      <div id="home-banner-collapsed" class="hidden justify-end -mt-2 flex">
+        <button onclick="openAnnouncementModal()" class="text-[11px] text-gray-500 hover:text-indigo-300 flex items-center gap-1.5 transition-colors">
+          <i class="fa-solid fa-eye-slash"></i> Announcement hidden — edit
+        </button>
+      </div>
+
+      <!-- Agent-designed widget cards (homepage.json .widgets). Hidden when empty. -->
+      <div id="home-widgets" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+
+      <!-- Quick Stats — designer can hide via homepage.json sections.stats -->
+      <div id="home-stats" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between">
+          <div class="text-gray-400 text-xs font-semibold mb-2">Pending TODOs</div>
+          <div class="text-2xl font-bold text-white flex items-end justify-between">
+            <span id="home-stat-todo">--</span>
+            <i class="fa-solid fa-calendar-check text-indigo-500/50 text-xl"></i>
+          </div>
+        </div>
+        <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between">
+          <div class="text-gray-400 text-xs font-semibold mb-2">Active Jobs</div>
+          <div class="text-2xl font-bold text-white flex items-end justify-between">
+            <span id="home-stat-jobs">--</span>
+            <i class="fa-solid fa-microchip text-purple-500/50 text-xl"></i>
+          </div>
+        </div>
+        <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between">
+          <div class="text-gray-400 text-xs font-semibold mb-2">System Load</div>
+          <div class="text-2xl font-bold text-white flex items-end justify-between">
+            <span id="home-stat-cpu">--</span>
+            <i class="fa-solid fa-server text-emerald-500/50 text-xl"></i>
+          </div>
+        </div>
+        <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between">
+          <div class="text-gray-400 text-xs font-semibold mb-2">Open Bug Reports</div>
+          <div class="text-2xl font-bold text-white flex items-end justify-between">
+            <span id="home-stat-bugs">--</span>
+            <i class="fa-solid fa-bug text-rose-500/50 text-xl"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Favorite Tools / Quick Links — designer can hide via sections.quickLinks -->
+      <div id="home-quicklinks">
+        <h2 class="text-lg font-bold text-white mb-3">Favorite Tools</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <button onclick="switchTab('todo')" class="text-left bg-dark-card hover:bg-dark-bg border border-dark-border rounded-xl p-4 transition-colors group">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center group-hover:bg-indigo-500 group-hover:text-white transition-colors">
+                <i class="fa-solid fa-calendar-check"></i>
+              </div>
+              <h3 class="text-gray-200 font-semibold">Shared TODOs</h3>
+            </div>
+            <p class="text-gray-500 text-xs">Manage household chores, groceries, and shared responsibilities.</p>
+          </button>
+          <button onclick="switchTab('server'); switchServerSubTab('agents')" class="text-left bg-dark-card hover:bg-dark-bg border border-dark-border rounded-xl p-4 transition-colors group">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center group-hover:bg-purple-500 group-hover:text-white transition-colors">
+                <i class="fa-solid fa-microchip"></i>
+              </div>
+              <h3 class="text-gray-200 font-semibold">Agents</h3>
+            </div>
+            <p class="text-gray-500 text-xs">Summon autonomous agents to manage server operations or research topics.</p>
+          </button>
+          <button onclick="switchTab('tools')" class="text-left bg-dark-card hover:bg-dark-bg border border-dark-border rounded-xl p-4 transition-colors group">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-colors">
+                <i class="fa-solid fa-toolbox"></i>
+              </div>
+              <h3 class="text-gray-200 font-semibold">All Tools & Projects</h3>
+            </div>
+            <p class="text-gray-500 text-xs">Access scripts, automations, and hosted mini-projects.</p>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-todo" class="hidden space-y-4">
+      <!-- Sub-tab selector + New Task -->
+      <div class="flex items-center justify-between bg-dark-card p-2 rounded-2xl border border-dark-border shadow-sm gap-2">
+        <div class="flex items-center space-x-2 bg-dark-bg p-1 rounded-xl border border-dark-border text-xs font-semibold overflow-x-auto custom-scrollbar">
+          <button onclick="switchTodoSubTab('daily')" id="todo-subtab-btn-daily" class="px-4 py-2 rounded-lg bg-indigo-600 text-white shadow flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-sun text-indigo-200"></i> Daily
+          </button>
+          <button onclick="switchTodoSubTab('manage')" id="todo-subtab-btn-manage" class="px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-list-ul text-gray-400"></i> Manage
+          </button>
+        </div>
+        <button onclick="openAddTodoModal()" class="inline-flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition-all shadow-md shadow-indigo-600/20 flex-shrink-0">
+          <i class="fa-solid fa-plus"></i> <span class="hidden sm:inline">New Task</span>
+        </button>
+      </div>
+
+      <!-- Unavailable banner — shown when /api/todo* 404s or errors, so the UI -->
+      <!-- degrades honestly instead of looking broken or silently blank. -->
+      <div id="todo-unavailable-banner" class="hidden bg-amber-950/40 border border-amber-800/60 text-amber-300 text-xs rounded-2xl p-3.5 flex items-center gap-2.5">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>The TODO API isn't responding yet — this view will populate once it's deployed. Nothing here is being saved.</span>
+      </div>
+
+      <!-- DAILY SUB-VIEW: PAST DUE / Today / Upcoming, matching Main.md's shape -->
+      <div id="todo-sub-daily" class="space-y-4">
+        <div id="todo-daily-container" class="space-y-4">
+          <div class="text-center py-16 text-gray-500 text-xs">Loading TODO...</div>
+        </div>
+      </div>
+
+      <!-- MANAGE SUB-VIEW: flat list, filters, edit/delete -->
+      <div id="todo-sub-manage" class="hidden space-y-4">
+        <div class="bg-dark-card p-3.5 rounded-2xl border border-dark-border flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
+          <div class="flex items-center space-x-1 bg-dark-bg p-1 rounded-xl border border-dark-border overflow-x-auto text-xs font-medium custom-scrollbar">
+            <button onclick="filterTodoManageType('all')" class="todo-manage-type-filter-btn px-3.5 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold shadow" data-filter="all">All</button>
+            <button onclick="filterTodoManageType('recurring')" class="todo-manage-type-filter-btn px-3.5 py-1.5 rounded-lg text-gray-400 hover:text-white" data-filter="recurring">🔁 Recurring</button>
+            <button onclick="filterTodoManageType('scheduled')" class="todo-manage-type-filter-btn px-3.5 py-1.5 rounded-lg text-gray-400 hover:text-white" data-filter="scheduled">📌 Scheduled</button>
+            <button onclick="filterTodoManageType('backlog')" class="todo-manage-type-filter-btn px-3.5 py-1.5 rounded-lg text-gray-400 hover:text-white" data-filter="backlog">📋 Backlog</button>
+          </div>
+          <select id="todo-manage-project-filter" onchange="filterTodoManageProject(this.value)" class="bg-dark-bg border border-dark-border rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+            <option value="all">All projects</option>
+          </select>
+        </div>
+        <div id="todo-manage-container" class="space-y-2.5">
+          <div class="text-center py-16 text-gray-500 text-xs">Loading tasks...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- TAB 2: AUTOMATION & SCRIPT RUNNER                       -->
+    <!-- ======================================================== -->
+    <section id="view-tools" class="hidden space-y-5">
+      <div class="bg-dark-card p-4 rounded-2xl border border-dark-border flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <i class="fa-solid fa-bolt text-indigo-400"></i> Automation & Portfolio Scripts
+          </h2>
+          <p class="text-xs text-gray-400">One-click execution of freelance scrapers, data normalizers, and diagnostic tools.</p>
+        </div>
+      </div>
+
+      <div id="scripts-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+
+      <!-- Live Execution Console Drawer -->
+      <div class="bg-black/95 rounded-2xl border border-dark-border p-4 shadow-2xl font-mono text-xs space-y-2.5">
+        <div class="flex items-center justify-between border-b border-dark-border pb-2.5">
+          <div class="flex flex-wrap items-center gap-2 mt-2 sm:mt-0">
+            <span id="console-indicator" class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+            <span id="console-title" class="text-gray-200 font-bold tracking-wide">Live Execution Output Console</span>
+          </div>
+          <div class="flex items-center gap-3 text-xs">
+            <button onclick="copyConsoleOutput()" class="text-gray-400 hover:text-indigo-400 transition-colors">
+              <i class="fa-regular fa-copy"></i> Copy
+            </button>
+            <button onclick="clearConsole()" class="text-gray-400 hover:text-rose-400 transition-colors">
+              <i class="fa-solid fa-trash-can"></i> Clear
+            </button>
+          </div>
+        </div>
+        <pre id="console-output" class="text-emerald-400 whitespace-pre-wrap max-h-72 overflow-y-auto custom-scrollbar leading-relaxed font-mono">Console ready. Click "Run Script" on any card above to execute on the server.</pre>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- TAB 3: SERVER (HEALTH & INTERACTIVE AGENTS)           -->
+    <!-- ======================================================== -->
+    <section id="view-server" class="hidden space-y-5">
+      
+      <!-- SUB-TAB SELECTOR -->
+      <div class="flex items-center justify-between bg-dark-card p-2 rounded-2xl border border-dark-border shadow-sm gap-2">
+        <div class="flex items-center space-x-2 bg-dark-bg p-1 rounded-xl border border-dark-border text-xs font-semibold overflow-x-auto custom-scrollbar min-w-0">
+          <button onclick="switchServerSubTab('health')" id="subtab-btn-health" title="Health & Stats" aria-label="Health & Stats" class="flex-shrink-0 px-4 py-2 rounded-lg bg-indigo-600 text-white shadow flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-heart-pulse text-indigo-200"></i> <span class="hidden sm:inline">Health & Stats</span>
+          </button>
+          <button onclick="switchServerSubTab('agents')" id="subtab-btn-agents" title="Agents" aria-label="Agents" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-robot text-purple-400"></i> <span class="hidden sm:inline">Agents</span>
+            <span id="subtab-agent-badge" class="hidden sm:inline px-1.5 py-0.2 rounded-full text-[9px] bg-purple-950 text-purple-300 border border-purple-800">Ready</span>
+          </button>
+          <button onclick="switchServerSubTab('feedback')" id="subtab-btn-feedback" title="Feedback" aria-label="Feedback" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-comment-dots text-rose-400"></i> <span class="hidden sm:inline">Feedback</span>
+          </button>
+        </div>
+
+        <button onclick="refreshTelemetry()" class="flex-shrink-0 text-xs bg-dark-bg border border-dark-border hover:bg-dark-accent text-gray-300 px-3.5 py-2 rounded-xl transition-colors flex items-center gap-1.5">
+          <i class="fa-solid fa-rotate"></i> Refresh
+        </button>
+      </div>
+
+      <!-- ====================================================== -->
+      <!-- SUB-TAB 1: HEALTH & STATS + INTERACTIVE TERMINAL       -->
+      <!-- ====================================================== -->
+      <div id="server-sub-health" class="space-y-5">
+        <!-- Staging health. Added 2026-08-26 after staging sat errored with 153
+             restarts for an hour with nothing anywhere surfacing it. Placed
+             FIRST and only made visible when something is wrong, so a broken
+             staging tree is impossible to walk past. -->
+        <div id="staging-health-card" class="hidden"></div>
+
+        <!-- 4 Hardware Telemetry Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+          <div class="bg-dark-card border border-dark-border p-4 rounded-2xl space-y-2 shadow-sm">
+            <div class="flex items-center justify-between text-xs text-gray-400 font-medium">
+              <span>RAM</span>
+              <i class="fa-solid fa-memory text-purple-400 text-sm"></i>
+            </div>
+            <div id="stat-ram-val" class="text-xl sm:text-2xl font-black text-white">-- GB</div>
+            <div class="w-full bg-dark-bg rounded-full h-2 overflow-hidden">
+              <div id="stat-ram-bar" class="bg-gradient-to-r from-purple-600 to-indigo-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <div class="text-[11px] text-gray-400" id="stat-ram-sub">Used: --% of 7.6GB</div>
+          </div>
+
+          <div class="bg-dark-card border border-dark-border p-4 rounded-2xl space-y-2 shadow-sm">
+            <div class="flex items-center justify-between text-xs text-gray-400 font-medium">
+              <span>CPU</span>
+              <i class="fa-solid fa-microchip text-indigo-400 text-sm"></i>
+            </div>
+            <div id="stat-cpu-val" class="text-xl sm:text-2xl font-black text-white">--</div>
+            <div class="w-full bg-dark-bg rounded-full h-2 overflow-hidden">
+              <div id="stat-cpu-bar" class="bg-gradient-to-r from-indigo-500 to-cyan-400 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <div class="text-[11px] text-gray-400" id="stat-cpu-sub">Load Averages: --</div>
+          </div>
+
+          <div class="bg-dark-card border border-dark-border p-4 rounded-2xl space-y-2 shadow-sm">
+            <div class="flex items-center justify-between text-xs text-gray-400 font-medium">
+              <span>Storage</span>
+              <i class="fa-solid fa-hard-drive text-emerald-400 text-sm"></i>
+            </div>
+            <div id="stat-disk-val" class="text-xl sm:text-2xl font-black text-white">-- GB</div>
+            <div class="w-full bg-dark-bg rounded-full h-2 overflow-hidden">
+              <div id="stat-disk-bar" class="bg-gradient-to-r from-emerald-500 to-teal-400 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <div class="text-[11px] text-gray-400" id="stat-disk-sub">-- Available</div>
+          </div>
+
+          <div class="bg-dark-card border border-dark-border p-4 rounded-2xl space-y-2 shadow-sm">
+            <div class="flex items-center justify-between text-xs text-gray-400 font-medium">
+              <span>Uptime</span>
+              <i class="fa-solid fa-clock-rotate-left text-amber-400 text-sm"></i>
+            </div>
+            <div id="stat-uptime-val" class="text-xl sm:text-2xl font-black text-white">--</div>
+            <div class="text-[11px] text-emerald-400 flex items-center gap-1.5 pt-1">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              OVHcloud Ubuntu 26.04
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Terminal Console -->
+        <div class="bg-dark-card border border-dark-border rounded-2xl p-5 space-y-4 shadow-md">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-dark-border pb-3">
+            <div>
+              <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-terminal text-cyan-400"></i> Interactive Server Console
+              </h3>
+              <p class="text-xs text-gray-400">Execute shell commands directly on the Ubuntu VPS host.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="runQuickCommand('df -h / && free -h')" class="text-[11px] bg-dark-bg border border-dark-border hover:bg-dark-accent px-2.5 py-1 rounded-lg text-gray-300 transition-colors">
+                Quick Health
+              </button>
+              <button onclick="runQuickCommand('pm2 status')" class="text-[11px] bg-dark-bg border border-dark-border hover:bg-dark-accent px-2.5 py-1 rounded-lg text-gray-300 transition-colors">
+                PM2 Status
+              </button>
+            </div>
+          </div>
+
+          <form onsubmit="execTerminalCommand(event)" class="flex gap-2">
+            <div class="relative flex-1">
+              <span class="absolute left-3.5 top-2.5 text-xs text-gray-500 font-mono font-bold">$</span>
+              <input type="text" id="term-input" placeholder="Type bash command (e.g. uptime, ps aux, pm2 logs)..." class="w-full bg-black/80 border border-dark-border rounded-xl pl-8 pr-4 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500 transition-colors">
+            </div>
+            <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow flex items-center gap-1.5">
+              <i class="fa-solid fa-play text-[10px]"></i> Run
+            </button>
+          </form>
+
+          <div class="bg-black/95 rounded-xl border border-dark-border p-3.5 font-mono text-xs space-y-2">
+            <div class="flex items-center justify-between border-b border-dark-border/50 pb-2 text-[11px] text-gray-400">
+              <span id="term-status-label">Terminal Output (CWD: /home/ubuntu)</span>
+              <button onclick="clearTerminalOutput()" class="text-gray-400 hover:text-white">&times; Clear</button>
+            </div>
+            <pre id="term-output" class="text-gray-300 whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar leading-relaxed">Ready. Enter a command above to execute on the server.</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====================================================== -->
+      <!-- SUB-TAB 2: INTERACTIVE AGENT WORKSPACE (NEW UI)     -->
+      <!-- ====================================================== -->
+      <div id="server-sub-agents" class="hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          
+          <!-- LEFT SIDEBAR: AGENT SESSIONS LIST -->
+          <div id="agent-left-pane" class="lg:col-span-4 bg-dark-card border border-dark-border rounded-2xl p-4 space-y-3.5 shadow-md transition-all">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-dark-border pb-3">
+              <div>
+                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                  <i class="fa-solid fa-robot text-purple-400"></i> Agents
+                </h3>
+                <p class="text-[11px] text-gray-400">Autonomous Server Personas</p>
+              </div>
+              <button onclick="openNewAgentModal()" class="text-xs bg-purple-600 hover:bg-purple-500 text-white font-semibold px-3 py-1.5 rounded-xl transition-colors shadow flex items-center gap-1">
+                <i class="fa-solid fa-plus text-[10px]"></i> New Agent
+              </button>
+            </div>
+
+            <!-- Sessions List Container -->
+            <div id="agent-sessions-list" class="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+              <div class="text-center py-6 text-gray-500 text-xs">Loading agent sessions...</div>
+            </div>
+
+            <!-- Quick Agent Presets Info -->
+            <div class="bg-dark-bg p-3 rounded-xl border border-dark-border text-[11px] text-gray-400 space-y-1.5">
+              <div class="font-semibold text-gray-300 flex items-center gap-1.5">
+                <i class="fa-solid fa-shield-halved text-indigo-400 text-xs"></i> Permission Presets
+              </div>
+              <p>🛠️ <strong>Debugger</strong>: Full Bash & File edits</p>
+              <p>🔍 <strong>Inspector</strong>: Safe Read-Only Queries</p>
+              <p>⚡ <strong>Automator</strong>: Script development & execution</p>
+            </div>
+          </div>
+
+          <!-- RIGHT COLUMN: INTERACTIVE AGENT CHAT & TOOL EXECUTION -->
+          <div id="agent-right-pane" class="lg:col-span-8 bg-dark-card border border-dark-border rounded-2xl flex flex-col h-[650px] shadow-lg overflow-hidden transition-all">
+            
+            <!-- Chat Header -->
+            <div class="p-4 border-b border-dark-border flex items-center justify-between bg-dark-bg/80 backdrop-blur-sm flex-shrink-0">
+              <div class="flex items-center gap-3">
+                <button onclick="selectSession(null)" class="lg:hidden md:hidden sm:hidden w-8 h-8 flex items-center justify-center rounded-xl bg-dark-bg text-gray-400 hover:text-white border border-dark-border">
+                  <i class="fa-solid fa-chevron-left text-xs"></i>
+                </button>
+                <div id="active-agent-icon" class="w-9 h-9 rounded-xl bg-purple-950 border border-purple-800 text-purple-300 flex items-center justify-center text-base">
+                  <i class="fa-solid fa-wrench"></i>
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h3 id="active-agent-name" class="text-sm font-bold text-white">Server Debugger</h3>
+                    <span id="active-agent-model-badge" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800 flex items-center gap-1">
+                      <i class="fa-solid fa-bolt text-[9px]"></i> Antigravity Flash
+                    </span>
+                  </div>
+                  <p id="active-agent-role-desc" class="text-[11px] text-gray-400">Full Read/Write & Bash Execution Access</p>
+                </div>
+              </div>
+
+              <!-- Actions -->
+              <div class="flex items-center gap-2">
+                <button onclick="clearCurrentChat()" title="Clear conversation" class="p-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-dark-accent rounded-xl transition-colors">
+                  <i class="fa-solid fa-eraser"></i>
+                </button>
+                <button onclick="deleteCurrentAgent()" title="Delete agent session" class="p-2 text-xs text-gray-500 hover:text-rose-400 hover:bg-dark-accent rounded-xl transition-colors">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Messages Stream Area -->
+            <div id="chat-messages-container" class="flex-1 p-4 overflow-y-auto custom-scrollbar space-y-4 bg-dark-bg/30">
+              <div class="text-center py-20 text-gray-500 text-xs">Select an agent or send a message to start conversation.</div>
+            </div>
+
+            <!-- Quick Suggestion Chips -->
+            <div id="quick-prompt-chips" class="px-4 py-2 border-t border-dark-border/40 flex items-center gap-2 overflow-x-auto text-[11px] custom-scrollbar bg-dark-card/60 flex-shrink-0">
+              <span class="text-gray-500 font-semibold flex-shrink-0">Prompts:</span>
+              <button onclick="sendQuickPrompt('Diagnose server health and check if all PM2 processes are running normally.')" class="px-2.5 py-1 rounded-lg bg-dark-bg hover:bg-dark-accent border border-dark-border text-gray-300 hover:text-white transition-colors flex-shrink-0">
+                🔍 Check PM2 & Services
+              </button>
+              <button onclick="sendQuickPrompt('Check available disk space, memory utilization, and CPU load.')" class="px-2.5 py-1 rounded-lg bg-dark-bg hover:bg-dark-accent border border-dark-border text-gray-300 hover:text-white transition-colors flex-shrink-0">
+                📊 Hardware Audit
+              </button>
+              <button onclick="sendQuickPrompt('Inspect recent system errors or warning logs.')" class="px-2.5 py-1 rounded-lg bg-dark-bg hover:bg-dark-accent border border-dark-border text-gray-300 hover:text-white transition-colors flex-shrink-0">
+                ⚠️ Inspect Error Logs
+              </button>
+            </div>
+
+            <!-- Chat Input Bar -->
+            <div class="p-3 border-t border-dark-border bg-dark-card flex-shrink-0">
+              <form onsubmit="submitAgentMessage(event)" class="flex items-center gap-2">
+                <input type="text" id="agent-chat-input" placeholder="Give instructions or ask the agent to perform a task..." class="flex-1 bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors">
+                                <button type="button" onclick="openScheduleModal()" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-3 py-2.5 rounded-xl transition-all shadow flex items-center justify-center gap-1.5" title="Schedule this prompt">
+                  <i class="fa-solid fa-clock text-[11px]"></i>
+                </button>
+                <button type="submit" id="btn-send-message" class="bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition-all shadow flex items-center gap-1.5">
+                  <span>Send</span>
+                  <i class="fa-regular fa-paper-plane text-[11px]"></i>
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====================================================== -->
+      <!-- SUB-TAB 3: FEEDBACK BOX                                -->
+      <!-- ====================================================== -->
+      <div id="server-sub-feedback" class="hidden space-y-4">
+      <!-- Quick Capture Form -->
+      <div class="bg-dark-card p-4 rounded-2xl border border-dark-border space-y-3 shadow-md">
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+          <i class="fa-solid fa-comment-dots text-rose-400"></i> Log Feedback
+        </h2>
+        <form id="feedback-form" onsubmit="submitFeedback(event)" class="space-y-3">
+          <div class="flex gap-2">
+            <select id="feedback-type" class="flex-shrink-0 bg-dark-bg border border-dark-border rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-rose-500 transition-colors"></select>
+            <select id="feedback-urgency" class="flex-shrink-0 bg-dark-bg border border-dark-border rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-rose-500 transition-colors">
+              <option value="low">Low Priority</option>
+              <option value="normal" selected>Normal</option>
+              <option value="high">High Urgency</option>
+              <option value="critical">Critical</option>
+            </select>
+
+            <input type="text" id="feedback-title" required placeholder="What's up? (e.g. Timeout dumps raw command into chat)" class="flex-1 min-w-0 bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-rose-500 transition-colors">
+          </div>
+          <textarea id="feedback-body" rows="2" placeholder="Optional details..." class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-rose-500 transition-colors resize-none"></textarea>
+          <button type="submit" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-paper-plane text-[11px]"></i> Submit
+          </button>
+        </form>
+      </div>
+
+      <!-- Filters -->
+      <div class="bg-dark-card p-3.5 rounded-2xl border border-dark-border flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
+        <div class="flex items-center space-x-1 bg-dark-bg p-1 rounded-xl border border-dark-border overflow-x-auto text-xs font-medium custom-scrollbar">
+          <button onclick="filterFeedbackStatus('all')" class="feedback-status-filter-btn px-3.5 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold shadow" data-filter="all">All</button>
+          <button onclick="filterFeedbackStatus('new')" class="feedback-status-filter-btn px-3.5 py-1.5 rounded-lg text-gray-400 hover:text-white" data-filter="new">New</button>
+          <button onclick="filterFeedbackStatus('in-progress')" class="feedback-status-filter-btn px-3.5 py-1.5 rounded-lg text-gray-400 hover:text-white" data-filter="in-progress">In Progress</button>
+          <button onclick="filterFeedbackStatus('done')" class="feedback-status-filter-btn px-3.5 py-1.5 rounded-lg text-gray-400 hover:text-white" data-filter="done">Done</button>
+          <button onclick="filterFeedbackStatus('wont-do')" class="feedback-status-filter-btn px-3.5 py-1.5 rounded-lg text-gray-400 hover:text-white" data-filter="wont-do">Won't Do</button>
+        </div>
+        
+        <select id="feedback-sort" onchange="sortFeedback(this.value)" class="bg-dark-bg border border-dark-border rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="urgency">Urgency First</option>
+        </select>
+
+        <select id="feedback-type-filter" onchange="filterFeedbackType(this.value)" class="bg-dark-bg border border-dark-border rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+          <option value="all">All types</option>
+        </select>
+      </div>
+
+      <!-- Feedback List -->
+      <div id="feedback-list" class="space-y-2.5">
+        <div class="text-center py-16 text-gray-500 text-xs">Loading feedback...</div>
+      </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- MOBILE BOTTOM NAVIGATION BAR -->
+  <nav class="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-dark-card/95 backdrop-blur-xl border-t border-dark-border flex justify-around py-2.5 px-2 shadow-2xl">
+            <button onclick="switchTab('home')" id="tab-btn-home" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
+          <i class="fa-solid fa-house"></i> Home
+        </button>
+        <button onclick="switchTab('todo')" id="mob-btn-todo" class="relative flex flex-col items-center justify-center w-full py-1 text-gray-400 text-[11px] gap-1 transition-colors">
+      <i class="fa-solid fa-calendar-check text-lg"></i>
+      <span id="mob-badge-todo-count" class="hidden absolute top-0 right-6 w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">0</span>
+      <span>Tasks</span>
+    </button>
+    <button onclick="switchTab('tools')" id="mob-btn-tools" class="flex flex-col items-center justify-center w-full py-1 text-gray-400 text-[11px] gap-1 transition-colors">
+      <i class="fa-solid fa-bolt text-lg"></i>
+      <span>Scripts</span>
+    </button>
+    <button onclick="switchTab('server')" id="mob-btn-server" class="relative flex flex-col items-center justify-center w-full py-1 text-gray-400 text-[11px] gap-1 transition-colors">
+      <i class="fa-solid fa-server text-lg"></i>
+      <span id="mob-badge-feedback-count" class="hidden absolute top-0 right-6 w-4 h-4 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">0</span>
+      <span>Server</span>
+    </button>
+  </nav>
+
+  <!-- ADD TASK MODAL -->
+  <div id="add-todo-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-dark-card border border-dark-border rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-dark-border pb-3">
+        <h3 id="todo-modal-title" class="text-base font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-calendar-check text-indigo-400"></i> New TODO Task
+        </h3>
+        <button onclick="closeAddTodoModal()" class="text-gray-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <form id="add-todo-form" onsubmit="submitTodoTask(event)" class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Task Name</label>
+          <input type="text" id="todo-name" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors" placeholder="e.g. Put Away A Basket Of Laundry">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 mb-1">Project</label>
+            <input type="text" id="todo-project" required list="todo-project-list" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" placeholder="e.g. Chores">
+            <datalist id="todo-project-list"></datalist>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 mb-1">Priority</label>
+            <select id="todo-priority" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+              <option value="High">High</option>
+              <option value="Medium" selected>Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Type</label>
+          <select id="todo-type" onchange="updateTodoTypeVisibility()" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+            <option value="recurring">🔁 Recurring</option>
+            <option value="scheduled">📌 Scheduled</option>
+            <option value="backlog">📋 Backlog</option>
+          </select>
+        </div>
+
+        <!-- RECURRING FIELDS -->
+        <div id="todo-recurring-fields" class="space-y-3">
+          <div id="todo-flagged-warning" class="hidden bg-amber-950/40 border border-amber-800/60 text-amber-300 text-[11px] rounded-xl p-2.5">
+            This task's stored frequency (<span id="todo-flagged-raw" class="font-mono"></span>) doesn't match any picker pattern. Pick a frequency below to replace it — saving will overwrite the unparseable value.
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 mb-1">Frequency</label>
+            <select id="todo-freq-type" onchange="updateTodoFreqVisibility()" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+              <option value="Daily">Daily</option>
+              <option value="Weekdays">Weekdays (Mon–Fri)</option>
+              <option value="Weekly">Weekly, on...</option>
+              <option value="Every2Weeks">Every 2 weeks, on...</option>
+              <option value="Monthly">Monthly, on the...</option>
+              <option value="Yearly">Yearly</option>
+            </select>
+          </div>
+          <div id="todo-freq-day-wrap" class="hidden">
+            <label class="block text-xs font-semibold text-gray-300 mb-1">Day of week</label>
+            <select id="todo-freq-day" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+              <option value="Sun">Sunday</option>
+              <option value="Mon">Monday</option>
+              <option value="Tue">Tuesday</option>
+              <option value="Wed">Wednesday</option>
+              <option value="Thu">Thursday</option>
+              <option value="Fri">Friday</option>
+              <option value="Sat">Saturday</option>
+            </select>
+          </div>
+          <div id="todo-freq-monthday-wrap" class="hidden">
+            <label class="block text-xs font-semibold text-gray-300 mb-1">Day of month</label>
+            <select id="todo-freq-monthday" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"></select>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-gray-300 mb-1">Next Due</label>
+              <input type="date" id="todo-nextdue" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-300 mb-1">Due Time (optional)</label>
+              <input type="time" id="todo-duetime" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3 items-end">
+            <div>
+              <label class="block text-xs font-semibold text-gray-300 mb-1">End Date (optional)</label>
+              <input type="date" id="todo-enddate" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+            </div>
+            <label class="flex items-center gap-2 text-xs text-gray-300 pb-2">
+              <input type="checkbox" id="todo-skippable" class="rounded text-indigo-600 focus:ring-0"> Skippable
+            </label>
+          </div>
+        </div>
+
+        <!-- SCHEDULED FIELDS -->
+        <div id="todo-scheduled-fields" class="hidden grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 mb-1">Due Date</label>
+            <input type="date" id="todo-scheduled-duedate" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 mb-1">Due Time (optional)</label>
+            <input type="time" id="todo-scheduled-duetime" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+          </div>
+        </div>
+
+        <!-- BACKLOG FIELDS -->
+        <div id="todo-backlog-fields" class="hidden">
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Added (optional — defaults to today)</label>
+          <input type="date" id="todo-backlog-added" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Notes</label>
+          <textarea id="todo-notes" rows="2" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors resize-none" placeholder="Optional..."></textarea>
+        </div>
+
+        <div id="todo-form-error" class="hidden bg-rose-950/40 border border-rose-800/60 text-rose-300 text-[11px] rounded-xl p-2.5"></div>
+
+        <div class="flex justify-end gap-2.5 pt-2">
+          <button type="button" onclick="closeAddTodoModal()" class="px-4 py-2 rounded-xl bg-dark-bg border border-dark-border text-xs text-gray-300 hover:text-white">Cancel</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow-md shadow-indigo-600/30">Save Task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- NEW AGENT MODAL (WITH ROLES & CLAUDE TOGGLE) -->
+  <div id="new-agent-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-dark-card border border-dark-border rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-dark-border pb-3">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-robot text-purple-400"></i> Configure New Agent
+        </h3>
+        <button onclick="closeNewAgentModal()" class="text-gray-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <form id="new-agent-form" onsubmit="submitNewAgent(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Agent Name</label>
+          <input type="text" id="new-agent-name" required placeholder="e.g. Server Debugger, Error Auditor..." class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-purple-500 transition-colors">
+        </div>
+
+        <!-- Role Presets Cards -->
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-2">Role & Permissions</label>
+          <div class="grid grid-cols-2 gap-2.5">
+            <label class="cursor-pointer border border-purple-500/80 bg-purple-950/20 p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-purple-400">
+              <input type="radio" name="agent-role" value="debugger" checked class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">🛠️ Debugger</div>
+                <div class="text-[10px] text-gray-400">Full Read/Write & Bash tool access</div>
+              </div>
+            </label>
+
+            <label class="cursor-pointer border border-dark-border bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-600">
+              <input type="radio" name="agent-role" value="query" class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">🔍 Inspector (Query)</div>
+                <div class="text-[10px] text-gray-400">Safe Read-Only queries (no edits)</div>
+              </div>
+            </label>
+
+            <label class="cursor-pointer border border-dark-border bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-600">
+              <input type="radio" name="agent-role" value="automator" class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">⚡ Automator</div>
+                <div class="text-[10px] text-gray-400">Python scripts & cron pipelines</div>
+              </div>
+            </label>
+
+            <label class="cursor-pointer border border-dark-border bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-600">
+              <input type="radio" name="agent-role" value="architect" class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">📐 Architect</div>
+                <div class="text-[10px] text-gray-400">System planning (Full Read/Write)</div>
+              </div>
+            </label>
+
+            <label class="cursor-pointer border border-dark-border bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-600">
+              <input type="radio" name="agent-role" value="designer" class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">🎨 Designer</div>
+                <div class="text-[10px] text-gray-400">Page design only — writes walled to the page document</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Model Picker -->
+        <div class="bg-dark-bg p-3 rounded-xl border border-dark-border space-y-1.5">
+          <label class="block text-xs font-semibold text-gray-300 mb-1 flex items-center gap-1.5">
+            <i class="fa-solid fa-brain text-amber-400"></i> Model
+          </label>
+          <div id="new-agent-model-picker" class="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar pr-1"></div>
+          <p class="text-[10px] text-gray-500 pl-0.5 pt-0.5">Antigravity — Gemini Flash Lite is the default (fast, free unlimited tokens via Cloudflare Proxy). Pick a different model only if you need it.</p>
+        </div>
+
+        <div class="flex justify-end gap-2.5 pt-2">
+          <button type="button" onclick="closeNewAgentModal()" class="px-4 py-2 rounded-xl bg-dark-bg border border-dark-border text-xs text-gray-300 hover:text-white">Cancel</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-semibold text-white shadow-md shadow-purple-600/30">Create Agent</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  
+  <!-- FLOATING SCHEDULED BUTTON -->
+  <button onclick="document.getElementById('scheduled-sidebar').classList.toggle('translate-x-full')" class="fixed bottom-24 right-5 w-12 h-12 bg-amber-600 text-white rounded-full shadow-lg hover:bg-amber-500 hover:scale-110 transition-all flex flex-col items-center justify-center z-40 group">
+    <i class="fa-solid fa-clock text-lg"></i>
+    <span id="floating-sched-badge" class="absolute -top-1 -right-1 bg-amber-900 border border-amber-400 text-[9px] font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
+  </button>
+
+  <!-- FLOATING DESIGNER BUTTON — same pattern as the scheduler FAB above.
+       Visible only on pages that have a designer-editable page document
+       (DESIGNER_PAGES); the bubble it opens is bound to that page. -->
+  <button id="designer-fab" onclick="openPageDesigner()" title="Page Designer" class="fixed bottom-40 right-5 w-12 h-12 bg-purple-600 text-white rounded-full shadow-lg hover:bg-purple-500 hover:scale-110 transition-all flex items-center justify-center z-40">
+    <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
+  </button>
+  
+  <!-- SCHEDULED SIDEBAR -->
+  <div id="scheduled-sidebar" class="fixed right-0 top-0 h-screen w-80 max-w-full bg-dark-card border-l border-dark-border shadow-2xl transform translate-x-full transition-transform z-50 flex flex-col">
+    <div class="p-4 border-b border-dark-border flex items-center justify-between bg-dark-bg/80 backdrop-blur-sm">
+      <h3 class="text-sm font-bold text-white flex items-center gap-2">
+        <i class="fa-solid fa-clock text-amber-400"></i> Scheduled Tasks
+      </h3>
+      <button onclick="document.getElementById('scheduled-sidebar').classList.add('translate-x-full')" class="text-gray-400 hover:text-white transition-colors">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+    </div>
+    
+    <div class="p-4 flex-1 overflow-y-auto custom-scrollbar">
+      <div id="scheduled-list" class="space-y-2">
+        <div class="text-center py-10 text-gray-500 text-xs">No scheduled prompts yet.</div>
+      </div>
+    </div>
+  </div>
+
+  
+  <!-- SCHEDULE MODAL -->
+  <div id="schedule-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div class="bg-dark-card border border-dark-border rounded-2xl p-5 w-full max-w-md shadow-2xl space-y-4">
+      <h3 class="text-white font-bold flex items-center gap-2 text-sm">
+        <i class="fa-solid fa-clock text-amber-400"></i> Schedule Prompt
+      </h3>
+      <form onsubmit="submitAgentSchedule(event)" class="space-y-4">
+        <div>
+          <label class="block text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-1.5">When to run (Local Time)</label>
+          <input type="datetime-local" id="schedule-runat" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500">
+          <p class="text-[10px] text-gray-500 mt-1">Leave blank to queue immediately (runs when agent is free).</p>
+        </div>
+        <div>
+          <label class="block text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-1.5">Recurring (Minutes)</label>
+          <input type="number" id="schedule-frequency" min="10" max="129600" placeholder="e.g. 60 for hourly" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 placeholder-gray-600">
+          <p class="text-[10px] text-gray-500 mt-1">Optional. Re-queues itself this many minutes after each run (min 10, max 129600).</p>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-dark-border">
+          <button type="button" onclick="document.getElementById('schedule-modal').classList.add('hidden')" class="px-4 py-2 rounded-xl text-gray-400 hover:text-white text-xs font-semibold transition-colors">Cancel</button>
+          <button type="submit" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow transition-all flex items-center gap-1.5">
+            <i class="fa-solid fa-check"></i> Schedule
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- QUEUE-ON-FAILURE MODAL -->
+  <div id="queue-prompt-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-dark-card border border-dark-border rounded-2xl w-full max-w-md p-5 shadow-2xl">
+      <div class="flex items-start gap-3 border-b border-dark-border pb-3 mb-3">
+        <div class="w-10 h-10 rounded-xl bg-amber-950 border border-amber-800 text-amber-300 flex items-center justify-center text-lg flex-shrink-0">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div>
+          <h3 class="text-sm font-bold text-white">Agent request failed</h3>
+          <p id="queue-modal-reason" class="text-[11px] text-gray-400 mt-0.5">The agent could not answer.</p>
+        </div>
+      </div>
+      <div class="bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-[11px] text-gray-400 mb-3 max-h-24 overflow-y-auto custom-scrollbar">
+        <span id="queue-modal-prompt" class="italic"></span>
+      </div>
+
+      <!-- Switch-model-and-retry section: only shown for a recoverable quota error -->
+      <div id="queue-modal-switch-section" class="hidden mb-4 border-t border-dark-border pt-3">
+        <p class="text-xs text-gray-300 mb-2 font-semibold">Switch model and retry now</p>
+        <div id="queue-modal-model-picker" class="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1"></div>
+        <button type="button" id="queue-modal-show-all-btn" onclick="toggleQueueModalShowAll()" class="text-[10px] text-indigo-400 hover:text-indigo-300 mt-2">Show all models</button>
+        <label class="flex items-center gap-2 mt-2.5 text-[11px] text-gray-400 cursor-pointer">
+          <input type="checkbox" id="queue-modal-persist" class="rounded text-indigo-600 focus:ring-0 bg-dark-card border-gray-600">
+          Remember this choice for the session
+        </label>
+        <button type="button" onclick="confirmSwitchAndRetry()" class="w-full mt-2.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-rotate text-[11px]"></i> Switch model &amp; retry
+        </button>
+      </div>
+
+      <p class="text-xs text-gray-300 mb-2">Queue this prompt to retry later? It will be held in the Scheduled tab so you can run it once the issue clears.</p>
+      <div class="flex items-center justify-end gap-2">
+        <button type="button" onclick="closeQueueModal()" class="px-4 py-2 rounded-xl bg-dark-bg border border-dark-border text-xs text-gray-300 hover:text-white">Dismiss</button>
+        <button type="button" onclick="confirmQueuePrompt()" class="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold flex items-center gap-1.5">
+          <i class="fa-solid fa-clock text-[11px]"></i> Queue for retry
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT APP LOGIC -->
+  <script>
+    let allTasks = [];
+    let currentFilter = 'all';
+    let searchQuery = '';
+    let agentSessions = [];
+    let activeSessionId = null;
+
+    // --- ASYNC JOBS (Agent Jobs & Cancellation contract §5) ---
+    // Keyed by sessionId. { jobId, timer, startTime, lastJob, cancelling }.
+    // A job keeps polling in the background even if the user switches away
+    // from its session — only the DOM update is gated on activeSessionId.
+    let jobPolls = {};
+
+    // --- MODEL REGISTRY ---
+    // Fetched from GET /api/agent/models. If that endpoint 404s (e.g. the
+    // backend half of this feature hasn't deployed yet), fall back to the two
+    // ids that have always existed so the picker never renders empty and old
+    // sessions still resolve to a sane label/engine.
+    const FALLBACK_MODELS = [
+      { id: 'antigravity-flash', label: 'Antigravity — Gemini Flash Lite', engine: 'gemini',
+        apiModel: 'gemini-flash-lite-latest', tier: 'fast', default: false,
+        description: 'Fastest and cheapest. Good for lookups and quick server questions.' },
+      { id: 'claude-heavy', label: 'Claude Code (Heavy)', engine: 'claude',
+        apiModel: null, tier: 'balanced', default: false,
+        description: 'Full Claude Code CLI in auto mode. Slower, more capable.' }
+    ];
+    let modelRegistry = FALLBACK_MODELS;
+
+    async function loadModelRegistry() {
+      try {
+        const res = await fetch('/api/agent/models');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (data && Array.isArray(data.models) && data.models.length) {
+          modelRegistry = data.models;
+        } else {
+          throw new Error('empty registry payload');
+        }
+      } catch (err) {
+        console.warn('GET /api/agent/models unavailable, using fallback registry:', err.message);
+        modelRegistry = FALLBACK_MODELS;
+      }
+      // Re-render anything already on screen that depends on the registry.
+      if (agentSessions.length) { renderSessionsList(); if (activeSessionId) selectSession(activeSessionId); }
+    }
+
+    function getModelInfo(id) {
+      return modelRegistry.find(m => m.id === id)
+        || FALLBACK_MODELS.find(m => m.id === id)
+        || { id: id || 'claude-haiku', label: id || 'Unknown model', engine: 'gemini', tier: 'fast', description: '' };
+    }
+
+    function getDefaultModelId() {
+      const def = modelRegistry.find(m => m.default);
+      return def ? def.id : 'claude-haiku';
+    }
+
+    const tierIcons = { fast: 'fa-bolt', balanced: 'fa-scale-balanced', deep: 'fa-brain' };
+    const tierLabels = { fast: 'Fast', balanced: 'Balanced', deep: 'Deep' };
+    const engineLabels = { gemini: 'Gemini', claude: 'Claude', ollama: 'Ollama (Local)', openai: 'OpenAI', unavailable: 'Unavailable / Unconfigured' };
+
+    // Renders a list of model radio-cards grouped by engine. Used by both the
+    // new-agent modal (full registry) and the exhaustion popup (suggested or full).
+    function renderModelPickerHTML(models, radioName, selectedId) {
+      const groups = { gemini: [], claude: [], ollama: [], openai: [], unavailable: [] };
+      models.forEach(m => { 
+        if (m.unavailable) groups.unavailable.push(m);
+        else (groups[m.engine] || (groups[m.engine] = [])).push(m); 
+      });
+      const sections = Object.keys(groups).filter(eng => groups[eng].length).map(eng => {
+        const cards = groups[eng].map(m => {
+          const checked = m.id === selectedId ? 'checked' : '';
+          const disabledClass = m.unavailable ? 'opacity-50 grayscale cursor-not-allowed pointer-events-none' : 'cursor-pointer hover:border-gray-600';
+          return `
+            <label class="border ${checked ? 'border-indigo-500 bg-indigo-950/20' : 'border-dark-border bg-dark-bg'} p-2.5 rounded-xl flex items-start gap-2 transition-all ${disabledClass}">
+              <input type="radio" name="${radioName}" value="${m.id}" ${checked} ${m.unavailable ? 'disabled' : ''} class="mt-1 text-indigo-600 focus:ring-0" onchange="onModelPickerChange('${radioName}', this.value)">
+              <div class="min-w-0">
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                  <i class="fa-solid ${tierIcons[m.tier] || 'fa-microchip'} text-[10px] text-indigo-400"></i>
+                  ${escapeHtml(m.label)}
+                  <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-dark-card border border-dark-border text-gray-400">${tierLabels[m.tier] || m.tier}</span>
+                  ${m.default ? '<span class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-950 border border-emerald-800 text-emerald-400">default</span>' : ''}
+                </div>
+                <div class="text-[10px] text-gray-400 mt-0.5">${escapeHtml(m.description || '')}</div>
+              </div>
+            </label>`;
+        }).join('');
+        return `<div class="space-y-1.5"><div class="text-[10px] font-bold uppercase tracking-wide text-gray-500 mt-1.5 mb-1">${engineLabels[eng] || eng}</div>${cards}</div>`;
+      });
+      return sections.join('');
+    }
+
+    // Simple dispatcher so the shared picker markup can report selection
+    // changes back without inlining a different handler per call site.
+    let newAgentSelectedModel = null;
+    function onModelPickerChange(radioName, value) {
+      if (radioName === 'new-agent-model') newAgentSelectedModel = value;
+      else if (radioName === 'queue-switch-model') { if (queueContext) queueContext.selectedModel = value; }
+    }
+
+    // --- MAIN TAB SWITCHING ---
+    function switchTab(tab) {
+      ['home', 'todo', 'tools', 'server'].forEach(t => {
+        document.getElementById(`view-${t}`).classList.add('hidden');
+        const deskBtn = document.getElementById(`tab-btn-${t}`);
+        const mobBtn = document.getElementById(`mob-btn-${t}`);
+
+        if (deskBtn) {
+          deskBtn.classList.remove('border-indigo-500', 'text-indigo-400', 'font-semibold');
+          deskBtn.classList.add('border-transparent', 'text-gray-400');
+        }
+        if (mobBtn) {
+          mobBtn.classList.remove('text-indigo-400', 'font-semibold');
+          mobBtn.classList.add('text-gray-400');
+        }
+      });
+
+      document.getElementById(`view-${tab}`).classList.remove('hidden');
+      const activeDeskBtn = document.getElementById(`tab-btn-${tab}`);
+      const activeMobBtn = document.getElementById(`mob-btn-${tab}`);
+
+      if (activeDeskBtn) {
+        activeDeskBtn.classList.add('border-indigo-500', 'text-indigo-400', 'font-semibold');
+        activeDeskBtn.classList.remove('border-transparent', 'text-gray-400');
+      }
+      if (activeMobBtn) {
+        activeMobBtn.classList.add('text-indigo-400', 'font-semibold');
+        activeMobBtn.classList.remove('text-gray-400');
+      }
+
+      // Designer is page-bound: leaving a page closes its bubble and the FAB
+      // only shows where a page document exists (defined with the bubble code).
+      onDesignerTabSwitch(tab);
+    }
+
+    // --- SERVER SUB-TAB SWITCHING ---
+    function switchServerSubTab(sub) {
+      ['health', 'agents', 'feedback'].forEach(s => {
+        document.getElementById(`server-sub-${s}`).classList.add('hidden');
+        const btn = document.getElementById(`subtab-btn-${s}`);
+        if (btn) {
+          btn.className = 'flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all';
+        }
+      });
+
+      document.getElementById(`server-sub-${sub}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`subtab-btn-${sub}`);
+      if (activeBtn) {
+        activeBtn.className = 'flex-shrink-0 px-4 py-2 rounded-lg bg-indigo-600 text-white shadow flex items-center gap-2 transition-all font-semibold';
+      }
+
+      if (sub === 'agents' && agentSessions.length === 0) {
+        loadAgentSessions();
+      }
+      if (sub === 'feedback') {
+        loadFeedback();
+      }
+    }
+
+    // ===================== TODO (ported vault_todo.py system) =====================
+    // Built against `Antigravity/TODO Migration — Contract.md` §7. The backend
+    // (todo-backend, dashboard/src/) is built against the same contract but did
+    // not exist while this was written — every fetch below degrades to an
+    // "unavailable" banner instead of breaking, per the contract's boundary rules.
+    //
+    // Emoji use explicit \u{...} escapes (not pasted literals) so the load-bearing
+    // variation selectors (spec §4.4 — 🗓️ needs U+FE0F, ⚠️ needs U+FE0F, 🔁/📅/
+    // 📌/📋 do not) survive byte-exact regardless of editor/encoding.
+    const TODO_EMOJI = {
+      cycle: '\u{1F501}',        // 🔁 recurring Daily/Weekdays
+      weekly: '\u{1F4C5}',       // 📅 recurring, frequency startswith "Weekly"
+      otherRecurring: '\u{1F5D3}\u{FE0F}', // 🗓️ any other recurring
+      scheduled: '\u{1F4CC}',    // 📌
+      backlog: '\u{1F4CB}',      // 📋
+      warn: '\u{26A0}\u{FE0F}'   // ⚠️ PAST DUE header
+    };
+
+    let todoView = null;             // last successful GET /api/todo result
+    let todoApiUnavailable = false;  // true once any /api/todo* call has failed
+    let todoAllTasks = [];           // GET /api/todo/tasks (Manage sub-view)
+    let todoProjects = [];           // GET /api/todo/projects
+    let todoManageTypeFilter = 'all';
+    let todoManageProjectFilter = 'all';
+    let todoEditingId = null;        // non-null while the modal is editing, not creating
+    let todoSubTab = 'daily';
+
+    // Never throws — every caller gets {ok, status, data} and decides what to
+    // show. This is what makes "the endpoints will not exist while you work"
+    // survive: a 404 or a dead connection both land here, not in a console error
+    // the phone user never sees.
+    async function todoApiFetch(url, opts) {
+      try {
+        const res = await fetch(url, opts);
+        let data = null;
+        try { data = await res.json(); } catch (_) { /* empty/non-JSON body */ }
+        return { ok: res.ok, status: res.status, data };
+      } catch (err) {
+        return { ok: false, status: 0, data: null, networkError: true };
+      }
+    }
+
+    function todoMarkUnavailable(unavailable) {
+      todoApiUnavailable = unavailable;
+      const banner = document.getElementById('todo-unavailable-banner');
+      if (banner) banner.classList.toggle('hidden', !unavailable);
+    }
+
+    // --- SUB-TAB SWITCHING ---
+    function switchTodoSubTab(sub) {
+      todoSubTab = sub;
+      ['daily', 'manage'].forEach(s => {
+        document.getElementById(`todo-sub-${s}`).classList.add('hidden');
+        const btn = document.getElementById(`todo-subtab-btn-${s}`);
+        if (btn) btn.className = 'px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all';
+      });
+      document.getElementById(`todo-sub-${sub}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`todo-subtab-btn-${sub}`);
+      if (activeBtn) activeBtn.className = 'px-4 py-2 rounded-lg bg-indigo-600 text-white shadow flex items-center gap-2 transition-all font-semibold';
+      if (sub === 'manage' && todoAllTasks.length === 0) loadTodoManage();
+    }
+
+    async function loadTodoDaily() {
+      const result = await todoApiFetch('/api/todo');
+      if (!result.ok) {
+        todoView = null;
+        todoMarkUnavailable(true);
+      } else {
+        todoView = result.data;
+        todoMarkUnavailable(false);
+      }
+      renderTodoDaily();
+      updateTodoBadge();
+    }
+    function updateTodoBadge() {
+      const count = todoView ? (todoView.pastDue || []).length + (todoView.today || []).length : 0;
+      const homeStatEl = document.getElementById('home-stat-todo');
+      if (homeStatEl) homeStatEl.textContent = count;
+      [['badge-todo-count', false], ['mob-badge-todo-count', true]].forEach(([id, isMob]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = isMob ? (count > 9 ? '9+' : count) : count;
+        el.classList.toggle('hidden', count === 0);
+      });
+    }
+
+    function todoEmoji(t) {
+      if (t.type === 'recurring') {
+        if (t.frequency === 'Daily' || t.frequency === 'Weekdays') return TODO_EMOJI.cycle;
+        if (typeof t.frequency === 'string' && t.frequency.startsWith('Weekly')) return TODO_EMOJI.weekly;
+        return TODO_EMOJI.otherRecurring;
+      }
+      if (t.type === 'scheduled') return TODO_EMOJI.scheduled;
+      if (t.type === 'backlog') return TODO_EMOJI.backlog;
+      return '';
+    }
+
+    // ISO "YYYY-MM-DD" -> "Fri, May 29" — parsed/rendered as UTC-anchored so a
+    // local-timezone Date() doesn't roll the calendar day backward (the same
+    // hazard contract §1.4 pins server-side; here it's display-only but the
+    // failure mode is identical, so it gets the same treatment).
+    function todoFormatDateLabel(iso) {
+      if (!iso) return '';
+      const [y, m, d] = iso.split('-').map(Number);
+      if (!y || !m || !d) return '';
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      const wd = dt.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+      const mo = dt.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+      return `${wd}, ${mo} ${d}`; // day deliberately not zero-padded — spec §4.2 / §4.15
+    }
+
+    // Spec §4.2: same-day rows show time only ("(8:00am)"); other-day rows show
+    // the full date, plus time if present ("(Fri, May 29 8:00pm)"); no date at
+    // all for the backlog-guarantee item (due is null).
+    function todoDateLabel(t, sameDay) {
+      const due = t.nextDue || t.dueDate || t.added || null;
+      if (sameDay) return t.dueTime ? `(${t.dueTime})` : '';
+      if (!due) return '';
+      const label = todoFormatDateLabel(due);
+      return t.dueTime ? `(${label} ${t.dueTime})` : `(${label})`;
+    }
+
+    function todoPriorityBadgeClass(p) {
+      return p === 'High' ? 'text-rose-400 bg-rose-950/70 border-rose-800/80' :
+             p === 'Medium' ? 'text-amber-400 bg-amber-950/70 border-amber-800/80' :
+             'text-blue-400 bg-blue-950/70 border-blue-800/80'; // Low, and anything unrecognized — matches contract §2 rule
+    }
+
+    // A flagged row (contract §1.3 — failed validation, surfaced not dropped)
+    // may not carry the normal fields. Render it distinctly and non-actionably
+    // rather than let a missing field throw mid-render and blank the whole list.
+    function todoIsFlagged(t) {
+      return !!(t.flagged || t.error || t.invalid);
+    }
+
+    function todoRowHtml(t, sameDay) {
+      if (todoIsFlagged(t)) {
+        return `
+          <div id="todo-row-${escapeHtml(t.id || '')}" class="bg-amber-950/20 border border-amber-800/50 rounded-2xl p-3.5 flex items-start gap-3">
+            <i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5"></i>
+            <div class="flex-1 min-w-0 text-xs">
+              <div class="text-amber-300 font-semibold">${escapeHtml(t.name || t.id || 'Unrecognized task')}</div>
+              <div class="text-amber-400/80">${escapeHtml(t.error || 'This row could not be parsed. Edit or delete it in Manage.')}</div>
+            </div>
+          </div>`;
+      }
+      const emoji = todoEmoji(t);
+      const dateLabel = todoDateLabel(t, sameDay);
+      return `
+        <div id="todo-row-${escapeHtml(t.id)}" class="bg-dark-card border border-dark-border hover:border-gray-700 transition-all rounded-2xl p-4 flex items-start gap-3.5 group shadow-sm">
+          <button onclick="completeTodoTask('${escapeHtml(t.id)}')" class="mt-0.5 w-5 h-5 rounded-lg border border-gray-600 hover:border-indigo-400 hover:bg-indigo-500/10 text-transparent flex items-center justify-center transition-all flex-shrink-0" title="Complete">
+            <i class="fa-solid fa-check text-[10px]"></i>
+          </button>
+          <div class="flex-1 min-w-0 space-y-1.5">
+            <div class="flex items-center justify-between gap-2">
+              <h4 class="text-sm font-semibold text-gray-100 truncate">
+                <span class="mr-1">${emoji}</span>${escapeHtml(t.name)}
+              </h4>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${todoPriorityBadgeClass(t.priority)}">${escapeHtml(t.priority || 'Low')}</span>
+                <button onclick="openEditTodoModal('${escapeHtml(t.id)}')" class="text-gray-600 hover:text-indigo-400 text-xs p-1 opacity-0 group-hover:opacity-100 transition-opacity" title="Edit">
+                  <i class="fa-solid fa-pen"></i>
+                </button>
+                <button onclick="deleteTodoTask('${escapeHtml(t.id)}')" class="text-gray-600 hover:text-rose-400 text-xs p-1 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+            ${dateLabel ? `<div class="text-xs text-gray-400">${escapeHtml(dateLabel)}</div>` : ''}
+            ${t.notes ? `<p class="text-xs text-gray-400 leading-relaxed">${escapeHtml(t.notes)}</p>` : ''}
+            <div class="flex items-center gap-3 text-[11px] text-gray-500 pt-0.5 flex-wrap">
+              <span class="inline-flex items-center gap-1 text-indigo-400 font-medium"><i class="fa-solid fa-tag text-[9px]"></i> ${escapeHtml(t.project || '')}</span>
+              ${t.type === 'recurring' && t.frequency ? `<span class="inline-flex items-center gap-1"><i class="fa-solid fa-rotate text-[9px]"></i> ${escapeHtml(t.frequency)}</span>` : ''}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    const todoCollapsedState = JSON.parse(localStorage.getItem('ada_todo_collapsed') || '{}');
+
+    function toggleTodoSection(sectionKey) {
+      todoCollapsedState[sectionKey] = !todoCollapsedState[sectionKey];
+      localStorage.setItem('ada_todo_collapsed', JSON.stringify(todoCollapsedState));
+      renderTodoDaily();
+    }
+
+    function todoSectionHtml(title, emoji, items, sameDay, extraHeaderClass, sectionKey) {
+      if (!items || items.length === 0) return '';
+      const isCollapsed = !!todoCollapsedState[sectionKey];
+      return `
+        <div class="space-y-2">
+          <div onclick="toggleTodoSection('${sectionKey}')" class="flex items-center justify-between cursor-pointer select-none group py-1">
+            <h3 class="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${extraHeaderClass || 'text-gray-400'}">
+              <span>${emoji}</span> ${title} <span class="text-gray-600 font-normal">(${items.length})</span>
+            </h3>
+            <div class="text-gray-500 group-hover:text-gray-300 text-xs flex items-center gap-1 transition-colors">
+              <span>${isCollapsed ? 'Show' : 'Hide'}</span>
+              <i class="fa-solid fa-chevron-${isCollapsed ? 'down' : 'up'} transition-transform duration-200"></i>
+            </div>
+          </div>
+          <div class="space-y-2.5 ${isCollapsed ? 'hidden' : ''}" id="todo-section-content-${sectionKey}">
+            ${items.map(t => todoRowHtml(t, sameDay)).join('')}
+          </div>
+        </div>`;
+    }
+
+    function renderTodoDaily() {
+      const container = document.getElementById('todo-daily-container');
+      if (!container) return;
+
+      if (todoApiUnavailable) {
+        container.innerHTML = '';
+        return;
+      }
+      if (!todoView) {
+        container.innerHTML = `<div class="text-center py-16 text-gray-500 text-xs">Loading TODO...</div>`;
+        return;
+      }
+
+      const pastDue = todoView.pastDue || [];
+      const today = todoView.today || [];
+      const upcoming = todoView.upcoming || [];
+
+      if (pastDue.length === 0 && today.length === 0 && upcoming.length === 0) {
+        container.innerHTML = `
+          <div class="bg-dark-card border border-dark-border rounded-2xl p-10 text-center text-gray-500 text-xs space-y-2">
+            <i class="fa-regular fa-circle-check text-3xl text-emerald-600"></i>
+            <p>Nothing due. Clear board.</p>
+          </div>`;
+        return;
+      }
+
+      container.innerHTML = [
+        todoSectionHtml('Past Due', TODO_EMOJI.warn, pastDue, false, 'text-rose-400', 'past-due'),
+        todoSectionHtml('Today', '', today, true, 'text-indigo-400', 'today'),
+        todoSectionHtml('Upcoming', '', upcoming, false, 'text-gray-400', 'upcoming')
+      ].join('');
+    }
+
+    async function completeTodoTask(id) {
+      const row = document.getElementById(`todo-row-${id}`);
+      if (row) { row.style.opacity = '0.35'; row.style.pointerEvents = 'none'; }
+      const result = await todoApiFetch(`/api/todo/tasks/${id}/complete`, { method: 'POST' });
+      if (!result.ok) {
+        if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
+        alert('Failed to complete task' + (result.data && result.data.error ? ': ' + result.data.error : '.'));
+        return;
+      }
+      await loadTodoDaily();
+      if (todoSubTab === 'manage' || todoAllTasks.length) await loadTodoManage();
+    }
+
+    // --- MANAGE SUB-VIEW ---
+    async function loadTodoManage() {
+      const result = await todoApiFetch('/api/todo/tasks');
+      if (!result.ok) {
+        todoAllTasks = [];
+        todoMarkUnavailable(true);
+      } else {
+        todoAllTasks = Array.isArray(result.data) ? result.data : [];
+        todoMarkUnavailable(false);
+      }
+      renderTodoManage();
+    }
+
+    async function loadTodoProjects() {
+      const result = await todoApiFetch('/api/todo/projects');
+      todoProjects = result.ok && Array.isArray(result.data) ? result.data : [];
+      const datalist = document.getElementById('todo-project-list');
+      if (datalist) datalist.innerHTML = todoProjects.map(p => `<option value="${escapeHtml(p)}"></option>`).join('');
+      const filterSelect = document.getElementById('todo-manage-project-filter');
+      if (filterSelect) {
+        const prev = filterSelect.value || 'all';
+        filterSelect.innerHTML = `<option value="all">All projects</option>` +
+          todoProjects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+        filterSelect.value = todoProjects.includes(prev) ? prev : 'all';
+      }
+    }
+
+    function filterTodoManageType(type) {
+      todoManageTypeFilter = type;
+      document.querySelectorAll('.todo-manage-type-filter-btn').forEach(b => {
+        b.className = b.dataset.filter === type
+          ? 'todo-manage-type-filter-btn px-3.5 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold shadow'
+          : 'todo-manage-type-filter-btn px-3.5 py-1.5 rounded-lg text-gray-400 hover:text-white';
+      });
+      renderTodoManage();
+    }
+
+    function filterTodoManageProject(project) {
+      todoManageProjectFilter = project;
+      renderTodoManage();
+    }
+
+    function renderTodoManage() {
+      const container = document.getElementById('todo-manage-container');
+      if (!container) return;
+
+      if (todoApiUnavailable) {
+        container.innerHTML = '';
+        return;
+      }
+
+      let filtered = todoAllTasks;
+      if (todoManageTypeFilter !== 'all') filtered = filtered.filter(t => t.type === todoManageTypeFilter);
+      if (todoManageProjectFilter !== 'all') filtered = filtered.filter(t => t.project === todoManageProjectFilter);
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="bg-dark-card border border-dark-border rounded-2xl p-10 text-center text-gray-500 text-xs space-y-2">
+            <i class="fa-regular fa-clipboard text-3xl text-gray-600"></i>
+            <p>No tasks found matching current filters.</p>
+          </div>`;
+        return;
+      }
+
+      // sameDay=false everywhere here — Manage is a flat catalog, not a
+      // day-relative view, so full dates always render.
+      container.innerHTML = filtered.map(t => todoRowHtml(t, false)).join('');
+    }
+
+    async function deleteTodoTask(id) {
+      if (!confirm('Delete this task? This cannot be undone from here.')) return;
+      const result = await todoApiFetch(`/api/todo/tasks/${id}`, { method: 'DELETE' });
+      if (!result.ok) {
+        alert('Failed to delete task.');
+        return;
+      }
+      await loadTodoManage();
+      await loadTodoDaily();
+    }
+
+    // --- ADD/EDIT MODAL ---
+    function todayISO() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    // Native <input type=time> (24h "HH:MM") -> the opaque "H:MMam"/"H:MMpm"
+    // string the engine's parse_date requires (spec §3.1: lowercase meridiem,
+    // no space, no leading zero on the hour). Using a picker instead of free
+    // text means this format is guaranteed correct by construction — the exact
+    // fragility the contract warns a free-text box would hit.
+    function todoTimeInputToOpaque(hhmm) {
+      if (!hhmm) return '';
+      const [hStr, mStr] = hhmm.split(':');
+      let h = parseInt(hStr, 10);
+      const mer = h >= 12 ? 'pm' : 'am';
+      let h12 = h % 12;
+      if (h12 === 0) h12 = 12;
+      return `${h12}:${mStr}${mer}`;
+    }
+
+    // Reverse, for pre-filling the time picker in edit mode. Returns '' on
+    // anything that doesn't match the strict format rather than guessing —
+    // an opaque string from elsewhere (or a malformed one) just leaves the
+    // picker blank instead of showing something wrong.
+    function todoOpaqueTimeToInput(opaque) {
+      if (!opaque) return '';
+      const m = /^(\d{1,2}):(\d{2})(am|pm)$/.exec(String(opaque).trim());
+      if (!m) return '';
+      let h = parseInt(m[1], 10) % 12;
+      if (m[3] === 'pm') h += 12;
+      return `${String(h).padStart(2, '0')}:${m[2]}`;
+    }
+
+    function todoOrdinal(n) {
+      const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    }
+
+    function populateTodoMonthDayOptions() {
+      const sel = document.getElementById('todo-freq-monthday');
+      if (!sel || sel.options.length) return; // populate once
+      sel.innerHTML = Array.from({ length: 31 }, (_, i) => i + 1)
+        .map(n => `<option value="${n}">${todoOrdinal(n)}</option>`).join('');
+    }
+
+    // Builds the exact-match, case-sensitive frequency string the engine
+    // requires (contract §1 / spec §2.2) from the picker's selections — this
+    // is what stands in for the free-text box the contract says to avoid.
+    function todoBuildFrequencyString() {
+      const ft = document.getElementById('todo-freq-type').value;
+      const day = document.getElementById('todo-freq-day').value;
+      const monthDay = document.getElementById('todo-freq-monthday').value;
+      switch (ft) {
+        case 'Daily': return 'Daily';
+        case 'Weekdays': return 'Weekdays';
+        case 'Weekly': return `Weekly (${day})`;
+        case 'Every2Weeks': return `Every 2 Weeks (${day})`;
+        case 'Monthly': return `Monthly (${todoOrdinal(parseInt(monthDay, 10))})`;
+        case 'Yearly': return 'Yearly';
+        default: return '';
+      }
+    }
+
+    // Reverse of the above, for pre-filling the picker in edit mode. Returns
+    // null when the stored string doesn't match any known pattern — the
+    // "flagged" case (spec §2.2's fragility list: bad case/spacing, bare
+    // Weekly/Monthly, etc.) — and the modal shows a warning instead of
+    // guessing a picker state that would silently change the task's schedule.
+    function todoParseFrequencyIntoPicker(freq) {
+      if (freq === 'Daily') return { type: 'Daily' };
+      if (freq === 'Weekdays') return { type: 'Weekdays' };
+      if (freq === 'Yearly') return { type: 'Yearly' };
+      let m = /^Weekly \((Sun|Mon|Tue|Wed|Thu|Fri|Sat)\)$/.exec(freq || '');
+      if (m) return { type: 'Weekly', day: m[1] };
+      m = /^Every 2 Weeks \((Sun|Mon|Tue|Wed|Thu|Fri|Sat)\)$/.exec(freq || '');
+      if (m) return { type: 'Every2Weeks', day: m[1] };
+      m = /^Monthly \((\d{1,2})(?:st|nd|rd|th)\)$/.exec(freq || '');
+      if (m) return { type: 'Monthly', monthDay: m[1] };
+      return null;
+    }
+
+    function updateTodoTypeVisibility() {
+      const type = document.getElementById('todo-type').value;
+      document.getElementById('todo-recurring-fields').classList.toggle('hidden', type !== 'recurring');
+      document.getElementById('todo-scheduled-fields').classList.toggle('hidden', type !== 'scheduled');
+      document.getElementById('todo-backlog-fields').classList.toggle('hidden', type !== 'backlog');
+      document.getElementById('todo-name').required = true;
+      document.getElementById('todo-nextdue').required = (type === 'recurring');
+    }
+
+    function updateTodoFreqVisibility() {
+      const ft = document.getElementById('todo-freq-type').value;
+      document.getElementById('todo-freq-day-wrap').classList.toggle('hidden', ft !== 'Weekly' && ft !== 'Every2Weeks');
+      document.getElementById('todo-freq-monthday-wrap').classList.toggle('hidden', ft !== 'Monthly');
+      if (ft === 'Monthly') populateTodoMonthDayOptions();
+    }
+
+    function todoFormError(msg) {
+      const el = document.getElementById('todo-form-error');
+      if (!el) return;
+      if (!msg) { el.classList.add('hidden'); el.textContent = ''; return; }
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    function openAddTodoModal() {
+      todoEditingId = null;
+      document.getElementById('todo-modal-title').innerHTML = '<i class="fa-solid fa-calendar-check text-indigo-400"></i> New TODO Task';
+      document.getElementById('add-todo-form').reset();
+      todoFormError(null);
+      document.getElementById('todo-flagged-warning').classList.add('hidden');
+      document.getElementById('todo-type').value = 'recurring';
+      document.getElementById('todo-freq-type').value = 'Daily';
+      updateTodoTypeVisibility();
+      updateTodoFreqVisibility();
+      document.getElementById('todo-nextdue').value = todayISO();
+      document.getElementById('todo-scheduled-duedate').value = todayISO();
+      document.getElementById('add-todo-modal').classList.remove('hidden');
+    }
+
+    function closeAddTodoModal() {
+      document.getElementById('add-todo-modal').classList.add('hidden');
+      todoEditingId = null;
+    }
+
+    function openEditTodoModal(id) {
+      const t = todoAllTasks.find(x => x.id === id) ||
+        (todoView && [...(todoView.pastDue || []), ...(todoView.today || []), ...(todoView.upcoming || [])].find(x => x.id === id));
+      if (!t) { alert('Task not found — try refreshing.'); return; }
+
+      todoEditingId = id;
+      document.getElementById('todo-modal-title').innerHTML = '<i class="fa-solid fa-calendar-check text-indigo-400"></i> Edit TODO Task';
+      document.getElementById('add-todo-form').reset();
+      todoFormError(null);
+
+      document.getElementById('todo-name').value = t.name || '';
+      document.getElementById('todo-project').value = t.project || '';
+      document.getElementById('todo-priority').value = t.priority || 'Medium';
+      document.getElementById('todo-notes').value = t.notes || '';
+      document.getElementById('todo-type').value = t.type || 'recurring';
+      updateTodoTypeVisibility();
+
+      document.getElementById('todo-flagged-warning').classList.add('hidden');
+      if (t.type === 'recurring') {
+        const parsed = todoParseFrequencyIntoPicker(t.frequency);
+        if (parsed) {
+          document.getElementById('todo-freq-type').value = parsed.type;
+          if (parsed.day) document.getElementById('todo-freq-day').value = parsed.day;
+          if (parsed.type === 'Monthly') {
+            populateTodoMonthDayOptions();
+            document.getElementById('todo-freq-monthday').value = parsed.monthDay;
+          }
+        } else {
+          document.getElementById('todo-flagged-warning').classList.remove('hidden');
+          document.getElementById('todo-flagged-raw').textContent = t.frequency || '(empty)';
+          document.getElementById('todo-freq-type').value = 'Daily';
+        }
+        updateTodoFreqVisibility();
+        document.getElementById('todo-skippable').checked = !!t.skippable;
+        document.getElementById('todo-nextdue').value = t.nextDue || '';
+        document.getElementById('todo-duetime').value = todoOpaqueTimeToInput(t.dueTime);
+        document.getElementById('todo-enddate').value = t.endDate || '';
+      } else if (t.type === 'scheduled') {
+        document.getElementById('todo-scheduled-duedate').value = t.dueDate || t.nextDue || '';
+        document.getElementById('todo-scheduled-duetime').value = todoOpaqueTimeToInput(t.dueTime);
+      } else if (t.type === 'backlog') {
+        document.getElementById('todo-backlog-added').value = t.added || '';
+      }
+
+      document.getElementById('add-todo-modal').classList.remove('hidden');
+    }
+
+    async function submitTodoTask(e) {
+      e.preventDefault();
+      todoFormError(null);
+
+      const type = document.getElementById('todo-type').value;
+      const payload = {
+        name: document.getElementById('todo-name').value.trim(),
+        project: document.getElementById('todo-project').value.trim(),
+        priority: document.getElementById('todo-priority').value,
+        type,
+        notes: document.getElementById('todo-notes').value.trim()
+      };
+
+      // Per-type fields. The contract's JSON example (§2) shows only a
+      // recurring row, so the scheduled/backlog date-field mapping below is
+      // inferred from the Python spec's per-type columns (§1.2: Recurring ->
+      // Next Due, Scheduled -> Due Date, Backlog -> Added) — flagged as a
+      // discrepancy in the log/summary since the contract doesn't pin it down
+      // explicitly and a mismatch here would silently break create/edit.
+      if (type === 'recurring') {
+        payload.frequency = todoBuildFrequencyString();
+        payload.skippable = document.getElementById('todo-skippable').checked;
+        payload.nextDue = document.getElementById('todo-nextdue').value;
+        payload.dueTime = todoTimeInputToOpaque(document.getElementById('todo-duetime').value);
+        payload.endDate = document.getElementById('todo-enddate').value || null;
+      } else if (type === 'scheduled') {
+        payload.dueDate = document.getElementById('todo-scheduled-duedate').value;
+        payload.dueTime = todoTimeInputToOpaque(document.getElementById('todo-scheduled-duetime').value);
+      } else if (type === 'backlog') {
+        payload.added = document.getElementById('todo-backlog-added').value || todayISO();
+      }
+
+      const url = todoEditingId ? `/api/todo/tasks/${todoEditingId}` : '/api/todo/tasks';
+      const method = todoEditingId ? 'PATCH' : 'POST';
+      const result = await todoApiFetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!result.ok) {
+        // Contract §1.3: validate-on-write, reject with a clear 400 — surface
+        // that message rather than a generic failure.
+        todoFormError((result.data && result.data.error) || `Failed to save task (HTTP ${result.status || 0}).`);
+        return;
+      }
+
+      closeAddTodoModal();
+      await loadTodoManage();
+      await loadTodoDaily();
+    }
+
+    // --- 2. AUTOMATION & SCRIPT RUNNER ---
+    async function loadScripts() {
+      try {
+        const res = await fetch('/api/scripts');
+        const scripts = await res.json();
+        const grid = document.getElementById('scripts-grid');
+        grid.innerHTML = scripts.map(s => `
+          <div class="bg-dark-card border border-dark-border rounded-2xl p-4 space-y-3 hover:border-gray-700 transition-all flex flex-col justify-between shadow-sm">
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-950/90 text-indigo-400 border border-indigo-800/80">${s.category}</span>
+                <span class="text-[10px] text-gray-500 font-mono">${s.runtime || 'system'}</span>
+              </div>
+              <h3 class="text-sm font-bold text-white mb-1">${s.name}</h3>
+              <p class="text-xs text-gray-400 leading-relaxed">${s.description}</p>
+            </div>
+
+            <button onclick="runScript('${s.id}', '${s.name}')" class="w-full bg-dark-bg hover:bg-indigo-600 border border-dark-border hover:border-indigo-500 text-white text-xs font-semibold py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm">
+              <i class="fa-solid fa-play text-[10px]"></i> Run Script Now
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        console.error('Failed to load scripts', err);
+      }
+    }
+
+    async function runScript(id, name) {
+      const consoleOutput = document.getElementById('console-output');
+      const consoleTitle = document.getElementById('console-title');
+      const indicator = document.getElementById('console-indicator');
+
+      consoleTitle.innerText = `Executing: ${name}...`;
+      indicator.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping';
+      consoleOutput.innerText = `[Initiating ${name} on remote Ubuntu VPS...]\n[Time: ${new Date().toLocaleTimeString()}]\n\n`;
+
+      try {
+        const res = await fetch('/api/scripts/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        const result = await res.json();
+        indicator.className = result.success ? 'w-2.5 h-2.5 rounded-full bg-emerald-400' : 'w-2.5 h-2.5 rounded-full bg-rose-500';
+        consoleTitle.innerText = `Finished: ${name} (${result.durationMs || 0}ms)`;
+
+        let out = `[Exit Status: ${result.success ? 'SUCCESS (Exit Code 0)' : 'FAILED'}]\n`;
+        out += `[Duration: ${result.durationMs || 0}ms]\n\n`;
+        if (result.stdout) out += `=== STDOUT OUTPUT ===\n${result.stdout}\n`;
+        if (result.stderr) out += `=== STDERR OUTPUT ===\n${result.stderr}\n`;
+        consoleOutput.innerText = out;
+      } catch (err) {
+        indicator.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+        consoleOutput.innerText += `\nError executing script: ${err.message}`;
+      }
+    }
+
+    function clearConsole() {
+      document.getElementById('console-output').innerText = 'Console cleared.';
+      document.getElementById('console-title').innerText = 'Live Execution Output Console';
+      document.getElementById('console-indicator').className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
+    }
+
+    function copyConsoleOutput() {
+      const text = document.getElementById('console-output').innerText;
+      navigator.clipboard.writeText(text);
+    }
+
+    // --- 3. INTERACTIVE TERMINAL CONSOLE ---
+    async function execTerminalCommand(e) {
+      if (e) e.preventDefault();
+      const input = document.getElementById('term-input');
+      const cmd = input.value.trim();
+      if (!cmd) return;
+
+      const out = document.getElementById('term-output');
+      const label = document.getElementById('term-status-label');
+      label.innerText = `Executing: ${cmd}...`;
+      out.innerText += `\n$ ${cmd}\n`;
+
+      try {
+        const res = await fetch('/api/terminal/exec', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: cmd })
+        });
+        const result = await res.json();
+        label.innerText = `Completed (Exit: ${result.exitCode}, ${result.durationMs}ms)`;
+        if (result.stdout) out.innerText += result.stdout;
+        if (result.stderr) out.innerText += `\n[STDERR] ${result.stderr}`;
+        out.scrollTop = out.scrollHeight;
+        input.value = '';
+      } catch (err) {
+        label.innerText = `Execution Error`;
+        out.innerText += `\n[Error] ${err.message}\n`;
+      }
+    }
+
+    function runQuickCommand(cmd) {
+      document.getElementById('term-input').value = cmd;
+      execTerminalCommand();
+    }
+
+    function clearTerminalOutput() {
+      document.getElementById('term-output').innerText = 'Console cleared.';
+      document.getElementById('term-status-label').innerText = 'Terminal Output (CWD: /home/ubuntu)';
+    }
+
+    // --- 4. HARDWARE TELEMETRY ---
+    async function refreshTelemetry() {
+      try {
+        const res = await fetch('/api/system');
+        const sys = await res.json();
+
+        // Cards
+        document.getElementById('stat-ram-val').innerText = `${sys.memory.usedGB} GB`;
+        document.getElementById('stat-ram-bar').style.width = `${sys.memory.percent}%`;
+        document.getElementById('stat-ram-sub').innerText = `Used: ${sys.memory.percent}% of ${sys.memory.totalGB}GB`;
+
+        document.getElementById('stat-cpu-val').innerText = `${sys.cpu.load1m}`;
+        const cpuPercent = Math.min(100, Math.round((parseFloat(sys.cpu.load1m) / sys.cpu.cores) * 100));
+        document.getElementById('stat-cpu-bar').style.width = `${cpuPercent}%`;
+        document.getElementById('stat-cpu-sub').innerText = `5m: ${sys.cpu.load5m} | 15m: ${sys.cpu.load15m}`;
+
+        document.getElementById('stat-disk-val').innerText = `${sys.disk.usedGB} GB`;
+        document.getElementById('stat-disk-bar').style.width = sys.disk.percent;
+        document.getElementById('stat-disk-sub').innerText = `${sys.disk.freeGB}GB Free (${sys.disk.percent})`;
+
+        document.getElementById('stat-uptime-val').innerText = sys.uptimeFormatted;
+        
+        const homeCpu = document.getElementById('home-stat-cpu');
+        if (homeCpu) homeCpu.innerText = `${sys.cpu.load1m}`;
+        const homeJobs = document.getElementById('home-stat-jobs');
+        if (homeJobs) homeJobs.innerText = sys.tmux ? sys.tmux.length.toString() : '0';
+      } catch (err) {
+        console.error('Failed to fetch telemetry', err);
+      }
+    }
+
+    // --- 5. INTERACTIVE AGENT CHAT & SESSIONS ---
+    const roleIcons = {
+      debugger: '<i class="fa-solid fa-wrench"></i>',
+      query: '<i class="fa-solid fa-magnifying-glass"></i>',
+      automator: '<i class="fa-solid fa-bolt"></i>',
+      architect: '<i class="fa-solid fa-compass-drafting"></i>'
+    };
+
+    const roleDescs = {
+      debugger: 'Full Read/Write & Bash Execution Access',
+      query: 'Safe Read-Only System Queries',
+      automator: 'Automation Scripter & Data Pipelines',
+      architect: 'System Planning & Architectural Analysis'
+    };
+
+    async function loadAgentSessions() {
+      try {
+        const res = await fetch('/api/agent/sessions');
+        agentSessions = await res.json();
+        renderSessionsList();      } catch (err) {
+        console.error('Failed to load agent sessions', err);
+      }
+    }
+
+    function renderSessionsList() {
+      const container = document.getElementById('agent-sessions-list');
+      if (agentSessions.length === 0) {
+        container.innerHTML = `<div class="text-gray-500 text-xs py-4 text-center">No active agent sessions.</div>`;
+        return;
+      }
+
+      container.innerHTML = agentSessions.map(s => {
+        const isActive = s.id === activeSessionId;
+        const icon = roleIcons[s.role] || '<i class="fa-solid fa-robot"></i>';
+        const modelInfo = getModelInfo(s.model);
+
+        return `
+          <div onclick="selectSession('${s.id}')" class="group cursor-pointer p-3 rounded-xl border transition-all flex items-center justify-between ${isActive ? 'bg-purple-950/40 border-purple-500 shadow-sm' : 'bg-dark-bg border-dark-border hover:border-gray-700'}">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-7 h-7 rounded-lg ${isActive ? 'bg-purple-600 text-white' : 'bg-dark-card text-purple-400'} flex items-center justify-center text-xs flex-shrink-0">
+                ${icon}
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-bold ${isActive ? 'text-white' : 'text-gray-300'} truncate">${escapeHtml(s.name)}</h4>
+                <p class="text-[10px] text-gray-500 truncate">${s.role} • ${escapeHtml(modelInfo.label)}</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="event.stopPropagation(); deleteAgentSession('${s.id}')" class="text-gray-600 hover:text-rose-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <i class="fa-solid fa-trash-can text-xs"></i>
+              </button>
+              <div class="w-2 h-2 rounded-full ${isActive ? 'bg-purple-400 animate-pulse' : 'bg-gray-600'}"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+    function selectSession(id) {
+      activeSessionId = id;
+      
+      const leftPane = document.getElementById('agent-left-pane');
+      const rightPane = document.getElementById('agent-right-pane');
+      
+      if (!id) {
+        if (leftPane) leftPane.className = 'lg:col-span-12 bg-dark-card border border-dark-border rounded-2xl p-4 space-y-3.5 shadow-md transition-all';
+        if (rightPane) rightPane.classList.add('hidden');
+        renderSessionsList();
+        return;
+      }
+      
+      if (leftPane) leftPane.className = 'hidden lg:block lg:col-span-4 bg-dark-card border border-dark-border rounded-2xl p-4 space-y-3.5 shadow-md transition-all';
+      if (rightPane) rightPane.className = 'lg:col-span-8 bg-dark-card border border-dark-border rounded-2xl flex flex-col h-[650px] shadow-lg overflow-hidden transition-all';
+
+      renderSessionsList();      const session = agentSessions.find(s => s.id === id);
+      if (!session) return;
+
+      document.getElementById('active-agent-name').innerText = session.name;
+      document.getElementById('active-agent-icon').innerHTML = roleIcons[session.role] || '<i class="fa-solid fa-robot"></i>';
+      document.getElementById('active-agent-role-desc').innerText = roleDescs[session.role] || 'Autonomous Assistant';
+
+      const modelInfo = getModelInfo(session.model);
+      const badgeIcon = modelInfo.engine === 'claude' ? 'fa-brain text-amber-400' : 'fa-bolt';
+      document.getElementById('active-agent-model-badge').innerHTML =
+        `<i class="fa-solid ${badgeIcon} text-[9px]"></i> ${escapeHtml(modelInfo.label)}`;
+
+      renderChatMessages(session.messages);
+      // Rebase the async-chat change detector onto the session now on screen.
+      // Without this it still holds the PREVIOUS session's signature, so the
+      // next poll either redraws needlessly or (on a coincidental match) skips
+      // a real message.
+      lastMessagesSignature = messagesSignature(session.messages);
+
+      // §5 reconnect: if a poll for this session is already tracked in this
+      // page's JS state (tab-switch, not reload), just redraw it; otherwise
+      // ask the server whether one is running (covers a fresh page load).
+      if (jobPolls[id]) {
+        renderJobProgress(id, jobPolls[id].lastJob);
+      } else {
+        checkForRunningJob(id);
+      }
+    }
+
+    // Shared by the finished-message list and the live progress bubble so the
+    // two look identical as a job's tool calls finish and slide into history.
+    function renderToolExecutionsHtml(toolExecutions) {
+      if (!toolExecutions || toolExecutions.length === 0) return '';
+      return toolExecutions.map((t) => `
+        <details class="mt-2 bg-black/80 border border-dark-border rounded-xl text-[11px] font-mono overflow-hidden">
+          <summary class="cursor-pointer px-3 py-1.5 text-purple-300 font-semibold flex items-center justify-between hover:bg-dark-accent/30 select-none">
+            <span class="flex items-center gap-1.5">
+              <i class="fa-solid fa-terminal text-cyan-400"></i> Tool: ${escapeHtml(t.name)} ${t.args && t.args.command ? `(\`${escapeHtml(t.args.command)}\`)` : ''}
+            </span>
+            <span class="text-[10px] text-gray-500">Details & Output</span>
+          </summary>
+          <div class="p-3 border-t border-dark-border text-gray-300 bg-black whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto custom-scrollbar">
+${escapeHtml(JSON.stringify(t.result, null, 2))}
+          </div>
+        </details>
+      `).join('');
+    }
+
+    function renderChatMessages(messages) {
+      const container = document.getElementById('chat-messages-container');
+      if (!messages || messages.length === 0) {
+        container.innerHTML = `<div class="text-center py-20 text-gray-500 text-xs">No messages yet. Ask the agent anything!</div>`;
+        return;
+      }
+
+      container.innerHTML = messages.map(m => {
+        const isUser = m.role === 'user';
+        const toolHtml = renderToolExecutionsHtml(m.toolExecutions);
+        // Async chat: a message the agent pushed on its own initiative rather
+        // than as the answer to a prompt. Badged, because otherwise it reads as
+        // a reply to whatever happens to sit above it.
+        const asyncBadge = m.async ? `
+                <div class="flex items-center gap-1.5 text-[10px] text-cyan-400 font-semibold">
+                  <i class="fa-solid fa-tower-broadcast"></i> Sent on its own
+                </div>` : '';
+
+        // Promote button: when an agent message contains the canonical token, we
+        // strip the token from the displayed text and render a click-to-promote
+        // button. The button is human-clicked — the agent only surfaces it, it
+        // cannot press it. Keep this string in sync with PROMOTE_ACTION_TOKEN in server.js.
+        const PROMOTE_TOKEN = '[ACTION: PROMOTE_STAGING]';
+        // Own-line match ONLY (same rule as containsPromoteToken in server.js
+        // — keep in sync). A message merely *mentioning* the token in prose,
+        // even in backticks, must not render a live deploy button; a bare
+        // .includes() did exactly that on 2026-08-27.
+        const hasPromote = !isUser && typeof m.text === 'string' &&
+          m.text.split('\n').some(l => l.trim() === PROMOTE_TOKEN);
+        const promoteDisplayText = hasPromote
+          ? m.text.split('\n').filter(l => l.trim() !== PROMOTE_TOKEN).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+          : m.text;
+        const promoteBtnHtml = hasPromote ? `
+                <button onclick="triggerPromoteStaging(this)" class="mt-1 inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors shadow-sm">
+                  <i class="fa-solid fa-rocket"></i> Push Staging → Live
+                </button>` : '';
+
+        if (isUser) {
+          return `
+            <div class="flex justify-end">
+              <div class="bg-indigo-600 text-white text-xs rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-lg shadow-sm leading-relaxed">
+                ${escapeHtml(m.text)}
+              </div>
+            </div>
+          `;
+        } else {
+          return `
+            <div class="flex justify-start gap-2.5 items-start">
+              <div class="w-7 h-7 rounded-xl ${m.async ? 'bg-cyan-950 border-cyan-800 text-cyan-300' : 'bg-purple-950 border-purple-800 text-purple-300'} border flex items-center justify-center text-xs flex-shrink-0 mt-0.5">
+                <i class="fa-solid ${m.async ? 'fa-tower-broadcast' : 'fa-robot'}"></i>
+              </div>
+              <div class="bg-dark-card border ${m.async ? 'border-cyan-900' : 'border-dark-border'} text-gray-200 text-xs rounded-2xl rounded-tl-sm px-4 py-3 max-w-xl shadow-sm leading-relaxed space-y-2">
+                ${asyncBadge}
+                <div class="whitespace-pre-wrap leading-relaxed">${escapeHtml(promoteDisplayText)}</div>
+                ${promoteBtnHtml}
+                ${toolHtml}
+              </div>
+            </div>
+          `;
+        }
+      }).join('');
+
+      setTimeout(() => container.scrollTop = container.scrollHeight, 10);
+    }
+
+    async function submitAgentMessage(e) {
+      if (e) e.preventDefault();
+      if (!activeSessionId) return;
+
+      const input = document.getElementById('agent-chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      input.value = '';
+      // Optimistically show the user message only on the initial send —
+      // a switch-and-retry reuses the same prompt and it's already on screen.
+      const session = agentSessions.find(s => s.id === activeSessionId);
+      if (session) {
+        session.messages.push({ role: 'user', text, timestamp: new Date().toISOString() });
+        renderChatMessages(session.messages);
+      }
+
+      await sendAgentTurn(activeSessionId, text);
+    }
+
+    // Shared by the normal send path and the "switch model & retry" action in
+    // the exhaustion popup. overrideModel/persistModel map straight onto the
+    // optional POST /chat fields from the contract (§2) — both absent means
+    // today's behavior exactly.
+    //
+    // Contract §3: POST /chat now returns 202 + { jobId, status: "running" }
+    // immediately, or 409 + the already-running job's id if one exists for
+    // this session. Either way we attach to the job and start polling.
+    // §4 backward-compat / degrade-gracefully: an old-style synchronous 200
+    // body (data.session, no jobId) is still handled directly, in case the
+    // two halves of this change ever land out of order.
+    async function triggerPromoteStaging(btn) {
+      // Cosmetic heads-up: how many staged tickets this deploy will auto-close.
+      // Best-effort — a fetch failure must never block the promote itself.
+      let stagedNote = '';
+      try {
+        const items = await (await fetch('/api/feedback?status=in-progress')).json();
+        const n = (Array.isArray(items) ? items : []).filter(i => i.stagedAt).length;
+        if (n) stagedNote = ` ${n} staged feedback ticket${n === 1 ? '' : 's'} will be auto-closed.`;
+      } catch (e) { /* count unavailable — proceed without it */ }
+      if (!confirm("Are you sure you want to push Staging to Live? This will restart the dashboard." + stagedNote)) return;
+      
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Promoting...';
+      
+      try {
+        // X-Promote-Confirm marks this as a genuine button click (see the
+        // endpoint's security note in server.js). Same-origin fetch sends the
+        // session cookie automatically.
+        const res = await fetch('/api/staging/promote', {
+          method: 'POST',
+          headers: { 'X-Promote-Confirm': '1' }
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(()=>({}));
+          throw new Error(err.error || 'Promotion API failed');
+        }
+        btn.classList.replace('bg-emerald-600', 'bg-gray-600');
+        btn.classList.replace('hover:bg-emerald-500', 'hover:bg-gray-500');
+        btn.classList.replace('border-emerald-500', 'border-gray-500');
+        btn.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> Promotion started — restarting…';
+      } catch (e) {
+        alert(e.message);
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        btn.innerHTML = originalHtml;
+      }
+    }
+
+    async function sendAgentTurn(sessionId, text, overrideModel, persistModel) {
+      const session = agentSessions.find(s => s.id === sessionId);
+
+      // Placeholder shown only until we know whether this is a job (202/409)
+      // or an old-style synchronous reply — startJobPolling() replaces it.
+      const container = document.getElementById('chat-messages-container');
+      if (sessionId === activeSessionId) {
+        const thinkingBubble = document.createElement('div');
+        thinkingBubble.id = 'thinking-indicator';
+        thinkingBubble.className = 'flex justify-start gap-2.5 items-start';
+        thinkingBubble.innerHTML = `
+          <div class="w-7 h-7 rounded-xl bg-purple-950 border border-purple-800 text-purple-300 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 animate-spin">
+            <i class="fa-solid fa-circle-notch"></i>
+          </div>
+          <div class="bg-dark-card border border-dark-border text-purple-300 text-xs rounded-2xl px-4 py-2.5 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+            <span>Starting…</span>
+          </div>
+        `;
+        container.appendChild(thinkingBubble);
+        setTimeout(() => container.scrollTop = container.scrollHeight, 10);
+      }
+
+      const body = { prompt: text };
+      if (overrideModel) body.model = overrideModel;
+      if (persistModel) body.persistModel = true;
+
+      try {
+        const res = await fetch(`/api/agent/sessions/${sessionId}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+
+        const tb = document.getElementById('thinking-indicator');
+        if (tb) tb.remove();
+
+        // Async job path — covers both 202 (new job) and 409 (one was
+        // already running for this session; attach rather than error).
+        if (data && data.jobId) {
+          if (overrideModel && persistModel) {
+            // The model-switch retry still needs to stick even though the
+            // turn itself is now async — apply it optimistically; the
+            // eventual session refresh will confirm it from the server.
+            if (session) session.model = overrideModel;
+            renderSessionsList();
+          }
+          startJobPolling(sessionId, data.jobId, data);
+          return;
+        }
+
+        // Fallback: old-style synchronous 200 body.
+        if (session && data.session) {
+          session.messages = data.session.messages;
+          renderChatMessages(session.messages);
+          if (overrideModel && persistModel) {
+            session.model = overrideModel;
+            renderSessionsList();
+            if (sessionId === activeSessionId) selectSession(activeSessionId);
+          }
+        }
+
+        // If the model errored (e.g. Gemini quota / expired token), offer to queue the prompt.
+        if (data.error && data.errorInfo && data.errorInfo.canQueue) {
+          openQueueModal(sessionId, text, data.errorInfo);
+        }
+      } catch (err) {
+        const tb = document.getElementById('thinking-indicator');
+        if (tb) tb.remove();
+        // Network / server failure — still let the user queue the prompt for later.
+        // Not a model-recoverable error, so no model picker (contract §3: recoverable: false).
+        openQueueModal(sessionId, text, { message: 'Could not reach the server: ' + err.message, recoverable: false });
+      }
+    }
+
+    // --- Async job polling (contract §5) ---
+
+    function formatElapsed(ms) {
+      const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    // On loading a session, ask the server whether it has a job in flight —
+    // this is the reconnect payoff: close the phone, come back, still there.
+    async function checkForRunningJob(sessionId) {
+      try {
+        const res = await fetch(`/api/agent/sessions/${sessionId}/job`);
+        if (res.status === 404) return;
+        const job = await res.json();
+        if (job && job.status === 'running') {
+          startJobPolling(sessionId, job.id, job);
+        }
+      } catch (err) {
+        console.error('Failed to check for a running job', err);
+      }
+    }
+
+    function startJobPolling(sessionId, jobId, initialJob) {
+      if (jobPolls[sessionId] && jobPolls[sessionId].timer) {
+        clearTimeout(jobPolls[sessionId].timer);
+      }
+      jobPolls[sessionId] = {
+        jobId,
+        timer: null,
+        startTime: Date.now(),
+        lastJob: (initialJob && initialJob.id) ? initialJob : null,
+        cancelling: false
+      };
+      if (sessionId === activeSessionId) renderJobProgress(sessionId, jobPolls[sessionId].lastJob);
+      pollJobOnce(sessionId, jobId);
+    }
+
+    async function pollJobOnce(sessionId, jobId) {
+      const poll = jobPolls[sessionId];
+      if (!poll || poll.jobId !== jobId) return; // superseded or cancelled out from under us
+
+      try {
+        const res = await fetch(`/api/agent/jobs/${jobId}`);
+        if (res.status === 404) {
+          // In-memory registry lost the job (e.g. server restart). Don't spin forever.
+          delete jobPolls[sessionId];
+          if (sessionId === activeSessionId) {
+            const bubble = document.getElementById('job-progress-bubble');
+            if (bubble) bubble.remove();
+          }
+          await refreshSessionMessages(sessionId);
+          return;
+        }
+        const job = await res.json();
+        poll.lastJob = job;
+
+        if (job.status === 'running') {
+          if (sessionId === activeSessionId) renderJobProgress(sessionId, job);
+          // §5: poll every 2s, backing off to 5s after 60s.
+          const elapsed = Date.now() - poll.startTime;
+          const delay = elapsed > 60000 ? 5000 : 2000;
+          poll.timer = setTimeout(() => pollJobOnce(sessionId, jobId), delay);
+        } else {
+          await finalizeJob(sessionId, job);
+        }
+      } catch (err) {
+        console.error('Job poll failed, retrying', err);
+        poll.timer = setTimeout(() => pollJobOnce(sessionId, jobId), 5000);
+      }
+    }
+
+    // Cancel is honest: mark cancelling, then show the cancelled message —
+    // never pretend nothing ran. A cancelled job is not an error and must
+    // never open the quota/overload/timeout modal.
+    async function cancelJob(sessionId, jobId) {
+      if (!jobId) return;
+      const poll = jobPolls[sessionId];
+      if (poll) {
+        poll.cancelling = true;
+        if (poll.timer) clearTimeout(poll.timer);
+      }
+      if (sessionId === activeSessionId) renderJobProgress(sessionId, poll ? poll.lastJob : null);
+
+      try {
+        const res = await fetch(`/api/agent/jobs/${jobId}`, { method: 'DELETE' });
+        const job = await res.json();
+        await finalizeJob(sessionId, job);
+      } catch (err) {
+        console.error('Cancel request failed', err);
+        // Don't strand the UI in "Cancelling…" forever — resume polling.
+        if (jobPolls[sessionId]) {
+          jobPolls[sessionId].cancelling = false;
+          pollJobOnce(sessionId, jobId);
+        }
+      }
+    }
+
+    // Terminal state (done/error/cancelled): drop the progress bubble, pull
+    // the real session messages (contract §3: the agent message — cancelled
+    // or not — is appended to the session exactly like a synchronous turn),
+    // and offer the queue modal only for a genuine, recoverable error.
+    async function finalizeJob(sessionId, job) {
+      const poll = jobPolls[sessionId];
+      if (poll && poll.timer) clearTimeout(poll.timer);
+      delete jobPolls[sessionId];
+
+      if (sessionId === activeSessionId) {
+        const bubble = document.getElementById('job-progress-bubble');
+        if (bubble) bubble.remove();
+      }
+
+      await refreshSessionMessages(sessionId);
+
+      if (job && job.status === 'error' && job.errorInfo && job.errorInfo.canQueue) {
+        if (sessionId === activeSessionId) {
+          openQueueModal(sessionId, job.prompt, job.errorInfo);
+        }
+      }
+    }
+
+    // Re-pulls the session list so the finished/cancelled agent message
+    // (with any toolExecutions) renders exactly as a synchronous turn would.
+    async function refreshSessionMessages(sessionId) {
+      try {
+        const res = await fetch('/api/agent/sessions');
+        const sessions = await res.json();
+        agentSessions = sessions;
+        renderSessionsList();
+        const session = agentSessions.find(s => s.id === sessionId);
+        if (session && sessionId === activeSessionId) {
+          renderChatMessages(session.messages);
+          // Keep the async poller in sync so it doesn't immediately redraw what
+          // was just drawn here.
+          lastMessagesSignature = messagesSignature(session.messages);
+        }
+        return session;
+      } catch (err) {
+        console.error('Failed to refresh session messages', err);
+        return null;
+      }
+    }
+
+    // --- Async chat poller (added 2026-08-26) ---------------------------------
+    // Messages can now arrive in a session with no prompt behind them (the
+    // agent's send_message tool, the scheduled-prompt queue, any server-side
+    // process). Nothing used to watch for that: the chat was only ever redrawn
+    // when a job the user started finished, so an unprompted message sat
+    // invisible in the store until the page was reloaded.
+    //
+    // This deliberately runs DURING a job as well as when idle — reporting
+    // progress mid-task is the main thing async chat is for, and gating it on
+    // idle would hide exactly the messages that matter most.
+    let lastMessagesSignature = '';
+
+    // Cheap change detector. Re-rendering unconditionally every few seconds
+    // would yank the scroll position to the bottom while Alex is reading back
+    // through a long chat, and collapse any open tool-output <details>.
+    function messagesSignature(messages) {
+      if (!messages || !messages.length) return '0';
+      const last = messages[messages.length - 1];
+      return `${messages.length}|${last.timestamp || ''}|${(last.text || '').length}`;
+    }
+
+    async function pollForAsyncMessages() {
+      if (!activeSessionId) return;
+      try {
+        const res = await fetch('/api/agent/sessions');
+        if (!res.ok) return;
+        const sessions = await res.json();
+        const session = sessions.find(s => s.id === activeSessionId);
+        if (!session) return;
+
+        const sig = messagesSignature(session.messages);
+        if (sig === lastMessagesSignature) return; // nothing new — leave the DOM alone
+        lastMessagesSignature = sig;
+
+        agentSessions = sessions;
+        renderSessionsList();
+        renderChatMessages(session.messages);
+
+        // renderChatMessages replaces the container's innerHTML, which destroys
+        // the in-flight job bubble. Put it back, or a job would appear to
+        // vanish (and take its Cancel button with it) the moment the agent
+        // posted a progress message.
+        const poll = jobPolls[activeSessionId];
+        if (poll) renderJobProgress(activeSessionId, poll.lastJob);
+      } catch (err) {
+        console.error('Async message poll failed', err);
+      }
+    }
+
+    setInterval(pollForAsyncMessages, 4000);
+
+    // Renders/updates the live progress bubble: elapsed time, tool
+    // executions as they arrive, and Cancel — or "Cancelling…" once fired.
+    function renderJobProgress(sessionId, job) {
+      if (sessionId !== activeSessionId) return;
+      const container = document.getElementById('chat-messages-container');
+      if (!container) return;
+
+      const oldThinking = document.getElementById('thinking-indicator');
+      if (oldThinking) oldThinking.remove();
+
+      const poll = jobPolls[sessionId];
+      const cancelling = !!(poll && poll.cancelling);
+      const jobId = (job && job.id) || (poll && poll.jobId) || '';
+      const elapsedMs = job && job.elapsedMs != null
+        ? job.elapsedMs
+        : (poll ? Date.now() - poll.startTime : 0);
+      const toolExecutions = job && job.toolExecutions ? job.toolExecutions : [];
+      // Live narration from the agent (added 2026-08-26). Tool calls alone read as
+      // machine noise; the agent's own running commentary is what makes a long job
+      // legible instead of looking like a hang.
+      const progress = job && Array.isArray(job.progress) ? job.progress : [];
+
+      let bubble = document.getElementById('job-progress-bubble');
+      if (!bubble) {
+        bubble = document.createElement('div');
+        bubble.id = 'job-progress-bubble';
+        bubble.className = 'flex justify-start gap-2.5 items-start';
+        container.appendChild(bubble);
+      }
+
+      bubble.innerHTML = `
+        <div class="w-7 h-7 rounded-xl bg-purple-950 border border-purple-800 text-purple-300 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 ${cancelling ? '' : 'animate-spin'}">
+          <i class="fa-solid ${cancelling ? 'fa-hourglass-half' : 'fa-circle-notch'}"></i>
+        </div>
+        <div class="bg-dark-card border border-dark-border text-purple-300 text-xs rounded-2xl px-4 py-3 max-w-xl shadow-sm leading-relaxed space-y-2 flex-1">
+          <div class="flex items-center justify-between gap-3">
+            <span class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full ${cancelling ? 'bg-amber-400' : 'bg-purple-400 animate-pulse'}"></span>
+              <span>${cancelling ? 'Cancelling…' : 'Agent is working…'}</span>
+              <span class="text-gray-500 font-mono text-[10px]">${formatElapsed(elapsedMs)}</span>
+            </span>
+            ${cancelling ? '' : `
+            <button onclick="cancelJob('${sessionId}', '${jobId}')" class="px-2.5 py-1 rounded-lg bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 text-[10px] font-semibold transition-colors flex items-center gap-1 flex-shrink-0">
+              <i class="fa-solid fa-stop"></i> Cancel
+            </button>`}
+          </div>
+          ${progress.length ? `
+          <div class="border-t border-dark-border pt-2 mt-1 space-y-1 max-h-40 overflow-y-auto custom-scrollbar">
+            ${progress.slice(-8).map((pg, i, arr) => `
+              <div class="flex items-start gap-2 text-[10px] ${i === arr.length - 1 ? 'text-purple-300' : 'text-gray-500'}">
+                <i class="fa-solid fa-angle-right mt-0.5 flex-shrink-0 opacity-60"></i>
+                <span class="font-mono break-all">${escapeHtml(pg.text || '')}</span>
+              </div>`).join('')}
+          </div>` : ''}
+          ${renderToolExecutionsHtml(toolExecutions)}
+        </div>
+      `;
+
+      setTimeout(() => container.scrollTop = container.scrollHeight, 10);
+    }
+
+    function sendQuickPrompt(promptText) {
+      document.getElementById('agent-chat-input').value = promptText;
+      submitAgentMessage();
+    }
+
+    async function clearCurrentChat() {
+      if (!activeSessionId) return;
+      if (!confirm('Clear message history for this agent session?')) return;
+      const res = await fetch(`/api/agent/sessions/${activeSessionId}/clear`, { method: 'POST' });
+      const updated = await res.json();
+      const session = agentSessions.find(s => s.id === activeSessionId);
+      if (session) session.messages = updated.messages;
+      renderChatMessages(updated.messages);
+    }
+
+    async function deleteAgentSession(id) {
+      if (!confirm('Delete this agent session?')) return;
+      await fetch(`/api/agent/sessions/${id}`, { method: 'DELETE' });
+      if (activeSessionId === id) activeSessionId = null;
+      loadAgentSessions();
+    }
+
+    async function deleteCurrentAgent() {
+      if (!activeSessionId) return;
+      await deleteAgentSession(activeSessionId);
+    }
+
+    function updateNewAgentModelPicker() {
+      const role = document.querySelector('input[name="agent-role"]:checked').value;
+      const requiresWrite = ['debugger', 'automator', 'architect'].includes(role);
+      
+      const availableModels = modelRegistry.map(m => {
+        let unavailable = m.unavailable;
+        let desc = m.description;
+        
+        if (requiresWrite && m.id.includes('-local')) {
+          unavailable = true;
+          desc += ' (Unavailable for ' + role + ' role)';
+        }
+        
+        if (role === 'architect' && !['claude-heavy', 'claude-opus'].includes(m.id)) {
+          unavailable = true;
+          desc = 'Architect role requires Opus or Fable.';
+        }
+        
+        return { ...m, unavailable, description: desc };
+      });
+
+      const selected = availableModels.find(m => m.id === newAgentSelectedModel);
+      if (selected && selected.unavailable) {
+        newAgentSelectedModel = availableModels.find(m => !m.unavailable && m.default)?.id || availableModels.find(m => !m.unavailable)?.id;
+      }
+
+      document.getElementById('new-agent-model-picker').innerHTML =
+        renderModelPickerHTML(availableModels, 'new-agent-model', newAgentSelectedModel);
+    }
+
+    function onRoleChange(radio) {
+      document.querySelectorAll('input[name="agent-role"]').forEach(r => {
+        const parent = r.closest('label');
+        if (r.checked) {
+          parent.classList.remove('border-dark-border', 'bg-dark-bg', 'hover:border-gray-600');
+          parent.classList.add('border-purple-500/80', 'bg-purple-950/20', 'hover:border-purple-400');
+        } else {
+          parent.classList.add('border-dark-border', 'bg-dark-bg', 'hover:border-gray-600');
+          parent.classList.remove('border-purple-500/80', 'bg-purple-950/20', 'hover:border-purple-400');
+        }
+      });
+      updateNewAgentModelPicker();
+    }
+    
+    let pendingAgentPrompt = null;
+    // Feedback lifecycle: carries the ticket id into session creation so the
+    // server can link session ↔ ticket and flip it to in-progress atomically.
+    let pendingAgentFeedbackId = null;
+    function openAgentForFeedback(id) {
+      const item = feedbackItems.find(f => f.id === id);
+      if (!item) return;
+      pendingAgentFeedbackId = id;
+      pendingAgentPrompt = `Please resolve this feedback item (${item.type}):\n\nTitle: ${item.title}\nDescription: ${item.body || 'None'}\n\nThe ticket (${id}) is already marked in-progress and linked to your session. If the fix is a code change: stage and verify it, then end your reply with the promote token per your workflow — the ticket will auto-close when Alex clicks deploy. If no code change is needed, set the ticket to 'done' yourself when you finish.`;
+
+      const el = document.getElementById('new-agent-name');
+      if (el) el.value = 'Fix ' + item.type + ' ' + id.split('-')[1].slice(-4);
+      openNewAgentModal();
+    }
+    
+    function openNewAgentModal() {
+      newAgentSelectedModel = getDefaultModelId();
+      updateNewAgentModelPicker();
+      document.getElementById('new-agent-modal').classList.remove('hidden');
+    }
+
+    function closeNewAgentModal() {
+      document.getElementById('new-agent-modal').classList.add('hidden');
+      document.getElementById('new-agent-form').reset();
+      // Clear pending feedback context on ANY close (submit captures what it
+      // needs first). Without this, cancelling a summon-from-feedback modal
+      // leaked the prompt/ticket into the next manually-created session.
+      pendingAgentPrompt = null;
+      pendingAgentFeedbackId = null;
+    }
+
+    async function submitNewAgent(e) {
+      e.preventDefault();
+      const name = document.getElementById('new-agent-name').value.trim();
+      const role = document.querySelector('input[name="agent-role"]:checked').value;
+      const model = newAgentSelectedModel || getDefaultModelId();
+      // Capture before closeNewAgentModal() wipes the pending state.
+      const feedbackId = pendingAgentFeedbackId;
+      const quickPrompt = pendingAgentPrompt;
+
+      const res = await fetch('/api/agent/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(feedbackId ? { name, role, model, feedbackId } : { name, role, model })
+      });
+      const newSession = await res.json();
+      closeNewAgentModal();
+      await loadAgentSessions();
+      selectSession(newSession.id);
+      if (quickPrompt) {
+        setTimeout(() => sendQuickPrompt(quickPrompt), 100);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    // ===================== SCHEDULED PROMPT QUEUE =====================
+    let scheduledItems = [];
+    // { sessionId, prompt, errorInfo, selectedModel, showingAll } captured from a failed send
+    let queueContext = null;
+
+    // --- Failure popup: offer to switch model & retry, queue, or cancel ---
+    // errorInfo follows the contract §3 shape: { errorType, engine, model, message,
+    // recoverable, suggestedModels }. Older/degraded callers may pass a partial
+    // object (e.g. a network failure) — handled defensively below.
+    function openQueueModal(sessionId, prompt, errorInfo) {
+      queueContext = { sessionId, prompt, errorInfo, selectedModel: null, showingAll: false };
+
+      const failedModelInfo = errorInfo && errorInfo.model ? getModelInfo(errorInfo.model) : null;
+      const reasonEl = document.getElementById('queue-modal-reason');
+      const switchSection = document.getElementById('queue-modal-switch-section');
+      const showAllBtn = document.getElementById('queue-modal-show-all-btn');
+
+      // 'overload' added 2026-08-26 — transient upstream capacity, and switching
+      // models is the fix, so it must offer the picker exactly like 'quota'.
+      // 'timeout' added 2026-08-26 — an upstream hang, same remedy as quota/overload:
+      // switch model (a Claude one bypasses Gemini entirely) or queue for later.
+      const isQuotaRecoverable = errorInfo && ['quota', 'overload', 'timeout'].includes(errorInfo.errorType) && errorInfo.recoverable !== false
+        && Array.isArray(errorInfo.suggestedModels) && errorInfo.suggestedModels.length > 0;
+
+      if (isQuotaRecoverable) {
+        const firstSuggested = getModelInfo(errorInfo.suggestedModels[0]);
+        reasonEl.textContent = (failedModelInfo ? `${failedModelInfo.label} ` : '') +
+          ((errorInfo.message || 'hit its quota.') + ` Switch to ${firstSuggested.label} and retry, or queue for later.`);
+        queueContext.selectedModel = errorInfo.suggestedModels[0];
+        renderQueueModelPicker();
+        switchSection.classList.remove('hidden');
+        showAllBtn.textContent = 'Show all models';
+        document.getElementById('queue-modal-persist').checked = false;
+      } else {
+        reasonEl.textContent = (errorInfo && errorInfo.message) || 'The agent could not answer this prompt.';
+        switchSection.classList.add('hidden');
+      }
+
+      document.getElementById('queue-modal-prompt').textContent = prompt;
+      document.getElementById('queue-prompt-modal').classList.remove('hidden');
+    }
+
+    function renderQueueModelPicker() {
+      if (!queueContext) return;
+      const errorInfo = queueContext.errorInfo || {};
+      const models = queueContext.showingAll
+        ? modelRegistry
+        : (errorInfo.suggestedModels || []).map(getModelInfo);
+      document.getElementById('queue-modal-model-picker').innerHTML =
+        renderModelPickerHTML(models, 'queue-switch-model', queueContext.selectedModel);
+    }
+
+    function toggleQueueModalShowAll() {
+      if (!queueContext) return;
+      queueContext.showingAll = !queueContext.showingAll;
+      document.getElementById('queue-modal-show-all-btn').textContent =
+        queueContext.showingAll ? 'Show suggested only' : 'Show all models';
+      renderQueueModelPicker();
+    }
+
+    function closeQueueModal() {
+      document.getElementById('queue-prompt-modal').classList.add('hidden');
+      queueContext = null;
+    }
+
+    async function confirmSwitchAndRetry() {
+      if (!queueContext) return;
+      const { sessionId, prompt, selectedModel } = queueContext;
+      const persist = document.getElementById('queue-modal-persist').checked;
+      closeQueueModal();
+      await sendAgentTurn(sessionId, prompt, selectedModel, persist);
+    }
+
+    async function confirmQueuePrompt() {
+      if (!queueContext) return closeQueueModal();
+      // §5: the queued item carries the model chosen in the switch picker (if the
+      // user picked one before deciding to queue instead), else the session's
+      // current model. Never chosen automatically — the human picked "queue", not "retry".
+      const session = agentSessions.find(s => s.id === queueContext.sessionId);
+      const model = queueContext.selectedModel || (session && session.model) || undefined;
+      try {
+        await fetch('/api/agent/scheduled', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: queueContext.sessionId,
+            prompt: queueContext.prompt,
+            model,
+            runAt: null,                 // hold for manual approval — don't auto re-burn quota
+            source: 'auto-recovery',
+            reason: 'Queued after a failed agent request.'
+          })
+        });
+        closeQueueModal();
+        document.getElementById('subtab-scheduled-badge')?.classList.remove('hidden');
+        await loadScheduled();
+      } catch (err) {
+        alert('Failed to queue prompt: ' + err.message);
+      }
+    }
+
+    // --- Queue management ---
+    async function loadScheduled() {
+      try {
+        const res = await fetch('/api/agent/scheduled');
+        scheduledItems = await res.json();
+      } catch (err) {
+        scheduledItems = [];
+      }
+      populateSchedSessions();
+      renderScheduled();
+    }
+
+    function populateSchedSessions() {
+      const select = document.getElementById('sched-session');
+      if (!select) return;
+      const prev = select.value;
+      if (!agentSessions.length) {
+        select.innerHTML = '<option value="">No agents — create one first</option>';
+        return;
+      }
+      select.innerHTML = agentSessions.map(s =>
+        `<option value="${s.id}">${escapeHtml(s.name)} (${escapeHtml(s.role)})</option>`
+      ).join('');
+      if (prev) select.value = prev;
+    }
+
+    function renderScheduled() {
+      const container = document.getElementById('scheduled-list');
+      const badge = document.getElementById('floating-sched-badge');
+      const pending = scheduledItems.filter(i => i.status === 'pending').length;
+      if (badge) {
+        badge.textContent = pending;
+        badge.classList.toggle('hidden', pending === 0);
+      }
+      if (!container) return;
+
+      if (!scheduledItems.length) {
+        container.innerHTML = '<div class="text-center py-10 text-gray-500 text-xs">No scheduled prompts yet.</div>';
+        return;
+      }
+
+      const statusStyles = {
+        pending: 'bg-amber-950 text-amber-300 border-amber-800',
+        running: 'bg-blue-950 text-blue-300 border-blue-800',
+        sent: 'bg-emerald-950 text-emerald-300 border-emerald-800',
+        failed: 'bg-rose-950 text-rose-300 border-rose-800'
+      };
+
+      container.innerHTML = scheduledItems.map(item => {
+        const badgeClass = statusStyles[item.status] || statusStyles.pending;
+        const when = item.runAt
+          ? `Auto-run: ${new Date(item.runAt).toLocaleString()}`
+          : 'Manual approval';
+        const freqText = item.frequencyMinutes ? `<span class="text-amber-400 ml-1"><i class="fa-solid fa-rotate text-[9px]"></i> every ${item.frequencyMinutes}m</span>` : '';
+        const src = { 'auto-recovery': '⚠️ retry', 'agent': '🤖 agent', 'manual': '✍️ manual' }[item.source] || item.source;
+        return `
+          <div class="bg-dark-bg border border-dark-border rounded-xl p-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border ${badgeClass} uppercase">${escapeHtml(item.status)}</span>
+                <span class="text-[11px] text-gray-400 truncate">→ ${escapeHtml(item.sessionName || item.sessionId)}</span>
+              </div>
+              <span class="text-[10px] text-gray-500 flex-shrink-0">${escapeHtml(src)}</span>
+            </div>
+            <p class="text-xs text-gray-200 break-words">${escapeHtml(item.prompt)}</p>
+            <div class="text-[10px] text-gray-500 flex items-center gap-2 flex-wrap">
+              <span><i class="fa-regular fa-clock"></i> ${escapeHtml(when)}${freqText}</span>
+              ${item.attempts ? `<span>· ${item.attempts} attempt(s)</span>` : ''}
+            </div>
+            ${item.result ? `<p class="text-[10px] text-gray-400 bg-dark-card border border-dark-border rounded-lg px-2 py-1 break-words">${escapeHtml(item.result)}</p>` : ''}
+            <div class="flex items-center justify-end gap-2 pt-1">
+              ${item.status !== 'sent' ? `<button onclick="runScheduled('${item.id}')" class="text-[11px] bg-emerald-700 hover:bg-emerald-600 text-white font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-play text-[10px]"></i> Run now</button>` : ''}
+              <button onclick="deleteScheduled('${item.id}')" class="text-[11px] bg-dark-card border border-dark-border text-gray-400 hover:text-rose-400 px-3 py-1.5 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-trash-can text-[10px]"></i> Delete</button>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+
+
+    
+    function openScheduleModal() {
+      const prompt = document.getElementById('agent-chat-input').value.trim();
+      if (!activeSessionId) return alert('Select an agent first.');
+      if (!prompt) return alert('Enter a prompt in the chat box first.');
+      document.getElementById('schedule-runat').value = '';
+      document.getElementById('schedule-frequency').value = '';
+      document.getElementById('schedule-modal').classList.remove('hidden');
+    }
+
+    async function submitAgentSchedule(e) {
+      e.preventDefault();
+      const prompt = document.getElementById('agent-chat-input').value.trim();
+      const runAtLocal = document.getElementById('schedule-runat').value;
+      const runAt = runAtLocal ? new Date(runAtLocal).toISOString() : null;
+      const freqVal = document.getElementById('schedule-frequency').value;
+      const frequencyMinutes = freqVal ? parseInt(freqVal, 10) : null;
+      
+      try {
+        const res = await fetch('/api/agent/scheduled', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: activeSessionId, prompt, runAt, frequencyMinutes, source: 'manual' })
+        });
+        if (!res.ok) { const err = await res.json(); return alert(err.error || 'Failed to schedule.'); }
+        
+        document.getElementById('agent-chat-input').value = '';
+        document.getElementById('schedule-frequency').value = '';
+        document.getElementById('schedule-modal').classList.add('hidden');
+        document.getElementById('scheduled-sidebar').classList.remove('translate-x-full');
+        await loadScheduled();
+      } catch (err) {
+        alert('Failed to schedule: ' + err.message);
+      }
+    }
+
+    async function runScheduled(id) {
+      const btnItems = scheduledItems.find(i => i.id === id);
+      if (btnItems) { btnItems.status = 'running'; renderScheduled(); }
+      try {
+        const res = await fetch(`/api/agent/scheduled/${id}/run`, { method: 'POST' });
+        const data = await res.json();
+        if (Array.isArray(data.scheduled)) { scheduledItems = data.scheduled; renderScheduled(); }
+        else { await loadScheduled(); }
+        // If the chat for this agent is open, refresh it to show the new exchange.
+        if (data.item && data.item.sessionId === activeSessionId) {
+          await loadAgentSessions();
+          selectSession(activeSessionId);
+        }
+      } catch (err) {
+        alert('Failed to run prompt: ' + err.message);
+        await loadScheduled();
+      }
+    }
+
+    async function deleteScheduled(id) {
+      if (!confirm('Remove this scheduled prompt?')) return;
+      await fetch(`/api/agent/scheduled/${id}`, { method: 'DELETE' });
+      await loadScheduled();
+    }
+
+    // ===================== FEEDBACK BOX =====================
+    // Contract: `Feedback Box — Contract.md` §5. The backend half (routes +
+    // storage) is being built concurrently and may not exist yet — every
+    // fetch here degrades gracefully rather than assuming the API is live.
+    const FALLBACK_FEEDBACK_TYPES = [
+      { value: 'bug', label: 'Bug' },
+      { value: 'improvement', label: 'Improvement' },
+      { value: 'feature', label: 'Feature' },
+      { value: 'chore', label: 'Chore' },
+      { value: 'idea', label: 'Idea' }
+    ];
+    const FEEDBACK_STATUS_STYLES = {
+      'new': 'bg-rose-950 text-rose-300 border-rose-800',
+      'in-progress': 'bg-amber-950 text-amber-300 border-amber-800',
+      'done': 'bg-emerald-950 text-emerald-300 border-emerald-800',
+      'wont-do': 'bg-gray-800 text-gray-400 border-gray-700'
+    };
+    let feedbackTypes = FALLBACK_FEEDBACK_TYPES;
+    let feedbackItems = [];
+    let feedbackStatusFilter = 'all';
+    let feedbackTypeFilter = 'all';
+    let feedbackSortOrder = 'newest';
+
+    async function loadFeedbackTypes() {
+      try {
+        const res = await fetch('/api/feedback/types');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        // Accept either a bare array or { types: [...] } — be lenient since
+        // the exact wrapper shape isn't pinned down in the contract.
+        const list = Array.isArray(data) ? data : (Array.isArray(data.types) ? data.types : null);
+        if (!list || !list.length) throw new Error('empty types payload');
+        // Normalise here, once: the real API keys entries { id, label }; some
+        // stubs/fallbacks use { value, label }. Every downstream reader expects
+        // .value/.label, so reconcile both shapes at the single load point
+        // rather than scattering `t.id ?? t.value` through every call site.
+        feedbackTypes = list.map(t => ({
+          value: t.id ?? t.value,
+          label: t.label ?? t.id ?? t.value
+        }));
+      } catch (err) {
+        console.warn('GET /api/feedback/types unavailable, using fallback types:', err.message);
+        feedbackTypes = FALLBACK_FEEDBACK_TYPES;
+      }
+      renderFeedbackTypeControls();
+    }
+
+    function renderFeedbackTypeControls() {
+      const typeSelect = document.getElementById('feedback-type');
+      if (typeSelect) {
+        typeSelect.innerHTML = feedbackTypes.map(t =>
+          `<option value="${escapeHtml(t.value)}">${escapeHtml(t.label || t.value)}</option>`
+        ).join('');
+        // §5: default the dropdown to `bug` — it's both the most common and most urgent.
+        typeSelect.value = feedbackTypes.some(t => t.value === 'bug') ? 'bug' : feedbackTypes[0].value;
+      }
+      const filterSelect = document.getElementById('feedback-type-filter');
+      if (filterSelect) {
+        const prev = filterSelect.value || 'all';
+        filterSelect.innerHTML = '<option value="all">All types</option>' +
+          feedbackTypes.map(t => `<option value="${escapeHtml(t.value)}">${escapeHtml(t.label || t.value)}</option>`).join('');
+        filterSelect.value = prev;
+      }
+    }
+
+    function feedbackTypeLabel(value) {
+      const t = feedbackTypes.find(t => t.value === value) || FALLBACK_FEEDBACK_TYPES.find(t => t.value === value);
+      return t ? (t.label || t.value) : value;
+    }
+
+    async function loadFeedback() {
+      try {
+        const params = new URLSearchParams();
+        if (feedbackStatusFilter !== 'all') params.set('status', feedbackStatusFilter);
+        if (feedbackTypeFilter !== 'all') params.set('type', feedbackTypeFilter);
+        const qs = params.toString();
+        const res = await fetch('/api/feedback' + (qs ? '?' + qs : ''));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        feedbackItems = Array.isArray(data) ? data : (Array.isArray(data.items) ? data.items : []);
+      } catch (err) {
+        console.error('Failed to load feedback', err);
+        feedbackItems = [];
+      }
+      renderFeedbackList();
+      updateFeedbackBadges();
+    }
+
+    function updateFeedbackBadges() {
+      // Feedback notification bubble should only show a number for in-progress items, not new or completed.
+      const inProgressCount = feedbackItems.filter(f => f.status === 'in-progress').length;
+      const deskBadge = document.getElementById('badge-feedback-count');
+      if (deskBadge) {
+        deskBadge.textContent = inProgressCount;
+        deskBadge.classList.toggle('hidden', inProgressCount === 0);
+      }
+      const mobBadge = document.getElementById('mob-badge-feedback-count');
+      if (mobBadge) {
+        mobBadge.textContent = inProgressCount > 9 ? '9+' : inProgressCount;
+        mobBadge.classList.toggle('hidden', inProgressCount === 0);
+      }
+    }
+
+    function filterFeedbackStatus(status) {
+      feedbackStatusFilter = status;
+      document.querySelectorAll('.feedback-status-filter-btn').forEach(b => {
+        if (b.dataset.filter === status) {
+          b.className = 'feedback-status-filter-btn px-3.5 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold shadow';
+        } else {
+          b.className = 'feedback-status-filter-btn px-3.5 py-1.5 rounded-lg text-gray-400 hover:text-white';
+        }
+      });
+      loadFeedback();
+    }
+
+    
+    function sortFeedback(val) {
+      feedbackSortOrder = val;
+      renderFeedbackList();
+    }
+
+    function filterFeedbackType(type) {
+      feedbackTypeFilter = type;
+      loadFeedback();
+    }
+
+    function renderFeedbackList() {
+      const homeBugs = document.getElementById('home-stat-bugs');
+      if (homeBugs) homeBugs.innerText = feedbackItems.filter(i => i.type === 'bug' && i.status !== 'done' && i.status !== 'wont-do').length.toString();
+      const container = document.getElementById('feedback-list');
+      if (!container) return;
+
+      if (feedbackItems.length === 0) {
+        container.innerHTML = `
+          <div class="bg-dark-card border border-dark-border rounded-2xl p-10 text-center text-gray-500 text-xs space-y-2">
+            <i class="fa-regular fa-comment-dots text-3xl text-gray-600"></i>
+            <p>No feedback found matching current filters.</p>
+          </div>
+        `;
+        return;
+      }
+
+      
+      let sortedItems = [...feedbackItems];
+      if (feedbackSortOrder === 'oldest') {
+        sortedItems.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+      } else if (feedbackSortOrder === 'urgency') {
+        const u = { critical: 4, high: 3, normal: 2, low: 1, undefined: 2 };
+        sortedItems.sort((a, b) => (u[b.urgency] || 2) - (u[a.urgency] || 2) || new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      } else {
+        sortedItems.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      }
+
+      container.innerHTML = sortedItems.map(f => {
+
+        const statusClass = FEEDBACK_STATUS_STYLES[f.status] || FEEDBACK_STATUS_STYLES['new'];
+        const created = f.createdAt ? new Date(f.createdAt).toLocaleString() : '';
+        return `
+          <div class="bg-dark-card border border-dark-border hover:border-gray-700 transition-all rounded-2xl p-4 space-y-2 shadow-sm">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-indigo-950/70 text-indigo-300 border-indigo-800/80 uppercase flex-shrink-0">${escapeHtml(feedbackTypeLabel(f.type))}</span>
+                ${f.urgency && f.urgency !== 'normal' ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${f.urgency === 'critical' ? 'bg-rose-950/70 text-rose-300 border-rose-800/80' : f.urgency === 'high' ? 'bg-amber-950/70 text-amber-300 border-amber-800/80' : 'bg-gray-800 text-gray-300 border-gray-700'} uppercase flex-shrink-0">${escapeHtml(f.urgency)}</span>` : ''}
+
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${statusClass} uppercase flex-shrink-0">${escapeHtml(f.status)}</span>
+                ${f.status === 'in-progress' && f.stagedAt ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-amber-950/70 text-amber-300 border-amber-800/80 flex-shrink-0" title="A linked agent staged and verified this fix; it auto-closes when Staging is pushed to Live">STAGED — CLOSES ON DEPLOY</span>` : ''}
+                ${f.status === 'in-progress' && f.sessionId ? `<button onclick="switchServerSubTab('agents'); selectSession('${escapeHtml(f.sessionId)}')" class="text-[10px] text-purple-400 hover:text-purple-300 underline decoration-dotted flex-shrink-0" title="Open the linked agent session"><i class="fa-solid fa-robot"></i> session</button>` : ''}
+              </div>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                <button onclick="openAgentForFeedback('${f.id}')" class="text-indigo-400 hover:text-indigo-300 text-xs p-1" title="Summon Agent to solve this">
+                  <i class="fa-solid fa-robot"></i>
+                </button>
+                <select onchange="updateFeedbackStatus('${f.id}', this.value)" class="bg-dark-bg border border-dark-border rounded-lg px-2 py-1 text-[10px] text-gray-300 focus:outline-none focus:border-indigo-500">
+                  <option value="new" ${f.status === 'new' ? 'selected' : ''}>new</option>
+                  <option value="in-progress" ${f.status === 'in-progress' ? 'selected' : ''}>in-progress</option>
+                  <option value="done" ${f.status === 'done' ? 'selected' : ''}>done</option>
+                  <option value="wont-do" ${f.status === 'wont-do' ? 'selected' : ''}>wont-do</option>
+                </select>
+                <button onclick="deleteFeedback('${f.id}')" class="text-gray-600 hover:text-rose-400 text-xs p-1" title="Delete (mistakes only)">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+            <h4 class="text-sm font-semibold text-gray-100">${escapeHtml(f.title)}</h4>
+            ${f.body ? `<p class="text-xs text-gray-400 leading-relaxed">${escapeHtml(f.body)}</p>` : ''}
+            ${f.notes ? `<div class="text-[11px] text-gray-400 bg-dark-bg border border-dark-border rounded-lg px-2.5 py-1.5 flex items-start gap-1.5"><i class="fa-solid fa-robot text-purple-400 mt-0.5"></i><span><span class="text-purple-300 font-semibold">${f.processedBy ? escapeHtml(f.processedBy) + ': ' : 'Agent note: '}</span>${escapeHtml(f.notes)}</span></div>` : ''}
+            <div class="text-[10px] text-gray-500">${escapeHtml(created)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function submitFeedback(e) {
+      e.preventDefault();
+      const type = document.getElementById('feedback-type').value;
+      const urgency = document.getElementById('feedback-urgency').value;
+      const title = document.getElementById('feedback-title').value.trim();
+      const body = document.getElementById('feedback-body').value.trim();
+      if (!title) return;
+
+      const payload = { type, title, urgency };
+      if (body) payload.body = body;
+
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const res = await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert(err.error || 'Failed to submit feedback.');
+          return;
+        }
+        document.getElementById('feedback-title').value = '';
+        document.getElementById('feedback-body').value = '';
+        document.getElementById('feedback-type').value = feedbackTypes.some(t => t.value === 'bug') ? 'bug' : feedbackTypes[0].value;
+        await loadFeedback();
+      } catch (err) {
+        alert('Failed to submit feedback: ' + err.message);
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    }
+
+    async function updateFeedbackStatus(id, status) {
+      try {
+        await fetch(`/api/feedback/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status })
+        });
+        await loadFeedback();
+      } catch (err) {
+        alert('Failed to update status: ' + err.message);
+      }
+    }
+
+    async function deleteFeedback(id) {
+      if (!confirm('Delete this feedback item? This is for mistakes only — processing normally uses status, not delete.')) return;
+      await fetch(`/api/feedback/${id}`, { method: 'DELETE' });
+      await loadFeedback();
+    }
+
+    // INITIALIZATION
+    loadTodoDaily();
+    loadTodoProjects();
+    loadScripts();
+    refreshTelemetry();
+    // ===================== HOMEPAGE LIVE DOCUMENT (fb-1787801162107) ==========
+    // The Home tab's banner + widgets render from GET /api/homepage, backed by
+    // data/homepage.json — a content layer OUTSIDE the deploy cycle (data/ is
+    // excluded from promote.sh both ways). Agents redesign the home screen by
+    // rewriting that one JSON file; a browser refresh shows it. If the fetch
+    // fails, the hardcoded banner fallback in the markup simply stays put.
+    let homepageDoc = null;
+
+    async function loadHomepage() {
+      try {
+        const res = await fetch('/api/homepage');
+        if (!res.ok) return;
+        homepageDoc = await res.json();
+        renderHomepage();
+      } catch (err) {
+        console.error('Homepage document failed to load; hardcoded fallback stays.', err);
+      }
+    }
+
+    function renderHomepage() {
+      if (!homepageDoc) return;
+      const a = homepageDoc.announcement || {};
+      document.getElementById('home-banner-title').textContent = a.title || 'House Updates & News';
+      document.getElementById('home-banner-text').textContent = a.text || '';
+      const iconEl = document.getElementById('home-banner-icon');
+      if (iconEl) iconEl.className = `fa-solid ${a.icon || 'fa-sparkles'} text-indigo-400`;
+      document.getElementById('home-banner').classList.toggle('hidden', a.visible === false);
+      document.getElementById('home-banner-collapsed').classList.toggle('hidden', a.visible !== false);
+
+      // Built-in sections the designer may switch off to replace with widgets.
+      const sections = homepageDoc.sections || {};
+      document.getElementById('home-stats').classList.toggle('hidden', sections.stats === false);
+      document.getElementById('home-quicklinks').classList.toggle('hidden', sections.quickLinks === false);
+
+      // Widget cards. w.html is injected raw ON PURPOSE: it only enters through
+      // the authenticated PUT /api/homepage or the server filesystem, i.e. from
+      // Alex or his agents — the same trust level as the agents' bash access.
+      const grid = document.getElementById('home-widgets');
+      const widgets = (homepageDoc.widgets || []).filter(w => w && !w.hidden);
+      grid.classList.toggle('hidden', widgets.length === 0);
+      grid.innerHTML = widgets.map(w => {
+        const accent = w.accent || 'indigo';
+        const linkAttr = w.link ? (w.link.tab
+          ? `onclick="switchTab('${escapeHtml(w.link.tab)}')"`
+          : `onclick="window.open('${escapeHtml(w.link.href || '')}', '_blank')"`) : '';
+        return `
+          <div class="text-left bg-dark-card border border-dark-border rounded-xl p-4 ${w.link ? 'cursor-pointer hover:bg-dark-bg transition-colors' : ''}" ${linkAttr}>
+            <div class="flex items-center gap-3 mb-2">
+              <div class="w-8 h-8 rounded-lg bg-${accent}-500/20 text-${accent}-400 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid ${escapeHtml(w.icon || 'fa-cube')}"></i>
+              </div>
+              <h3 class="text-gray-200 font-semibold">${escapeHtml(w.title)}</h3>
+            </div>
+            <div class="text-gray-400 text-xs leading-relaxed">${w.html || ''}</div>
+            ${w.link && w.link.label ? `<div class="mt-2 text-[11px] font-semibold text-${accent}-400">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
+          </div>`;
+      }).join('');
+      syncHomeStatMirrors();
+    }
+
+    // Widgets can embed <span data-home-stat="todo|jobs|cpu|bugs"></span> to
+    // show live values. We mirror from the built-in stat spans (which keep
+    // updating even when the stats section is hidden) instead of hooking every
+    // update site — one dumb copy loop beats four fragile integration points.
+    function syncHomeStatMirrors() {
+      document.querySelectorAll('[data-home-stat]').forEach(el => {
+        const src = document.getElementById('home-stat-' + el.getAttribute('data-home-stat'));
+        if (src && el.textContent !== src.textContent) el.textContent = src.textContent;
+      });
+    }
+    setInterval(syncHomeStatMirrors, 5000);
+
+    function openAnnouncementModal() {
+      const a = (homepageDoc && homepageDoc.announcement) || {};
+      document.getElementById('announcement-title-input').value = a.title || '';
+      document.getElementById('announcement-text-input').value = a.text || '';
+      document.getElementById('announcement-visible-input').checked = a.visible !== false;
+      document.getElementById('announcement-modal-error').classList.add('hidden');
+      document.getElementById('announcement-modal').classList.remove('hidden');
+    }
+
+    function closeAnnouncementModal() {
+      document.getElementById('announcement-modal').classList.add('hidden');
+    }
+
+    async function saveAnnouncement(e) {
+      e.preventDefault();
+      const errEl = document.getElementById('announcement-modal-error');
+      try {
+        const res = await fetch('/api/homepage', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            announcement: {
+              title: document.getElementById('announcement-title-input').value.trim(),
+              text: document.getElementById('announcement-text-input').value.trim(),
+              visible: document.getElementById('announcement-visible-input').checked
+            },
+            updatedBy: 'Alex (dashboard)'
+          })
+        });
+        if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
+        homepageDoc = await res.json();
+        renderHomepage();
+        closeAnnouncementModal();
+      } catch (err) {
+        errEl.textContent = err.message || 'Save failed.';
+        errEl.classList.remove('hidden');
+      }
+    }
+
+    // ===================== DESIGNER BUBBLE ====================================
+    // The wand button opens a page-anchored chat bubble driving a dedicated
+    // 'designer'-role agent session (containerized server-side to the homepage
+    // live document; defaults to Antigravity Flash, switchable). The session is
+    // a normal agent session, so the conversation also lives in Server → Agents.
+    // The session id is remembered per page in localStorage so reopening the
+    // bubble resumes the same conversation.
+    // Pages with a designer-editable live document. Adding a page here (plus a
+    // server-side PAGE_DOCS entry and a renderer for its document) brings the
+    // Designer FAB and a fresh per-page rolling conversation to that page.
+    const DESIGNER_PAGES = { home: { label: 'Home', title: 'Homepage Designer' } };
+    let designerCurrentTab = 'home';   // kept current by the switchTab hook
+    let designerBubblePage = null;     // page the OPEN bubble is bound to
+    let designerSessionId = null;      // session backing the open bubble
+    let designerSession = null;
+    let designerBusy = false;
+
+    function designerStorageKey(page) { return 'ada_designer_session_' + page; }
+
+    // Called from switchTab. The Designer is page-bound: changing pages closes
+    // the bubble (each page's conversation survives in its own session and
+    // resumes when the FAB is pressed on that page again), and the FAB only
+    // shows on pages that have a page document.
+    function onDesignerTabSwitch(tab) {
+      designerCurrentTab = tab;
+      closeDesignerBubble();
+      const fab = document.getElementById('designer-fab');
+      if (fab) fab.classList.toggle('hidden', !DESIGNER_PAGES[tab]);
+    }
+
+    async function openPageDesigner() {
+      const page = designerCurrentTab;
+      const cfg = DESIGNER_PAGES[page];
+      if (!cfg) return;
+      designerBubblePage = page;
+      designerSessionId = null;
+      try { designerSessionId = localStorage.getItem(designerStorageKey(page)); } catch (e) {}
+      document.getElementById('designer-bubble-title').textContent = cfg.title;
+      document.getElementById('designer-bubble-messages').innerHTML = '';
+      document.getElementById('designer-bubble').classList.remove('hidden');
+      try {
+        await ensureDesignerSession(page);
+      } catch (err) {
+        renderDesignerNotice('Could not start the Designer: ' + err.message);
+        return;
+      }
+      renderDesignerMessages();
+      populateDesignerModelSelect();
+      attachToRunningDesignerJob(); // bubble reopened mid-turn → reattach, don't lose it
+      document.getElementById('designer-bubble-input').focus();
+    }
+
+    // The banner wand predates the FAB and stays as a Home-page shortcut.
+    function openHomepageDesigner() { openPageDesigner(); }
+
+    function closeDesignerBubble() {
+      document.getElementById('designer-bubble').classList.add('hidden');
+    }
+
+    async function ensureDesignerSession(page) {
+      page = page || designerBubblePage || 'home';
+      if (designerSessionId) {
+        const r = await fetch(`/api/agent/sessions/${designerSessionId}`);
+        if (r.ok) { designerSession = await r.json(); return; }
+        designerSessionId = null; // stale — e.g. deleted from the Agents tab
+      }
+      const res = await fetch('/api/agent/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // `page` binds the session server-side: walls + role prompt follow it.
+        body: JSON.stringify({ name: (DESIGNER_PAGES[page] || {}).title || 'Page Designer', role: 'designer', page })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      designerSession = await res.json();
+      designerSessionId = designerSession.id;
+      try { localStorage.setItem(designerStorageKey(page), designerSessionId); } catch (e) {}
+      loadAgentSessions(); // surface it in the Agents tab list right away
+    }
+
+    function populateDesignerModelSelect() {
+      const sel = document.getElementById('designer-model-select');
+      sel.innerHTML = modelRegistry.filter(m => !m.unavailable).map(m =>
+        `<option value="${escapeHtml(m.id)}" ${designerSession && designerSession.model === m.id ? 'selected' : ''}>${escapeHtml(m.label)}</option>`
+      ).join('');
+    }
+
+    async function changeDesignerModel(modelId) {
+      if (!designerSessionId) return;
+      const res = await fetch(`/api/agent/sessions/${designerSessionId}/model`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelId })
+      });
+      if (res.ok) {
+        designerSession = await res.json();
+        renderDesignerNotice('Model switched to ' + getModelInfo(modelId).label + '. Still containerized to this page.');
+      } else {
+        renderDesignerNotice('Model switch failed.');
+        populateDesignerModelSelect(); // snap the select back to reality
+      }
+    }
+
+    function renderDesignerMessages() {
+      const box = document.getElementById('designer-bubble-messages');
+      const msgs = (designerSession && designerSession.messages) || [];
+      box.innerHTML = msgs.map(m => m.role === 'user'
+        ? `<div class="flex justify-end"><div class="max-w-[85%] bg-indigo-600/80 text-white rounded-xl rounded-br-sm px-3 py-2 whitespace-pre-wrap break-words">${escapeHtml(m.text)}</div></div>`
+        : `<div class="flex"><div class="max-w-[85%] bg-dark-bg border border-dark-border text-gray-200 rounded-xl rounded-bl-sm px-3 py-2 whitespace-pre-wrap break-words">${escapeHtml(m.text)}</div></div>`
+      ).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function renderDesignerNotice(text) {
+      const box = document.getElementById('designer-bubble-messages');
+      const div = document.createElement('div');
+      div.className = 'text-center text-[10px] text-gray-500 py-1';
+      div.textContent = text;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function prefillDesignerInput(text) {
+      const inp = document.getElementById('designer-bubble-input');
+      inp.value = text;
+      inp.focus();
+    }
+
+    function setDesignerBusy(busy, statusText) {
+      designerBusy = busy;
+      document.getElementById('designer-bubble-send').disabled = busy;
+      document.getElementById('designer-bubble-status').classList.toggle('hidden', !busy);
+      if (statusText) document.getElementById('designer-bubble-status-text').textContent = statusText;
+    }
+
+    function submitDesignerForm(e) {
+      e.preventDefault();
+      const inp = document.getElementById('designer-bubble-input');
+      const text = inp.value.trim();
+      if (!text) return;
+      inp.value = '';
+      sendDesignerMessage(text);
+    }
+
+    async function sendDesignerMessage(text) {
+      if (designerBusy) {
+        renderDesignerNotice('The Designer is still working — one request at a time.');
+        return;
+      }
+      try {
+        await ensureDesignerSession();
+      } catch (err) {
+        renderDesignerNotice('Could not start the Designer: ' + err.message);
+        return;
+      }
+      // Optimistic echo — the server persists the user message on POST anyway.
+      designerSession.messages = designerSession.messages || [];
+      designerSession.messages.push({ role: 'user', text, timestamp: new Date().toISOString() });
+      renderDesignerMessages();
+      setDesignerBusy(true, 'Designing…');
+      try {
+        const res = await fetch(`/api/agent/sessions/${designerSessionId}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: text })
+        });
+        const data = await res.json();
+        // 409 = a turn is already running server-side; attach to it.
+        if (res.status === 409 && data.jobId) return pollDesignerJob(data.jobId);
+        if (!res.ok || !data.jobId) throw new Error(data.error || ('HTTP ' + res.status));
+        pollDesignerJob(data.jobId);
+      } catch (err) {
+        setDesignerBusy(false);
+        renderDesignerNotice('Send failed: ' + err.message);
+      }
+    }
+
+    function pollDesignerJob(jobId) {
+      setDesignerBusy(true, 'Designing…');
+      const poll = async () => {
+        try {
+          const res = await fetch(`/api/agent/jobs/${jobId}`);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const job = await res.json();
+          if (job.status === 'running') {
+            const last = job.progress && job.progress.length ? job.progress[job.progress.length - 1] : null;
+            const p = jobPolls[designerSessionId];
+            if (p && p.cancelling) {
+               document.getElementById('designer-bubble-status-text').textContent = 'Cancelling…';
+            } else if (last) {
+               document.getElementById('designer-bubble-status-text').textContent = String(last.text || last).slice(0, 90);
+            }
+            setTimeout(poll, 1500);
+            return;
+          }
+          // Terminal — pull the persisted conversation and repaint the page so
+          // the designer's edits show up live, no manual refresh needed.
+          const sres = await fetch(`/api/agent/sessions/${designerSessionId}`);
+          if (sres.ok) designerSession = await sres.json();
+          renderDesignerMessages();
+          setDesignerBusy(false);
+          loadHomepage();
+        } catch (err) {
+          setDesignerBusy(false);
+          renderDesignerNotice('Lost contact with the design job: ' + err.message);
+        }
+      };
+      poll();
+    }
+
+
+    async function cancelDesignerJob() {
+      if (!designerSessionId) return;
+      const poll = jobPolls[designerSessionId];
+      if (!poll || !poll.jobId) return;
+      
+      poll.cancelling = true;
+      const btn = document.getElementById('designer-bubble-cancel-btn');
+      if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Cancelling…';
+      if (document.getElementById('designer-bubble-spinner')) document.getElementById('designer-bubble-spinner').className = 'fa-solid fa-hourglass-half';
+      
+      try {
+        await fetch(`/api/agent/jobs/${poll.jobId}/cancel`, { method: 'POST' });
+      } catch (err) {
+        console.error('Failed to cancel designer job', err);
+      }
+    }
+
+    async function attachToRunningDesignerJob() {
+      if (!designerSessionId) return;
+      try {
+        const res = await fetch(`/api/agent/sessions/${designerSessionId}/job`);
+        if (!res.ok) return; // 404 = no job, normal
+        const job = await res.json();
+        if (job.status === 'running') pollDesignerJob(job.id);
+      } catch (e) { /* bubble stays usable */ }
+    }
+
+    async function openDesignerInAgentsTab() {
+      closeDesignerBubble();
+      switchTab('server');
+      switchServerSubTab('agents');
+      if (designerSessionId) {
+        await loadAgentSessions();
+        selectSession(designerSessionId);
+      }
+    }
+
+    loadHomepage();
+    loadModelRegistry().then(loadAgentSessions);
+    loadScheduled();
+    loadFeedbackTypes().then(loadFeedback);
+    setInterval(refreshTelemetry, 5000);
+    setInterval(() => { if (!document.getElementById('scheduled-sidebar').classList.contains('translate-x-full')) loadScheduled(); }, 15000);
+
+    // --- Staging health banner (added 2026-08-26) ----------------------------
+    // Shows ONLY when staging is broken. A card that is always present becomes
+    // wallpaper; one that appears only on failure stays meaningful. The whole
+    // point is that a dead staging tree — which silently invalidates any work
+    // an agent claims to have staged — can no longer go unnoticed.
+    async function refreshStagingHealth() {
+      const card = document.getElementById('staging-health-card');
+      if (!card) return;
+      try {
+        const res = await fetch('/api/staging/status');
+        if (!res.ok) return;
+        const s = await res.json();
+
+        if (s.healthy) { card.classList.add('hidden'); card.innerHTML = ''; return; }
+
+        card.classList.remove('hidden');
+        card.innerHTML = `
+          <div class="bg-rose-950/40 border border-rose-800 rounded-2xl p-4 shadow-sm space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <span class="flex items-center gap-2 text-rose-300 font-bold text-sm">
+                <i class="fa-solid fa-triangle-exclamation"></i> Staging is DOWN
+              </span>
+              <span class="font-mono text-[10px] text-rose-400/80">
+                HTTP ${escapeHtml(s.httpCode)} · pm2 ${escapeHtml(String(s.pm2Status))} · ${escapeHtml(String(s.restarts))} restarts
+              </span>
+            </div>
+            <div class="text-[11px] text-rose-200 leading-relaxed">
+              Any work an agent reports as &ldquo;staged&rdquo; right now is <strong>untested</strong> — staging is not running it.
+              Recover with <code class="bg-black/50 px-1.5 py-0.5 rounded font-mono">bash ~/ops/stage-check.sh</code>
+            </div>
+            ${s.lastError ? `
+            <details class="bg-black/60 border border-rose-900 rounded-xl overflow-hidden">
+              <summary class="cursor-pointer px-3 py-1.5 text-rose-300 text-[11px] font-semibold select-none hover:bg-rose-950/40">
+                Last error output
+              </summary>
+              <div class="p-3 border-t border-rose-900 text-gray-300 bg-black text-[10px] font-mono whitespace-pre-wrap max-h-48 overflow-y-auto custom-scrollbar">${escapeHtml(s.lastError)}</div>
+            </details>` : ''}
+          </div>
+        `;
+      } catch (err) {
+        // Never let a monitoring widget take the page down with it.
+        console.error('Staging health check failed', err);
+      }
+    }
+
+    refreshStagingHealth();
+    setInterval(refreshStagingHealth, 20000);
+  </script>
+
+  <!-- TRIP PLANNER MODAL (SHELL) -->
+  <div id="trip-planner-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-dark-card border border-dark-border rounded-2xl w-full max-w-2xl p-6 space-y-4 shadow-2xl relative overflow-hidden">
+      <!-- Construction Tape Banner -->
+      
+      
+      <div class="flex items-center justify-between border-b border-dark-border pb-3 pt-2">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-plane-departure text-indigo-400"></i> Trip Planner Hub
+        </h3>
+        <button onclick="document.getElementById('trip-planner-modal').classList.add('hidden')" class="text-gray-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <div class="py-12 flex flex-col items-center justify-center text-center space-y-3">
+        <div class="w-16 h-16 rounded-2xl bg-dark-bg border border-dark-border flex items-center justify-center mb-2">
+          <i class="fa-solid fa-person-digging text-3xl text-gray-500"></i>
+        </div>
+        <h4 class="text-lg font-bold text-white">Under Construction</h4>
+        <p class="text-sm text-gray-400 max-w-sm">The frontend shell is ready. Assign a Dashboard Agent to build the backend JSON store and API wiring when you are ready to pivot to this project!</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ANNOUNCEMENT EDIT MODAL — writes the announcement block of the
+       homepage live document via PUT /api/homepage (fb-1787801162107) -->
+  <div id="announcement-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-dark-card border border-dark-border rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-dark-border pb-3">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-bullhorn text-indigo-400"></i> Edit Announcement
+        </h3>
+        <button onclick="closeAnnouncementModal()" class="text-gray-400 hover:text-white text-lg">&times;</button>
+      </div>
+      <form id="announcement-form" onsubmit="saveAnnouncement(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-gray-400 mb-1">Title</label>
+          <input type="text" id="announcement-title-input" maxlength="120" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-400 mb-1">Message</label>
+          <textarea id="announcement-text-input" rows="4" maxlength="2000" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors custom-scrollbar"></textarea>
+        </div>
+        <label class="flex items-center gap-2 text-xs text-gray-300 select-none">
+          <input type="checkbox" id="announcement-visible-input" class="rounded text-indigo-600 focus:ring-0 bg-dark-card border-gray-600" checked>
+          Show the banner on the home page
+        </label>
+        <p id="announcement-modal-error" class="hidden text-[11px] text-rose-400"></p>
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button type="button" onclick="closeAnnouncementModal()" class="px-4 py-2 rounded-xl text-gray-400 hover:text-white text-xs font-semibold transition-colors">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all shadow-md shadow-indigo-600/20">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- DESIGNER BUBBLE — a compact, page-anchored chat with the Designer agent
+       (role: designer, walled to the homepage live document). The session it
+       drives is a normal agent session, so the full conversation also appears
+       under Server → Agents. Opened by the wand button on the banner. -->
+  <div id="designer-bubble" class="hidden fixed bottom-24 md:bottom-6 right-4 z-40 w-[24rem] max-w-[calc(100vw-2rem)] bg-dark-card border border-purple-800/60 rounded-2xl shadow-2xl shadow-purple-950/50 flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between gap-2 px-4 py-3 bg-gradient-to-r from-purple-950/60 to-indigo-950/60 border-b border-dark-border">
+      <div class="flex items-center gap-2 min-w-0">
+        <i class="fa-solid fa-wand-magic-sparkles text-purple-400"></i>
+        <span id="designer-bubble-title" class="text-sm font-bold text-white truncate">Homepage Designer</span>
+      </div>
+      <div class="flex items-center gap-1.5 flex-shrink-0">
+        <select id="designer-model-select" onchange="changeDesignerModel(this.value)" title="Designer model" class="bg-dark-bg border border-dark-border rounded-lg text-[10px] text-gray-300 px-1.5 py-1 focus:outline-none focus:border-purple-500 max-w-[8rem]"></select>
+        <button onclick="openDesignerInAgentsTab()" title="Open full conversation in Agents tab" class="w-6 h-6 rounded-lg text-gray-400 hover:text-white hover:bg-dark-bg text-xs flex items-center justify-center transition-colors">
+          <i class="fa-solid fa-up-right-from-square"></i>
+        </button>
+        <button onclick="closeDesignerBubble()" title="Close" class="w-6 h-6 rounded-lg text-gray-400 hover:text-white hover:bg-dark-bg text-sm flex items-center justify-center transition-colors">&times;</button>
+      </div>
+    </div>
+
+    <!-- Quick edit actions: chips that prefill or fire common design requests -->
+    <div class="flex items-center gap-1.5 px-3 py-2 border-b border-dark-border overflow-x-auto custom-scrollbar">
+      <button onclick="openAnnouncementModal()" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-indigo-500 transition-colors"><i class="fa-solid fa-pen mr-1"></i>Banner</button>
+      <button onclick="prefillDesignerInput('Add a new widget that ')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-indigo-500 transition-colors"><i class="fa-solid fa-plus mr-1"></i>New widget</button>
+      <button onclick="prefillDesignerInput('Redesign the stats section: ')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-indigo-500 transition-colors"><i class="fa-solid fa-chart-simple mr-1"></i>Stats</button>
+      <button onclick="sendDesignerMessage('Undo your most recent change to the page document — restore it to how it was before your last edit.')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-rose-500 transition-colors"><i class="fa-solid fa-rotate-left mr-1"></i>Undo</button>
+      <button onclick="sendDesignerMessage('Look at what exists on this server (tools, scripts, TODOs, projects) and propose 2-3 new homepage widget ideas. Just propose — do not apply yet.')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-emerald-500 transition-colors"><i class="fa-solid fa-lightbulb mr-1"></i>Ideas</button>
+    </div>
+
+    <div id="designer-bubble-messages" class="h-72 overflow-y-auto custom-scrollbar px-3 py-3 space-y-2 text-xs"></div>
+
+    <div id="designer-bubble-status" class="hidden px-4 py-1.5 text-[10px] text-purple-300 border-t border-dark-border flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2 flex-1 min-w-0">
+        <i id="designer-bubble-spinner" class="fa-solid fa-circle-notch fa-spin"></i> <span id="designer-bubble-status-text" class="truncate">Designing…</span>
+      </div>
+      <button onclick="cancelDesignerJob()" id="designer-bubble-cancel-btn" class="px-2 py-1 rounded bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 transition-colors flex items-center gap-1 flex-shrink-0">
+        <i class="fa-solid fa-stop"></i> Cancel
+      </button>
+    </div>
+
+    <form onsubmit="submitDesignerForm(event)" class="flex items-center gap-2 p-3 border-t border-dark-border">
+      <input type="text" id="designer-bubble-input" placeholder="Describe a design change…" autocomplete="off" class="flex-1 bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors">
+      <button type="submit" id="designer-bubble-send" class="w-8 h-8 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs flex items-center justify-center transition-all flex-shrink-0">
+        <i class="fa-solid fa-paper-plane"></i>
+      </button>
+    </form>
+  </div>
+
+  <!-- THEME CONTROLLER — cycle dark → light → auto, live-follow OS in auto -->
+  <script>
+    (function () {
+      var mql = matchMedia('(prefers-color-scheme: dark)');
+      var ORDER = ['dark', 'light', 'auto'];
+      var META = {
+        dark:  { icon: 'fa-moon',               label: 'Dark'  },
+        light: { icon: 'fa-sun',                label: 'Light' },
+        auto:  { icon: 'fa-circle-half-stroke', label: 'Auto'  }
+      };
+      function getMode() { try { return localStorage.getItem('ada_theme') || 'auto'; } catch (e) { return 'auto'; } }
+      function render() {
+        var meta = META[getMode()] || META.auto;
+        document.querySelectorAll('.theme-cycle').forEach(function (b) {
+          b.title = 'Theme: ' + meta.label + ' — click to change';
+          var ic = b.querySelector('i'); if (ic) ic.className = 'fa-solid ' + meta.icon;
+          var lb = b.querySelector('.theme-cycle-label'); if (lb) lb.textContent = meta.label;
+        });
+      }
+      function apply() {
+        document.documentElement.setAttribute('data-theme', window.__adaResolveTheme(getMode()));
+        render();
+      }
+      window.cycleTheme = function () {
+        var next = ORDER[(ORDER.indexOf(getMode()) + 1) % ORDER.length];
+        try { localStorage.setItem('ada_theme', next); } catch (e) {}
+        apply();
+      };
+      mql.addEventListener('change', function () { if (getMode() === 'auto') apply(); });
+      apply();
+    })();
+  </script>
+
+</body>
+</html>
