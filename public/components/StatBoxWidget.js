@@ -16,7 +16,7 @@ class StatBoxWidget extends HTMLElement {
     const stat = this.getAttribute('stat') || 'todo';
     const title = this.getAttribute('title') || 'Statistic';
     const icon = this.getAttribute('icon') || 'fa-chart-bar';
-    const accent = this.getAttribute('accent') || 'indigo';
+    // const accent = this.getAttribute('accent') || 'indigo';
     
     this.innerHTML = `
       <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">

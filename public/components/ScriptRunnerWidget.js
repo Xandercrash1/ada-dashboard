@@ -49,7 +49,7 @@ class ScriptRunnerWidget extends HTMLElement {
 
     const label = this.getAttribute('label') || 'Run Script';
     const icon = this.getAttribute('icon') || 'fa-terminal';
-    const accent = this.getAttribute('accent') || 'indigo';
+    // const accent = this.getAttribute('accent') || 'indigo';
     const scriptId = this.getAttribute('script-id') || 'sys-health';
     
     this.innerHTML = `

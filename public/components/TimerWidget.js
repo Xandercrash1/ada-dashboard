@@ -67,7 +67,7 @@ class TimerWidget extends HTMLElement {
     else bgClass = '';
 
     const title = this.getAttribute('title') || 'Timer';
-    const accent = this.getAttribute('accent') || 'amber';
+    // const accent = this.getAttribute('accent') || 'amber';
     
     this.innerHTML = `
       <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">

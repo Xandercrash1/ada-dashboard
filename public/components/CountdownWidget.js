@@ -42,7 +42,7 @@ class CountdownWidget extends HTMLElement {
     else bgClass = '';
 
     const title = this.getAttribute('title') || 'Countdown';
-    const accent = this.getAttribute('accent') || 'indigo';
+    // const accent = this.getAttribute('accent') || 'indigo';
     
     this.innerHTML = `
       <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">

@@ -58,7 +58,7 @@ class StopwatchWidget extends HTMLElement {
     else bgClass = '';
 
     const title = this.getAttribute('title') || 'Stopwatch';
-    const accent = this.getAttribute('accent') || 'emerald';
+    // const accent = this.getAttribute('accent') || 'emerald';
     
     this.innerHTML = `
       <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">
