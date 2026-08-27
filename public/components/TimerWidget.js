@@ -53,22 +53,22 @@ class TimerWidget extends HTMLElement {
     const h = Math.floor(this.remaining / (1000 * 60 * 60));
     
     const pad = n => n.toString().padStart(2, '0');
-    el.textContent = h > 0 ? \`\${pad(h)}:\${pad(m)}:\${pad(s)}\` : \`\${pad(m)}:\${pad(s)}\`;
+    el.textContent = h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
   }
 
   render() {
     const title = this.getAttribute('title') || 'Timer';
     const accent = this.getAttribute('accent') || 'amber';
     
-    this.innerHTML = \`
+    this.innerHTML = `
       <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between h-full">
-        <div class="flex items-center gap-2 text-\${accent}-400 mb-2">
+        <div class="flex items-center gap-2 text-${accent}-400 mb-2">
             <i class="fa-solid fa-clock-rotate-left"></i>
-            <span class="text-xs font-semibold uppercase tracking-wider">\${title}</span>
+            <span class="text-xs font-semibold uppercase tracking-wider">${title}</span>
         </div>
         <div class="time-display text-4xl font-bold text-white font-mono tracking-wider text-center my-3">--:--</div>
         <div class="flex justify-center gap-3">
-            <button class="play-btn w-10 h-10 rounded-full bg-\${accent}-500 hover:bg-\${accent}-600 text-white flex items-center justify-center transition-colors">
+            <button class="play-btn w-10 h-10 rounded-full bg-${accent}-500 hover:bg-${accent}-600 text-white flex items-center justify-center transition-colors">
                 <i class="fa-solid fa-play"></i>
             </button>
             <button class="reset-btn w-10 h-10 rounded-full bg-gray-700 hover:bg-gray-600 text-white flex items-center justify-center transition-colors">
@@ -76,7 +76,7 @@ class TimerWidget extends HTMLElement {
             </button>
         </div>
       </div>
-    \`;
+    `;
     this.updateDisplay();
     
     this.querySelector('.play-btn').addEventListener('click', () => this.toggle());

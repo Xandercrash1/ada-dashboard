@@ -28,22 +28,22 @@ class CountdownWidget extends HTMLElement {
     const s = Math.floor((dist % (1000 * 60)) / 1000);
 
     const pad = n => n.toString().padStart(2, '0');
-    el.textContent = \`\${pad(d)}d \${pad(h)}h \${pad(m)}m \${pad(s)}s\`;
+    el.textContent = `${pad(d)}d ${pad(h)}h ${pad(m)}m ${pad(s)}s`;
   }
 
   render() {
     const title = this.getAttribute('title') || 'Countdown';
     const accent = this.getAttribute('accent') || 'indigo';
     
-    this.innerHTML = \`
+    this.innerHTML = `
       <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between h-full">
-        <div class="flex items-center gap-2 text-\${accent}-400 mb-2">
+        <div class="flex items-center gap-2 text-${accent}-400 mb-2">
             <i class="fa-solid fa-hourglass-half"></i>
-            <span class="text-xs font-semibold uppercase tracking-wider">\${title}</span>
+            <span class="text-xs font-semibold uppercase tracking-wider">${title}</span>
         </div>
         <div class="timer-text text-2xl font-bold text-white font-mono tracking-widest text-center mt-2">--:--:--:--</div>
       </div>
-    \`;
+    `;
     this.updateTime();
   }
 }

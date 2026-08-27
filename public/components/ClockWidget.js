@@ -26,12 +26,12 @@ class ClockWidget extends HTMLElement {
   render() {
     const theme = this.getAttribute('theme') || 'purple';
     const font = this.getAttribute('font') || "'Courier New', monospace";
-    this.innerHTML = \`
-      <div style="background: \${theme}; color: white; text-align: center; padding: 10px; border-radius: 5px; height: 100%; display: flex; flex-direction: column; justify-content: center;">
-          <div class="time" style="font-family:\${font};font-size:2.4rem;font-weight:700;letter-spacing:3px;"></div>
+    this.innerHTML = `
+      <div style="background: ${theme}; color: white; text-align: center; padding: 10px; border-radius: 5px; height: 100%; display: flex; flex-direction: column; justify-content: center;">
+          <div class="time" style="font-family:${font};font-size:2.4rem;font-weight:700;letter-spacing:3px;"></div>
           <div class="date" style="font-size:0.85rem;color:rgba(255,255,255,0.8);margin-top:5px;font-family: 'Inter', sans-serif;"></div>
       </div>
-    \`;
+    `;
     this.updateTime();
   }
 }
