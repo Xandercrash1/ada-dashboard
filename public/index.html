@@ -180,6 +180,8 @@
           <span id="home-stat-jobs">0</span>
           <span id="home-stat-cpu">0.00</span>
           <span id="home-stat-bugs">0</span>
+          <span id="home-stat-ram">0</span>
+          <span id="home-stat-ram_percent">0</span>
       </div>
 
     </section>
@@ -3125,7 +3127,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       syncHomeStatMirrors();
     }
 
-    // Widgets can embed <span data-home-stat="todo|jobs|cpu|bugs"></span> to
+    // Widgets can embed <span data-home-stat="todo|jobs|cpu|bugs|ram|ram_percent"></span> to
     // show live values. We mirror from the built-in stat spans (which keep
     // updating even when the stats section is hidden) instead of hooking every
     // update site — one dumb copy loop beats four fragile integration points.
