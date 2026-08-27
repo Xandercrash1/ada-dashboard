@@ -607,7 +607,7 @@ app.get('/api/scripts', (req, res) => {
       defaultArgs: ['--dry-run', 'demo']
     },
     {
-      id: 'sys-health',
+      id: 'clear-pm2', name: 'Clear PM2 Logs', category: 'Maintenance', description: 'Flushes all PM2 logs to free up disk space.', runtime: 'bash' }, { id: 'check-disk', name: 'Check Heavy Directories', category: 'Diagnostics', description: 'Finds the top 5 largest directories in the home folder.', runtime: 'bash' }, { id: 'apt-update', name: 'Check System Updates', category: 'Maintenance', description: 'Runs apt update to check for pending security patches.', runtime: 'bash' }, { id: 'sys-health',
       name: 'Server Deep Diagnostic',
       category: 'Operations',
       description: 'Checks OS kernel, CPU load, memory utilization, disk I/O, and network status.',
@@ -624,7 +624,7 @@ app.post('/api/scripts/run', (req, res) => {
     'web-scraper': { cmd: 'python3', file: path.join(SCRIPTS_DIR, 'web-scraper/scrape_quotes.py'), defaultArgs: ['--pages', '2'] },
     'data-cleaner': { cmd: 'python3', file: path.join(SCRIPTS_DIR, 'data-cleaner/clean_data.py'), defaultArgs: ['sample_messy_data.csv'] },
     'file-organizer': { cmd: 'python3', file: path.join(SCRIPTS_DIR, 'file-organizer/organize_files.py'), defaultArgs: ['--dry-run', 'demo'] },
-    'sys-health': { rawCmd: 'echo "=== HOST SPECS ===" && uname -a && echo "" && echo "=== MEMORY ===" && free -h && echo "" && echo "=== DISK ===" && df -h / && echo "" && echo "=== TOP PROCESSES ===" && ps aux --sort=-%mem | head -n 8' }
+    'clear-pm2': { rawCmd: 'pm2 flush' }, 'check-disk': { rawCmd: 'du -sh /home/ubuntu/* 2>/dev/null | sort -rh | head -n 5' }, 'apt-update': { rawCmd: 'sudo apt update && apt list --upgradable' }, 'sys-health': { rawCmd: 'echo "=== HOST SPECS ===" && uname -a && echo "" && echo "=== MEMORY ===" && free -h && echo "" && echo "=== DISK ===" && df -h / && echo "" && echo "=== TOP PROCESSES ===" && ps aux --sort=-%mem | head -n 8' }
   };
 
   const selected = scripts[id];
