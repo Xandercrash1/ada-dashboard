@@ -2119,8 +2119,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       };
       if (sessionId === activeSessionId) renderJobProgress(sessionId, jobPolls[sessionId].lastJob);
       pollJobOnce(sessionId, jobId);
-    }
       updateAgentTabBadge();
+    }
 
     async function pollJobOnce(sessionId, jobId) {
       const poll = jobPolls[sessionId];
