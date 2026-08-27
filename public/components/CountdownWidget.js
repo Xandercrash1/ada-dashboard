@@ -41,15 +41,12 @@ class CountdownWidget extends HTMLElement {
     else if (theme === 'gradient') bgClass = `bg-gradient-to-br from-${accent}-600/80 to-${accent}-900/80 backdrop-blur-md border border-${accent}-400/30 shadow-lg text-white`;
     else bgClass = '';
 
-    const title = this.getAttribute('title') || 'Countdown';
+    const title = this.hasAttribute('title') ? this.getAttribute('title') : 'Countdown';
     // const accent = this.getAttribute('accent') || 'indigo';
     
     this.innerHTML = `
       <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">
-        <div class="flex items-center gap-2 text-${accent}-400 mb-2">
-            <i class="fa-solid fa-hourglass-half"></i>
-            <span class="text-xs font-semibold uppercase tracking-wider">${title}</span>
-        </div>
+        ${title ? `<div class="flex items-center gap-2 text-${accent}-400 mb-2"><i class="fa-solid fa-hourglass-half"></i><span class="text-xs font-semibold uppercase tracking-wider">${title}</span></div>` : ''}
         <div class="timer-text text-2xl font-bold text-white font-mono tracking-widest text-center mt-2">--:--:--:--</div>
       </div>
     `;

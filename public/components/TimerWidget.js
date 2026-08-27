@@ -66,15 +66,12 @@ class TimerWidget extends HTMLElement {
     else if (theme === 'gradient') bgClass = `bg-gradient-to-br from-${accent}-600/80 to-${accent}-900/80 backdrop-blur-md border border-${accent}-400/30 shadow-lg text-white`;
     else bgClass = '';
 
-    const title = this.getAttribute('title') || 'Timer';
+    const title = this.hasAttribute('title') ? this.getAttribute('title') : 'Timer';
     // const accent = this.getAttribute('accent') || 'amber';
     
     this.innerHTML = `
       <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">
-        <div class="flex items-center gap-2 text-${accent}-400 mb-2">
-            <i class="fa-solid fa-clock-rotate-left"></i>
-            <span class="text-xs font-semibold uppercase tracking-wider">${title}</span>
-        </div>
+        ${title ? `<div class="flex items-center gap-2 text-${accent}-400 mb-2"><i class="fa-solid fa-clock-rotate-left"></i><span class="text-xs font-semibold uppercase tracking-wider">${title}</span></div>` : ''}
         <div class="time-display text-4xl font-bold text-white font-mono tracking-wider text-center my-3">--:--</div>
         <div class="flex justify-center gap-3">
             <button class="play-btn w-10 h-10 rounded-full bg-${accent}-500 hover:bg-${accent}-600 text-white flex items-center justify-center transition-colors">

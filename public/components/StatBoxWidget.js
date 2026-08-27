@@ -14,13 +14,13 @@ class StatBoxWidget extends HTMLElement {
     else bgClass = '';
 
     const stat = this.getAttribute('stat') || 'todo';
-    const title = this.getAttribute('title') || 'Statistic';
+    const title = this.hasAttribute('title') ? this.getAttribute('title') : 'Statistic';
     const icon = this.getAttribute('icon') || 'fa-chart-bar';
     // const accent = this.getAttribute('accent') || 'indigo';
     
     this.innerHTML = `
       <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">
-        <div class="text-gray-400 text-xs font-semibold mb-2">${title}</div>
+        ${title ? `<div class="text-gray-400 text-xs font-semibold mb-2">${title}</div>` : ''}
         <div class="text-2xl font-bold text-white flex items-end justify-between">
           <span data-home-stat="${stat}">--</span>
           <i class="fa-solid ${icon} text-${accent}-500/50 text-xl"></i>
