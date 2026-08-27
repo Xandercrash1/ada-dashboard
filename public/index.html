@@ -1952,7 +1952,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
               </div>
               <div class="bg-dark-card border ${m.async ? 'border-cyan-900' : 'border-dark-border'} text-gray-200 text-xs rounded-2xl rounded-tl-sm px-4 py-3 max-w-xl shadow-sm leading-relaxed space-y-2">
                 ${asyncBadge}
-                <div class="prose prose-sm prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/50 prose-pre:border prose-pre:border-dark-border prose-a:text-indigo-400 marker:text-indigo-400 prose-code:text-indigo-200 prose-headings:text-gray-100">${marked.parse(promoteDisplayText)}</div>
+                <div class="prose prose-sm dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-pre:border dark:prose-pre:border-dark-border prose-a:text-indigo-400 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600 dark:prose-headings:text-gray-100">${marked.parse(promoteDisplayText)}</div>
                 ${promoteBtnHtml}
                 ${toolHtml}
               </div>
@@ -3312,7 +3312,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const msgs = (designerSession && designerSession.messages) || [];
       box.innerHTML = msgs.map(m => m.role === 'user'
         ? `<div class="flex justify-end"><div class="max-w-[85%] bg-indigo-600/80 text-white rounded-xl rounded-br-sm px-3 py-2 whitespace-pre-wrap break-words">${escapeHtml(m.text)}</div></div>`
-        : `<div class="flex"><div class="max-w-[85%] bg-dark-bg border border-dark-border text-gray-200 rounded-xl rounded-bl-sm px-3 py-2 whitespace-pre-wrap break-words">${escapeHtml(m.text)}</div></div>`
+        : `<div class="flex"><div class="max-w-[85%] bg-dark-bg border border-dark-border text-gray-800 dark:text-gray-200 rounded-xl rounded-bl-sm px-3 py-2 break-words prose prose-sm dark:prose-invert prose-p:leading-snug prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-a:text-indigo-500 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600">${marked.parse(m.text)}</div></div>`
       ).join('');
       box.scrollTop = box.scrollHeight;
     }
