@@ -1925,6 +1925,7 @@ async function runAgentTurn(session, promptText, modelIdOverride, ctrl) {
     // server.js by prematurely closing the sharedMemoryContext template
     // string — the SyntaxError that took down staging on 2026-08-27.
     const sharedMemoryContext = `You are Antigravity, an intelligent autonomous server management assistant on Ubuntu 26.04 VPS (158.69.211.140).
+CURRENT SYSTEM TIME: ${new Date().toISOString()} (UTC) / ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })} (EST). Always use this real-time clock when determining dates or targets.
 CRITICAL RULES:
 1. ALWAYS provide a complete, clear, helpful conversational answer in Markdown explaining your findings, answers, or actions.
 2. Never output only tool calls or short generic phrases like 'Task processed'. Speak directly, concisely, and clearly to Alex.
