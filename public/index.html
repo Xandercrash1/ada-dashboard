@@ -281,7 +281,7 @@
           </button>
           <button onclick="switchServerSubTab('agents')" id="subtab-btn-agents" title="Agents" aria-label="Agents" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
             <i class="fa-solid fa-robot text-purple-400"></i> <span class="hidden sm:inline">Agents</span>
-            <span id="subtab-agent-badge" class="hidden sm:inline px-1.5 py-0.2 rounded-full text-[9px] bg-purple-950 text-purple-300 border border-purple-800">Ready</span>
+            <span id="subtab-agent-badge" class="w-2 h-2 rounded-full bg-purple-400 animate-pulse hidden shadow-[0_0_8px_rgba(168,85,247,0.8)]"></span>
           </button>
           <button onclick="switchServerSubTab('feedback')" id="subtab-btn-feedback" title="Tickets" aria-label="Tickets" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
             <i class="fa-solid fa-ticket text-rose-400"></i> <span class="hidden sm:inline">Tickets</span>
@@ -896,6 +896,16 @@
     // A job keeps polling in the background even if the user switches away
     // from its session — only the DOM update is gated on activeSessionId.
     let jobPolls = {};
+
+    function updateAgentTabBadge() {
+      const badge = document.getElementById('subtab-agent-badge');
+      if (badge) {
+        const isWorking = Object.keys(jobPolls).length > 0 || typeof designerBusy !== "undefined" && designerBusy;
+        if (isWorking) badge.classList.remove('hidden');
+        else badge.classList.add('hidden');
+      }
+    }
+
 
     // --- MODEL REGISTRY ---
     // Fetched from GET /api/agent/models. If that endpoint 404s (e.g. the
@@ -2110,6 +2120,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (sessionId === activeSessionId) renderJobProgress(sessionId, jobPolls[sessionId].lastJob);
       pollJobOnce(sessionId, jobId);
     }
+      updateAgentTabBadge();
 
     async function pollJobOnce(sessionId, jobId) {
       const poll = jobPolls[sessionId];
@@ -2120,6 +2131,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         if (res.status === 404) {
           // In-memory registry lost the job (e.g. server restart). Don't spin forever.
           delete jobPolls[sessionId];
+      updateAgentTabBadge();
           if (sessionId === activeSessionId) {
             const bubble = document.getElementById('job-progress-bubble');
             if (bubble) bubble.remove();
@@ -2179,6 +2191,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const poll = jobPolls[sessionId];
       if (poll && poll.timer) clearTimeout(poll.timer);
       delete jobPolls[sessionId];
+      updateAgentTabBadge();
 
       if (sessionId === activeSessionId) {
         const bubble = document.getElementById('job-progress-bubble');
@@ -3292,6 +3305,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
     function setDesignerBusy(busy, statusText) {
       designerBusy = busy;
+      if (typeof updateAgentTabBadge === "function") updateAgentTabBadge();
       document.getElementById('designer-bubble-send').disabled = busy;
       document.getElementById('designer-bubble-status').classList.toggle('hidden', !busy);
       if (statusText) document.getElementById('designer-bubble-status-text').textContent = statusText;
