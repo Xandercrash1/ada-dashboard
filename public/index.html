@@ -188,36 +188,12 @@
       <!-- Agent-designed widget cards (homepage.json .widgets). Hidden when empty. -->
       <div id="home-widgets" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
 
-      <!-- Quick Stats — designer can hide via homepage.json sections.stats -->
-      <div id="home-stats" class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between">
-          <div class="text-gray-400 text-xs font-semibold mb-2">Pending TODOs</div>
-          <div class="text-2xl font-bold text-white flex items-end justify-between">
-            <span id="home-stat-todo">--</span>
-            <i class="fa-solid fa-calendar-check text-indigo-500/50 text-xl"></i>
-          </div>
-        </div>
-        <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between">
-          <div class="text-gray-400 text-xs font-semibold mb-2">Active Jobs</div>
-          <div class="text-2xl font-bold text-white flex items-end justify-between">
-            <span id="home-stat-jobs">--</span>
-            <i class="fa-solid fa-microchip text-purple-500/50 text-xl"></i>
-          </div>
-        </div>
-        <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between">
-          <div class="text-gray-400 text-xs font-semibold mb-2">System Load</div>
-          <div class="text-2xl font-bold text-white flex items-end justify-between">
-            <span id="home-stat-cpu">--</span>
-            <i class="fa-solid fa-server text-emerald-500/50 text-xl"></i>
-          </div>
-        </div>
-        <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between">
-          <div class="text-gray-400 text-xs font-semibold mb-2">Open Bug Reports</div>
-          <div class="text-2xl font-bold text-white flex items-end justify-between">
-            <span id="home-stat-bugs">--</span>
-            <i class="fa-solid fa-bug text-rose-500/50 text-xl"></i>
-          </div>
-        </div>
+      <!-- Hidden state store for live stats so Designer widgets can safely mirror them -->
+      <div id="home-stats-state" style="display:none;">
+          <span id="home-stat-todo">0</span>
+          <span id="home-stat-jobs">0</span>
+          <span id="home-stat-cpu">0.00</span>
+          <span id="home-stat-bugs">0</span>
       </div>
 
       <!-- Favorite Tools / Quick Links — designer can hide via sections.quickLinks -->
