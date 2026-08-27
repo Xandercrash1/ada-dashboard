@@ -48,11 +48,17 @@ class StopwatchWidget extends HTMLElement {
   }
 
   render() {
+    const theme = this.getAttribute('theme') || 'transparent';
+    let bgClass = '';
+    if (theme === 'glass') bgClass = 'bg-white/5 dark:bg-black/20 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-lg';
+    else if (theme === 'solid') bgClass = '${bgClass}';
+    else bgClass = '';
+
     const title = this.getAttribute('title') || 'Stopwatch';
     const accent = this.getAttribute('accent') || 'emerald';
     
     this.innerHTML = `
-      <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between h-full">
+      <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">
         <div class="flex items-center gap-2 text-${accent}-400 mb-2">
             <i class="fa-solid fa-stopwatch"></i>
             <span class="text-xs font-semibold uppercase tracking-wider">${title}</span>

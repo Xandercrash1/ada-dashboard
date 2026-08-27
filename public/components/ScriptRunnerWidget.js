@@ -38,13 +38,19 @@ class ScriptRunnerWidget extends HTMLElement {
   }
 
   render() {
+    const theme = this.getAttribute('theme') || 'transparent';
+    let bgClass = '';
+    if (theme === 'glass') bgClass = 'bg-white/5 dark:bg-black/20 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-lg';
+    else if (theme === 'solid') bgClass = '${bgClass}';
+    else bgClass = '';
+
     const label = this.getAttribute('label') || 'Run Script';
     const icon = this.getAttribute('icon') || 'fa-terminal';
     const accent = this.getAttribute('accent') || 'indigo';
     const scriptId = this.getAttribute('script-id') || 'sys-health';
     
     this.innerHTML = `
-      <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-center items-center h-full gap-3 transition-colors hover:bg-dark-bg">
+      <div class="${bgClass} rounded-xl p-4 flex flex-col justify-center items-center h-full gap-3 transition-colors hover:bg-dark-bg">
         <div class="text-gray-400 text-xs font-semibold uppercase tracking-wider">${scriptId}</div>
         <button class="w-full py-3 px-4 rounded-lg bg-${accent}-500 hover:bg-${accent}-600 text-white font-bold flex items-center justify-center gap-2 transition-colors">
             <i class="fa-solid ${icon}"></i> ${label}

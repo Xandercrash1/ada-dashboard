@@ -3046,15 +3046,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           ? `onclick="switchTab('${escapeHtml(w.link.tab)}')"`
           : `onclick="window.open('${escapeHtml(w.link.href || '')}', '_blank')"`) : '';
         return `
-          <div class="text-left bg-dark-card border border-dark-border rounded-xl p-4 ${w.link ? 'cursor-pointer hover:bg-dark-bg transition-colors' : ''}" ${linkAttr}>
-            <div class="flex items-center gap-3 mb-2">
-              <div class="w-8 h-8 rounded-lg bg-${accent}-500/20 text-${accent}-400 flex items-center justify-center flex-shrink-0">
-                <i class="fa-solid ${escapeHtml(w.icon || 'fa-cube')}"></i>
-              </div>
-              <h3 class="text-gray-200 font-semibold">${escapeHtml(w.title)}</h3>
-            </div>
-            <div class="text-gray-400 text-xs leading-relaxed">${w.html || ''}</div>
-            ${w.link && w.link.label ? `<div class="mt-2 text-[11px] font-semibold text-${accent}-400">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
+          <div class="relative w-full h-full ${w.link ? 'cursor-pointer group' : ''}" ${linkAttr}>
+            ${w.html || ''}
+            ${w.link && w.link.label ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
           </div>`;
       }).join('');
       

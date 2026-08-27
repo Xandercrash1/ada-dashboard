@@ -4,6 +4,12 @@ class GreetingWidget extends HTMLElement {
   attributeChangedCallback() { this.render(); }
   
   render() {
+    const theme = this.getAttribute('theme') || 'transparent';
+    let bgClass = '';
+    if (theme === 'glass') bgClass = 'bg-white/5 dark:bg-black/20 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-lg';
+    else if (theme === 'solid') bgClass = '${bgClass}';
+    else bgClass = '';
+
     const name = this.getAttribute('name') || 'Alex';
     const hour = new Date().getHours();
     let greeting = 'Good evening';
@@ -13,7 +19,7 @@ class GreetingWidget extends HTMLElement {
     else if (hour < 18) { greeting = 'Good afternoon'; icon = 'fa-cloud-sun'; color = 'sky'; }
 
     this.innerHTML = `
-      <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex items-center gap-4 h-full">
+      <div class="${bgClass} rounded-xl p-4 flex items-center gap-4 h-full">
         <div class="w-12 h-12 rounded-full bg-${color}-500/20 text-${color}-400 flex items-center justify-center text-2xl">
           <i class="fa-solid ${icon}"></i>
         </div>
