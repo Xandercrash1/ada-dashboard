@@ -283,8 +283,8 @@
             <i class="fa-solid fa-robot text-purple-400"></i> <span class="hidden sm:inline">Agents</span>
             <span id="subtab-agent-badge" class="hidden sm:inline px-1.5 py-0.2 rounded-full text-[9px] bg-purple-950 text-purple-300 border border-purple-800">Ready</span>
           </button>
-          <button onclick="switchServerSubTab('feedback')" id="subtab-btn-feedback" title="Feedback" aria-label="Feedback" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
-            <i class="fa-solid fa-comment-dots text-rose-400"></i> <span class="hidden sm:inline">Feedback</span>
+          <button onclick="switchServerSubTab('feedback')" id="subtab-btn-feedback" title="Tickets" aria-label="Tickets" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-ticket text-rose-400"></i> <span class="hidden sm:inline">Tickets</span>
           </button>
         </div>
 
@@ -376,7 +376,7 @@
           <form onsubmit="execTerminalCommand(event)" class="flex gap-2">
             <div class="relative flex-1">
               <span class="absolute left-3.5 top-2.5 text-xs text-gray-500 font-mono font-bold">$</span>
-              <input type="text" id="term-input" placeholder="Type bash command (e.g. uptime, ps aux, pm2 logs)..." class="w-full bg-black/80 border border-dark-border rounded-xl pl-8 pr-4 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500 transition-colors">
+              <input type="text" id="term-input" placeholder="Type bash command (e.g. uptime, ps aux, pm2 logs)..." class="w-full bg-black/80 border border-dark-border rounded-xl pl-8 pr-4 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500 transition-colors" autocomplete="off">
             </div>
             <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow flex items-center gap-1.5">
               <i class="fa-solid fa-play text-[10px]"></i> Run
@@ -485,7 +485,7 @@
             <!-- Chat Input Bar -->
             <div class="p-3 border-t border-dark-border bg-dark-card flex-shrink-0">
               <form onsubmit="submitAgentMessage(event)" class="flex items-center gap-2">
-                <input type="text" id="agent-chat-input" placeholder="Give instructions or ask the agent to perform a task..." class="flex-1 bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors">
+                <input type="text" id="agent-chat-input" placeholder="Give instructions or ask the agent to perform a task..." class="flex-1 bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors" autocomplete="off">
                                 <button type="button" onclick="openScheduleModal()" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-3 py-2.5 rounded-xl transition-all shadow flex items-center justify-center gap-1.5" title="Schedule this prompt">
                   <i class="fa-solid fa-clock text-[11px]"></i>
                 </button>
@@ -506,7 +506,7 @@
       <!-- Quick Capture Form -->
       <div class="bg-dark-card p-4 rounded-2xl border border-dark-border space-y-3 shadow-md">
         <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-          <i class="fa-solid fa-comment-dots text-rose-400"></i> Log Feedback
+          <i class="fa-solid fa-ticket text-rose-400"></i> Create Ticket
         </h2>
         <form id="feedback-form" onsubmit="submitFeedback(event)" class="space-y-3">
           <div class="flex gap-2">
@@ -518,9 +518,9 @@
               <option value="critical">Critical</option>
             </select>
 
-            <input type="text" id="feedback-title" required placeholder="What's up? (e.g. Timeout dumps raw command into chat)" class="flex-1 min-w-0 bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-rose-500 transition-colors">
+            <input type="text" id="feedback-title" required placeholder="What's up? (e.g. Timeout dumps raw command into chat)" class="flex-1 min-w-0 bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-rose-500 transition-colors" autocomplete="off">
           </div>
-          <textarea id="feedback-body" rows="2" placeholder="Optional details..." class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-rose-500 transition-colors resize-none"></textarea>
+          <textarea id="feedback-body" rows="2" placeholder="Optional details..." class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-rose-500 transition-colors resize-none" autocomplete="off"></textarea>
           <button type="submit" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5">
             <i class="fa-solid fa-paper-plane text-[11px]"></i> Submit
           </button>
@@ -590,13 +590,13 @@
       <form id="add-todo-form" onsubmit="submitTodoTask(event)" class="space-y-3.5">
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1">Task Name</label>
-          <input type="text" id="todo-name" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors" placeholder="e.g. Put Away A Basket Of Laundry">
+          <input type="text" id="todo-name" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors" placeholder="e.g. Put Away A Basket Of Laundry" autocomplete="off">
         </div>
 
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold text-gray-300 mb-1">Project</label>
-            <input type="text" id="todo-project" required list="todo-project-list" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" placeholder="e.g. Chores">
+            <input type="text" id="todo-project" required list="todo-project-list" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" placeholder="e.g. Chores" autocomplete="off">
             <datalist id="todo-project-list"></datalist>
           </div>
           <div>
@@ -691,7 +691,7 @@
 
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1">Notes</label>
-          <textarea id="todo-notes" rows="2" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors resize-none" placeholder="Optional..."></textarea>
+          <textarea id="todo-notes" rows="2" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors resize-none" placeholder="Optional..." autocomplete="off"></textarea>
         </div>
 
         <div id="todo-form-error" class="hidden bg-rose-950/40 border border-rose-800/60 text-rose-300 text-[11px] rounded-xl p-2.5"></div>
@@ -717,7 +717,7 @@
       <form id="new-agent-form" onsubmit="submitNewAgent(event)" class="space-y-4">
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1">Agent Name</label>
-          <input type="text" id="new-agent-name" required placeholder="e.g. Server Debugger, Error Auditor..." class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-purple-500 transition-colors">
+          <input type="text" id="new-agent-name" required placeholder="e.g. Server Debugger, Error Auditor..." class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-purple-500 transition-colors" autocomplete="off">
         </div>
 
         <!-- Role Presets Cards -->
@@ -3502,14 +3502,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       <form id="announcement-form" onsubmit="saveAnnouncement(event)" class="space-y-3">
         <div>
           <label class="block text-xs font-semibold text-gray-400 mb-1">Title</label>
-          <input type="text" id="announcement-title-input" maxlength="120" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors">
+          <input type="text" id="announcement-title-input" maxlength="120" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors" autocomplete="off">
         </div>
         <div>
           <label class="block text-xs font-semibold text-gray-400 mb-1">Message</label>
-          <textarea id="announcement-text-input" rows="4" maxlength="2000" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors custom-scrollbar"></textarea>
+          <textarea id="announcement-text-input" rows="4" maxlength="2000" required class="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors custom-scrollbar" autocomplete="off"></textarea>
         </div>
         <label class="flex items-center gap-2 text-xs text-gray-300 select-none">
-          <input type="checkbox" id="announcement-visible-input" class="rounded text-indigo-600 focus:ring-0 bg-dark-card border-gray-600" checked>
+          <input type="checkbox" id="announcement-visible-input" class="rounded text-indigo-600 focus:ring-0 bg-dark-card border-gray-600" checked autocomplete="off">
           Show the banner on the home page
         </label>
         <p id="announcement-modal-error" class="hidden text-[11px] text-rose-400"></p>
