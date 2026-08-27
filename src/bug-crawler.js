@@ -39,20 +39,22 @@ async function run() {
   // We have new logs. Ask Ollama to check if there's a real crash or error here.
   console.log('[Crawler] Found new logs. Sending to Ollama for analysis...');
   
-  const prompt = `You are an autonomous bug crawler. Analyze the following recent server error logs. 
-If there is no real error (e.g. just a benign warning or empty log), reply with "NO_ERROR".
-If there is a real crash, exception, or significant bug, reply with a JSON object representing a bug ticket to be filed.
-The JSON must have the following keys:
-- title: A short, descriptive title of the bug.
-- body: A detailed explanation of the crash, the stack trace summary, and potential causes.
-- urgency: "normal", "high", or "critical" depending on severity.
+  const prompt = `You are an autonomous bug crawler. Analyze the following recent server error logs.
+You MUST reply with ONLY a JSON object.
+If there is no real error (e.g. just a benign warning or empty log), reply with {"has_error": false}.
+If there is a real crash, exception, or significant bug, reply with:
+{
+  "has_error": true,
+  "title": "A short, descriptive title of the bug",
+  "body": "A detailed explanation of the crash, the stack trace summary, and potential causes.",
+  "urgency": "normal" // or "high", "critical"
+}
 
 Logs:
 \`\`\`
-${newLogs.slice(-2000)} // keep it bounded
+${newLogs.slice(-2000)}
 \`\`\`
-
-ONLY OUTPUT VALID JSON OR "NO_ERROR". Do not include markdown fences around the JSON.`;
+`;
 
   try {
     const res = await fetch('http://127.0.0.1:11434/api/generate', {
@@ -72,16 +74,11 @@ ONLY OUTPUT VALID JSON OR "NO_ERROR". Do not include markdown fences around the 
     
     const data = await res.json();
     let text = data.response.trim();
-    if (text === 'NO_ERROR') {
+    const ticket = JSON.parse(text);
+    if (!ticket.has_error) {
       console.log('[Crawler] Model determined there are no actionable errors.');
       return;
     }
-    
-    // Strip potential markdown fences if the model hallucinated them
-    if (text.startsWith('```json')) text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    if (text.startsWith('```')) text = text.replace(/```/g, '').trim();
-    
-    const ticket = JSON.parse(text);
     
     // Write ticket
     const feedback = fs.existsSync(FEEDBACK_FILE) ? JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf8')) : [];
