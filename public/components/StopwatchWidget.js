@@ -51,7 +51,7 @@ class StopwatchWidget extends HTMLElement {
     const theme = this.getAttribute('theme') || 'transparent';
     let bgClass = '';
     if (theme === 'glass') bgClass = 'bg-white/5 dark:bg-black/20 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-lg';
-    else if (theme === 'solid') bgClass = '${bgClass}';
+    else if (theme === 'solid') bgClass = 'bg-dark-card border border-dark-border';
     else bgClass = '';
 
     const title = this.getAttribute('title') || 'Stopwatch';
