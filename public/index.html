@@ -3079,6 +3079,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             ${w.link && w.link.label ? `<div class="mt-2 text-[11px] font-semibold text-${accent}-400">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
           </div>`;
       }).join('');
+      
+      // Execute any scripts the Designer injected (since innerHTML ignores them by default)
+      grid.querySelectorAll('script').forEach(oldScript => {
+        const newScript = document.createElement('script');
+        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+        newScript.appendChild(document.createTextNode(oldScript.innerHTML));
+        oldScript.parentNode.replaceChild(newScript, oldScript);
+      });
+      
       syncHomeStatMirrors();
     }
 
