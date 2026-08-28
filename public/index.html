@@ -117,7 +117,7 @@
 <body class="min-h-screen flex flex-col pb-24 md:pb-8 antialiased custom-scrollbar">
 
   <!-- DESKTOP / TABLET TABS -->
-  <div class="bg-dark-card border-b border-dark-border hidden md:block relative z-[999]">
+  <div class="border-b border-white/10 bg-transparent hidden md:block relative z-[999]">
     <div class="max-w-6xl mx-auto px-4 flex items-center justify-between">
       <nav class="flex space-x-8">
                 <button onclick="switchTab('home')" id="tab-btn-home" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
@@ -3314,6 +3314,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (!w) return;
       
       document.getElementById('edit-widget-id').value = id;
+      document.getElementById('edit-widget-size').value = w.size || 'auto';
       
       const div = document.createElement('div');
       div.innerHTML = w.html;
@@ -3336,6 +3337,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const id = document.getElementById('edit-widget-id').value;
       const theme = document.getElementById('edit-widget-theme').value;
       const accent = document.getElementById('edit-widget-accent').value;
+      const size = document.getElementById('edit-widget-size').value;
       
       const w = homepageDoc.widgets.find(w => w.id === id);
       if (w) {
@@ -3348,6 +3350,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           el.setAttribute('accent', accent);
           w.html = div.innerHTML;
         }
+        if (size !== 'auto') w.size = size;
+        else delete w.size;
       }
       
       closeWidgetEditModal();
@@ -3919,8 +3923,18 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       <div class="p-5 space-y-4">
         <input type="hidden" id="edit-widget-id">
         <div>
+          <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Size</label>
+          <select id="edit-widget-size" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            <option value="auto">Auto (Smart Sizing)</option>
+            <option value="1x1">1x1 (Small Square)</option>
+            <option value="2x1">2x1 (Wide Pill)</option>
+            <option value="2x2">2x2 (Large Square)</option>
+            <option value="full">Full Width</option>
+          </select>
+        </div>
+        <div>
           <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Theme</label>
-          <select id="edit-widget-theme" class="w-full bg-dark-card border border-dark-border text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+          <select id="edit-widget-theme" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
             <option value="transparent">Transparent (Clean)</option>
             <option value="glass">Glass (Frosted)</option>
             <option value="solid">Solid (Card)</option>
@@ -3931,17 +3945,17 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         <div>
           <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Accent Color</label>
           <div class="grid grid-cols-3 gap-2">
-            <button onclick="selectEditAccent('indigo')" id="accent-btn-indigo" class="accent-btn py-2 rounded border border-dark-border text-indigo-400 hover:bg-indigo-500/10 text-xs font-semibold">Indigo</button>
-            <button onclick="selectEditAccent('purple')" id="accent-btn-purple" class="accent-btn py-2 rounded border border-dark-border text-purple-400 hover:bg-purple-500/10 text-xs font-semibold">Purple</button>
-            <button onclick="selectEditAccent('rose')" id="accent-btn-rose" class="accent-btn py-2 rounded border border-dark-border text-rose-400 hover:bg-rose-500/10 text-xs font-semibold">Rose</button>
-            <button onclick="selectEditAccent('amber')" id="accent-btn-amber" class="accent-btn py-2 rounded border border-dark-border text-amber-400 hover:bg-amber-500/10 text-xs font-semibold">Amber</button>
-            <button onclick="selectEditAccent('emerald')" id="accent-btn-emerald" class="accent-btn py-2 rounded border border-dark-border text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold">Emerald</button>
-            <button onclick="selectEditAccent('sky')" id="accent-btn-sky" class="accent-btn py-2 rounded border border-dark-border text-sky-400 hover:bg-sky-500/10 text-xs font-semibold">Sky</button>
+            <button onclick="selectEditAccent('indigo')" id="accent-btn-indigo" class="accent-btn py-2 rounded border border-white/5 text-indigo-400 hover:bg-indigo-500/10 text-xs font-semibold">Indigo</button>
+            <button onclick="selectEditAccent('purple')" id="accent-btn-purple" class="accent-btn py-2 rounded border border-white/5 text-purple-400 hover:bg-purple-500/10 text-xs font-semibold">Purple</button>
+            <button onclick="selectEditAccent('rose')" id="accent-btn-rose" class="accent-btn py-2 rounded border border-white/5 text-rose-400 hover:bg-rose-500/10 text-xs font-semibold">Rose</button>
+            <button onclick="selectEditAccent('amber')" id="accent-btn-amber" class="accent-btn py-2 rounded border border-white/5 text-amber-400 hover:bg-amber-500/10 text-xs font-semibold">Amber</button>
+            <button onclick="selectEditAccent('emerald')" id="accent-btn-emerald" class="accent-btn py-2 rounded border border-white/5 text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold">Emerald</button>
+            <button onclick="selectEditAccent('sky')" id="accent-btn-sky" class="accent-btn py-2 rounded border border-white/5 text-sky-400 hover:bg-sky-500/10 text-xs font-semibold">Sky</button>
           </div>
           <input type="hidden" id="edit-widget-accent">
         </div>
       </div>
-      <div class="p-4 bg-dark-card border-t border-dark-border flex justify-end gap-3">
+      <div class="p-4 border-t border-white/10 bg-transparent flex justify-end gap-3">
         <button onclick="closeWidgetEditModal()" class="px-4 py-2 text-sm text-gray-300 hover:text-white">Cancel</button>
         <button onclick="saveWidgetEdit()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg shadow-lg">Save Changes</button>
       </div>
