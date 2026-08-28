@@ -646,7 +646,21 @@ app.get('/api/glance', (req, res) => {
     if (hour < 12) { greeting = 'Good morning'; icon = 'fa-sun'; color = 'amber'; }
     else if (hour < 18) { greeting = 'Good afternoon'; icon = 'fa-cloud-sun'; color = 'sky'; }
     
-    return res.json({ text: `${greeting}, Alex. All systems nominal.`, icon, color });
+    let weatherStr = "All systems nominal.";
+    if (global.cachedWeather && global.cachedWeather.time > Date.now() - 3600000) {
+      weatherStr = `It's currently ${global.cachedWeather.temp}°C and ${global.cachedWeather.desc}.`;
+    } else {
+      // Async fetch to cache for next time so we don't block this request
+      fetch('https://wttr.in/?format=j1').then(r => r.json()).then(data => {
+        global.cachedWeather = {
+          time: Date.now(),
+          temp: data.current_condition[0].temp_C,
+          desc: data.current_condition[0].weatherDesc[0].value.toLowerCase()
+        };
+      }).catch(() => {});
+    }
+    
+    return res.json({ text: `${greeting}, Alex. ${weatherStr}`, icon, color });
   } catch (err) {
     return res.json({ text: "At a glance unavailable", icon: "fa-circle-exclamation", color: "gray" });
   }
@@ -3200,6 +3214,47 @@ app.get('/api/system/logs', (req, res) => {
     const logs = execSync(`tail -n ${safeLines} ${logPath}`).toString();
     res.json({ logs });
   } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// --- 12. WEATHER & LOCATION API ---
+app.get('/api/weather', async (req, res) => {
+  try {
+    
+    // For simplicity, we use wttr.in based on the server IP, or passing a location query.
+    const q = req.query.q || '';
+    const url = `https://wttr.in/${encodeURIComponent(q)}?format=j1`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Weather API failed: ${response.statusText}`);
+    const data = await response.json();
+    
+    const current = data.current_condition[0];
+    res.json({
+      temp_c: current.temp_C,
+      temp_f: current.temp_F,
+      condition: current.weatherDesc[0].value,
+      icon: current.weatherIconUrl ? current.weatherIconUrl[0].value : ''
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// --- 13. CALENDAR API ---
+app.get('/api/calendar/events', (req, res) => {
+  try {
+    const eventsPath = path.join(DATA_DIR, 'events.json');
+    if (require('fs').existsSync(eventsPath)) {
+      const events = JSON.parse(require('fs').readFileSync(eventsPath, 'utf8'));
+      // Filter for today only, or just return them all if it's a simple list
+      return res.json(events);
+    }
+    // Return empty list if no file yet
+    res.json([]);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
