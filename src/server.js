@@ -1710,14 +1710,24 @@ async function runOllamaOpenAITurn(session, promptText, systemInstruction, model
     if (engine === 'openai') headers['Authorization'] = `Bearer ${OPENAI_API_KEY}`;
     
     let resData;
+    // Contract §3: point ctrl.kill at the in-flight request so the job's DELETE
+    // handler can abort it. Without this, cancel only lands between turns — and
+    // with stream:false Ollama generates the ENTIRE completion before returning,
+    // so a cancelled job kept burning CPU for minutes (observed 2026-08-28).
+    // Aborting the fetch closes the connection, which makes Ollama stop generating.
+    const ac = new AbortController();
+    if (ctrl) ctrl.kill = () => ac.abort();
     try {
-      const res = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(reqBody) });
+      const res = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(reqBody), signal: ac.signal });
       if (!res.ok) {
         const errText = await res.text();
         return { agentMsg: { role: 'agent', text: `⚠️ API error (${res.status}): ${errText}`, timestamp: new Date().toISOString(), toolExecutions, errorType: 'api' }, errorInfo: null };
       }
       resData = await res.json();
     } catch (e) {
+      // A user cancel aborts this fetch; fall through to the normal cancelled
+      // exit instead of reporting a phantom network error.
+      if (ctrl && ctrl.cancelled) break;
       return { agentMsg: { role: 'agent', text: `⚠️ Connection failed: ${e.message}`, timestamp: new Date().toISOString(), toolExecutions, errorType: 'network' }, errorInfo: null };
     }
     
