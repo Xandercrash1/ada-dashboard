@@ -1956,6 +1956,10 @@ DESIGN CANVAS: { glanceTheme: {theme, accent}, widgets: [{id, title, icon, accen
 6. <ada-script-runner script-id="sys-health|web-scraper|data-cleaner" label="Run diagnostic" icon="fa-terminal" accent="indigo" theme="glass|transparent|solid|neon|gradient" ></ada-script-runner>
 7. <ada-stat-box stat="todo|jobs|cpu|bugs|ram" title="Label" icon="fa-chart-bar" accent="indigo" theme="glass|transparent|solid|neon|gradient" ></ada-stat-box>
 8. <ada-greeting name="User" theme="glass|transparent|solid|neon|gradient" ></ada-greeting>
+9. <ada-sysmon theme="glass|transparent|solid|neon|gradient" accent="emerald"></ada-sysmon>
+10. <ada-scratchpad theme="glass|transparent|solid|neon|gradient" accent="amber"></ada-scratchpad>
+11. <ada-calendar theme="glass|transparent|solid|neon|gradient" accent="indigo"></ada-calendar>
+12. <ada-photo-frame lib="vacation" interval="10" theme="glass|transparent|solid|neon|gradient" accent="sky"></ada-photo-frame>
 If the user wants a widget that isn't in the library, tell them to ask the Architect to build the Custom Element first! Changes appear instantly on save.`
   };
 
