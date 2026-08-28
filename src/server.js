@@ -3133,6 +3133,77 @@ app.post('/api/media/upload', async (req, res) => {
   }
 });
 
+
+// --- 11. SYSTEM MONITORING API ---
+app.get('/api/system/stats', (req, res) => {
+  try {
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const memory = {
+      total: Math.round(totalMem / 1024 / 1024),
+      used: Math.round(usedMem / 1024 / 1024),
+      free: Math.round(freeMem / 1024 / 1024),
+      percent: Math.round((usedMem / totalMem) * 100)
+    };
+    
+    const cpu = {
+      load: os.loadavg(),
+      cores: os.cpus().length
+    };
+    
+    let disk = { total: '0G', used: '0G', percent: '0%' };
+    try {
+      const df = execSync('df -h /').toString().split('\n')[1].split(/\s+/);
+      disk = { total: df[1], used: df[2], percent: df[4] };
+    } catch(e) {}
+    
+    let pm2 = [];
+    try {
+      const pm2Out = JSON.parse(execSync('pm2 jlist').toString());
+      pm2 = pm2Out.map(p => ({
+        name: p.name,
+        status: p.pm2_env.status,
+        memory: Math.round(p.monit.memory / 1024 / 1024),
+        cpu: p.monit.cpu,
+        restarts: p.pm2_env.restart_time
+      }));
+    } catch(e) {}
+    
+    res.json({ memory, cpu, disk, pm2 });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/system/restart', (req, res) => {
+  try {
+    const { processName } = req.body;
+    if (!processName) return res.status(400).json({ error: 'Missing processName' });
+    const cleanName = processName.replace(/[^a-zA-Z0-9_-]/g, '');
+    execSync(`pm2 restart ${cleanName}`);
+    res.json({ success: true, message: `Restarted ${cleanName}` });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/system/logs', (req, res) => {
+  try {
+    const { processName, lines = 100 } = req.query;
+    if (!processName) return res.status(400).json({ error: 'Missing processName' });
+    const cleanName = processName.replace(/[^a-zA-Z0-9_-]/g, '');
+    const safeLines = parseInt(lines) || 100;
+    const logPath = `/home/ubuntu/.pm2/logs/${cleanName}-error.log`;
+    if (!require('fs').existsSync(logPath)) return res.status(404).json({ error: 'Log file not found' });
+    
+    const logs = execSync(`tail -n ${safeLines} ${logPath}`).toString();
+    res.json({ logs });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`================================================`);
   console.log(` Ada Operations Hub live on port ${PORT}`);
