@@ -22,6 +22,7 @@ class ScratchpadWidget extends HTMLElement {
         const textarea = this.querySelector('textarea');
         if (textarea && document.activeElement !== textarea) {
           textarea.value = this.text;
+          setTimeout(() => this.adjustHeight(), 50); // wait for render
         }
       }
     } catch (e) {}
@@ -53,7 +54,47 @@ class ScratchpadWidget extends HTMLElement {
     const statusIcon = this.querySelector('#scratchpad-status');
     if (statusIcon) statusIcon.className = 'fa-solid fa-pen text-amber-500';
     
+    this.adjustHeight();
     this.typingTimer = setTimeout(() => this.saveText(), 1000);
+  }
+
+  adjustHeight() {
+    const textarea = this.querySelector('textarea');
+    if (!textarea) return;
+    
+    // Reset to calculate natural scroll height
+    textarea.style.height = '1px';
+    const contentHeight = textarea.scrollHeight;
+    textarea.style.height = '100%';
+    
+    // Header is ~30px, padding is 32px.
+    const requiredHeight = contentHeight + 65;
+    
+    let requiredRows = 2; // Default starting height (256px)
+    if (requiredHeight > 380) requiredRows = 4;
+    else if (requiredHeight > 240) requiredRows = 3;
+    
+    const wrapper = this.parentElement;
+    if (wrapper) {
+      let currentRows = 2;
+      wrapper.classList.forEach(cls => {
+        if (cls.startsWith('row-span-')) {
+          currentRows = parseInt(cls.replace('row-span-', ''));
+          wrapper.classList.remove(cls);
+        }
+      });
+      
+      wrapper.classList.add(`row-span-${requiredRows}`);
+      
+      // Persist the size without triggering a full re-render
+      if (currentRows !== requiredRows && window.homepageDoc) {
+        const widgetDef = window.homepageDoc.widgets.find(w => w.id === 'scratchpad');
+        if (widgetDef && widgetDef.rows !== requiredRows) {
+           widgetDef.rows = requiredRows;
+           if (window.saveHomepageDoc) window.saveHomepageDoc();
+        }
+      }
+    }
   }
 
   render() {
