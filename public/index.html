@@ -13,10 +13,15 @@
         if (mode === 'light' || mode === 'dark') return mode;
         return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; // auto
       };
+      // Tailwind (darkMode:'class') needs .dark on <html>; our CSS keys off data-theme.
+      window.__adaApplyTheme = function (resolved) {
+        document.documentElement.setAttribute('data-theme', resolved);
+        document.documentElement.classList.toggle('dark', resolved === 'dark');
+      };
       var mode = 'auto';
       try { mode = localStorage.getItem('ada_theme') || 'auto'; } catch (e) {}
-      try { document.documentElement.setAttribute('data-theme', window.__adaResolveTheme(mode)); }
-      catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+      try { window.__adaApplyTheme(window.__adaResolveTheme(mode)); }
+      catch (e) { window.__adaApplyTheme('dark'); }
     })();
   </script>
   <script type="module" src="/components/index.js"></script>
@@ -101,6 +106,15 @@
     [data-theme="light"] [class*="bg-sky-"].text-white,
     [data-theme="light"] [class*="bg-black"].text-white,
     [data-theme="light"] [class*="bg-gradient"].text-white { color: #ffffff; }
+    /* Translucent black/white utilities assume a dark page. Remap the subtle ones
+       (inputs, cards, hairline borders) so they read as light-gray on white.
+       Scrims and terminal panes (bg-black/40+) intentionally stay dark. */
+    [data-theme="light"] .bg-black\/20 { background-color: rgba(0, 0, 0, 0.045); }
+    [data-theme="light"] .bg-white\/5  { background-color: rgba(0, 0, 0, 0.03); }
+    [data-theme="light"] .bg-white\/10 { background-color: rgba(0, 0, 0, 0.05); }
+    [data-theme="light"] .hover\:bg-white\/5:hover { background-color: rgba(0, 0, 0, 0.04); }
+    [data-theme="light"] .border-white\/5  { border-color: rgba(0, 0, 0, 0.08); }
+    [data-theme="light"] .border-white\/10 { border-color: rgba(0, 0, 0, 0.10); }
     /* Terminal / code panes (bg-black*) intentionally stay dark in both themes. */
     /* Minimalist theme cycle button (top bar) */
     .theme-cycle {
@@ -4077,7 +4091,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         });
       }
       function apply() {
-        document.documentElement.setAttribute('data-theme', window.__adaResolveTheme(getMode()));
+        window.__adaApplyTheme(window.__adaResolveTheme(getMode()));
         render();
       }
       window.cycleTheme = function () {
