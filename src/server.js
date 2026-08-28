@@ -657,13 +657,13 @@ app.get('/api/glance', (req, res) => {
     
     let weatherStr = "All systems nominal.";
     if (global.cachedWeather && global.cachedWeather.time > Date.now() - 3600000) {
-      weatherStr = `It's currently ${global.cachedWeather.temp}°C and ${global.cachedWeather.desc}.`;
+      weatherStr = `It's currently ${global.cachedWeather.temp}°F and ${global.cachedWeather.desc}.`;
     } else {
       // Async fetch to cache for next time so we don't block this request
       fetch('https://wttr.in/Windham,ME?format=j1').then(r => r.json()).then(data => {
         global.cachedWeather = {
           time: Date.now(),
-          temp: data.current_condition[0].temp_C,
+          temp: data.current_condition[0].temp_F,
           desc: (data.current_condition[0].weatherDesc[0].value || '').trim().toLowerCase()
         };
       }).catch(() => {});
