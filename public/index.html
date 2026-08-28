@@ -1700,16 +1700,37 @@
         }
 
         grid.innerHTML = files.map(f => `
-          <a href="${f.path}" target="_blank" class="block group relative aspect-square bg-dark-bg rounded-xl border border-dark-border overflow-hidden hover:border-indigo-500 transition-colors">
-            <img src="${f.path}" alt="${f.filename}" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" loading="lazy">
-            <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-2 pt-6 translate-y-full group-hover:translate-y-0 transition-transform">
+          <div class="block group relative aspect-square bg-dark-bg rounded-xl border border-dark-border overflow-hidden hover:border-indigo-500 transition-colors">
+            <a href="${f.path}" target="_blank" class="block w-full h-full">
+              <img src="${f.path}" alt="${f.filename}" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" loading="lazy">
+            </a>
+            <button onclick="deleteStorageMedia('${f.library}', '${f.filename}')" class="absolute top-2 right-2 bg-rose-600/90 hover:bg-rose-500 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg">
+              <i class="fa-solid fa-xmark text-xs"></i>
+            </button>
+            <div class="absolute inset-x-0 bottom-0 pointer-events-none bg-gradient-to-t from-black/90 to-transparent p-2 pt-6 translate-y-full group-hover:translate-y-0 transition-transform">
               <p class="text-[10px] text-white truncate">${f.filename}</p>
               <p class="text-[9px] text-indigo-300">${f.library}</p>
             </div>
-          </a>
+          </div>
         `).join('');
       } catch (err) {
         console.error('Failed to load media files', err);
+      }
+    }
+
+    async function deleteStorageMedia(library, filename) {
+      if (!confirm(`Are you sure you want to permanently delete ${filename}?`)) return;
+      try {
+        const res = await fetch('/api/media/files', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ library, filename })
+        });
+        const result = await res.json();
+        if (result.error) throw new Error(result.error);
+        loadStorageMedia();
+      } catch (err) {
+        alert('Failed to delete media: ' + err.message);
       }
     }
 

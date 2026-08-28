@@ -3073,6 +3073,25 @@ app.get('/api/media/files', (req, res) => {
   }
 });
 
+app.delete('/api/media/files', (req, res) => {
+  try {
+    const { library, filename } = req.body;
+    if (!library || !filename) return res.status(400).json({ error: 'Missing library or filename' });
+    
+    // Sanitize path inputs to prevent directory traversal
+    const cleanLib = library.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+    const cleanName = filename.replace(/[^a-zA-Z0-9_.-]/g, '');
+    
+    const targetPath = path.join(MEDIA_DIR, cleanLib, cleanName);
+    if (!fs.existsSync(targetPath)) return res.status(404).json({ error: 'File not found' });
+    
+    fs.unlinkSync(targetPath);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/media/upload', (req, res) => {
   try {
     const { library, filename, base64 } = req.body;
