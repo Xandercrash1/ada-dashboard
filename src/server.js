@@ -2458,7 +2458,7 @@ app.post('/api/agent/sessions/:id/chat', (req, res) => {
     // If this session is the Remote Bridge, we DO NOT invoke the local Gemini/Claude
     // agent logic. We just stop here and let the external python daemon poll it.
     if (session.role === 'bridge') {
-      return res.json(session);
+      return res.json({ bridge: true, session });
     }
 
     const effectiveModelId = modelOverride || session.model || getDefaultModel().id;
