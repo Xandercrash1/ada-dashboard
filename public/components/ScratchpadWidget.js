@@ -62,26 +62,37 @@ class ScratchpadWidget extends HTMLElement {
     const textarea = this.querySelector('textarea');
     if (!textarea) return;
     
-    // Reset to calculate natural scroll height
-    textarea.style.height = '1px';
-    const contentHeight = textarea.scrollHeight;
-    textarea.style.height = '100%';
+    // To get true text height, we must remove flex/height constraints
+    // that force the textarea to stretch to the parent container.
+    const originalFlex = textarea.style.flex;
+    const originalHeight = textarea.style.height;
     
-    // Header is ~30px, padding is 32px.
+    textarea.style.flex = 'none';
+    textarea.style.height = '0px';
+    const contentHeight = textarea.scrollHeight;
+    
+    textarea.style.flex = originalFlex;
+    textarea.style.height = originalHeight;
+    
+    // Header is ~30px, padding is 32px. 
     const requiredHeight = contentHeight + 65;
     
-    let requiredRows = 2; // Default starting height (256px)
-    if (requiredHeight > 380) requiredRows = 4;
-    else if (requiredHeight > 240) requiredRows = 3;
+    // Row 1 = 120px, Row 2 = 256px, Row 3 = 392px, Row 4 = 528px
+    let requiredRows = 1; 
+    if (requiredHeight > 392) requiredRows = 4;
+    else if (requiredHeight > 256) requiredRows = 3;
+    else if (requiredHeight > 120) requiredRows = 2;
     
     const wrapper = this.parentElement;
     if (wrapper) {
       let currentRows = 2;
+      const classesToRemove = [];
       wrapper.classList.forEach(cls => {
-        if (cls.startsWith('row-span-')) {
-          currentRows = parseInt(cls.replace('row-span-', ''));
-          wrapper.classList.remove(cls);
-        }
+        if (cls.startsWith('row-span-')) classesToRemove.push(cls);
+      });
+      classesToRemove.forEach(cls => {
+        currentRows = parseInt(cls.replace('row-span-', '')) || currentRows;
+        wrapper.classList.remove(cls);
       });
       
       wrapper.classList.add(`row-span-${requiredRows}`);
