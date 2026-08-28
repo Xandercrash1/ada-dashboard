@@ -578,54 +578,13 @@ app.put('/api/homepage', (req, res) => {
 
 // --- 3. SCRIPTS & AUTOMATION API ---
 app.get('/api/scripts', (req, res) => {
-  const scriptRegistry = [
-    {
-      id: 'web-scraper',
-      name: 'Paginated Web Scraper',
-      category: 'Freelance Portfolio',
-      description: 'Scrapes live quotes, authors, and tags across pagination, generating CSV output.',
-      path: 'web-scraper/scrape_quotes.py',
-      runtime: 'python3',
-      defaultArgs: ['--pages', '2']
-    },
-    {
-      id: 'data-cleaner',
-      name: 'CSV Data Normalizer & Cleaner',
-      category: 'Freelance Portfolio',
-      description: 'Standardizes column headers, strips duplicates, and normalizes messy date formats.',
-      path: 'data-cleaner/clean_data.py',
-      runtime: 'python3',
-      defaultArgs: ['sample_messy_data.csv']
-    },
-    {
-      id: 'file-organizer',
-      name: 'Directory File Organizer (Dry Run)',
-      category: 'Freelance Portfolio',
-      description: 'Scans target folder and categorizes files by extension into structured folders.',
-      path: 'file-organizer/organize_files.py',
-      runtime: 'python3',
-      defaultArgs: ['--dry-run', 'demo']
-    },
-    {
-      id: 'clear-pm2', name: 'Clear PM2 Logs', category: 'Maintenance', description: 'Flushes all PM2 logs to free up disk space.', runtime: 'bash' }, { id: 'check-disk', name: 'Check Heavy Directories', category: 'Diagnostics', description: 'Finds the top 5 largest directories in the home folder.', runtime: 'bash' }, { id: 'apt-update', name: 'Check System Updates', category: 'Maintenance', description: 'Runs apt update to check for pending security patches.', runtime: 'bash' }, { id: 'sys-health',
-      name: 'Server Deep Diagnostic',
-      category: 'Operations',
-      description: 'Checks OS kernel, CPU load, memory utilization, disk I/O, and network status.',
-      runtime: 'bash',
-      command: 'echo "=== HOST SPECS ===" && uname -a && echo "" && echo "=== MEMORY ===" && free -h && echo "" && echo "=== DISK ===" && df -h / && echo "" && echo "=== TOP PROCESSES ===" && ps aux --sort=-%mem | head -n 8'
-    }
-  ];
+  const scriptRegistry = [];
   res.json(scriptRegistry);
 });
 
 app.post('/api/scripts/run', (req, res) => {
   const { id, customArgs } = req.body;
-  const scripts = {
-    'web-scraper': { cmd: 'python3', file: path.join(SCRIPTS_DIR, 'web-scraper/scrape_quotes.py'), defaultArgs: ['--pages', '2'] },
-    'data-cleaner': { cmd: 'python3', file: path.join(SCRIPTS_DIR, 'data-cleaner/clean_data.py'), defaultArgs: ['sample_messy_data.csv'] },
-    'file-organizer': { cmd: 'python3', file: path.join(SCRIPTS_DIR, 'file-organizer/organize_files.py'), defaultArgs: ['--dry-run', 'demo'] },
-    'clear-pm2': { rawCmd: 'pm2 flush' }, 'check-disk': { rawCmd: 'du -sh /home/ubuntu/* 2>/dev/null | sort -rh | head -n 5' }, 'apt-update': { rawCmd: 'sudo apt update && apt list --upgradable' }, 'sys-health': { rawCmd: 'echo "=== HOST SPECS ===" && uname -a && echo "" && echo "=== MEMORY ===" && free -h && echo "" && echo "=== DISK ===" && df -h / && echo "" && echo "=== TOP PROCESSES ===" && ps aux --sort=-%mem | head -n 8' }
-  };
+  const scripts = {};
 
   const selected = scripts[id];
   if (!selected) return res.status(404).json({ error: 'Unknown script ID' });
