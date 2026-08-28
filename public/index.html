@@ -3333,6 +3333,74 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       document.getElementById('widget-edit-modal').classList.add('hidden');
     }
 
+    // --- DRAG TO RESIZE ---
+    let resizingWidget = null;
+    let resizeStartX = 0;
+    let resizeStartY = 0;
+    let initialSizeRank = 2;
+
+    function getWidgetSizeRank(size, id) {
+      if (size === '1x1') return 1;
+      if (size === '2x1') return 2;
+      if (size === '2x2') return 3;
+      if (size === 'full') return 4;
+      if (id === 'photo-frame') return 3;
+      if (id === 'stat-todo' || id === 'stat-jobs') return 1;
+      return 2;
+    }
+
+    function getRankSize(rank) {
+      if (rank <= 1) return '1x1';
+      if (rank === 2) return '2x1';
+      if (rank === 3) return '2x2';
+      return 'full';
+    }
+
+    function startWidgetResize(e, id) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!homepageDoc) return;
+      const w = homepageDoc.widgets.find(w => w.id === id);
+      if (!w) return;
+      resizingWidget = w;
+      resizeStartX = e.clientX;
+      resizeStartY = e.clientY;
+      initialSizeRank = getWidgetSizeRank(w.size, w.id);
+      
+      document.addEventListener('mousemove', onWidgetResizeMove);
+      document.addEventListener('mouseup', onWidgetResizeEnd);
+      document.body.style.cursor = 'nwse-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    function onWidgetResizeMove(e) {
+      if (!resizingWidget) return;
+      const dx = e.clientX - resizeStartX;
+      const dy = e.clientY - resizeStartY;
+      
+      // Every ~75px of movement in the diagonal direction changes the rank
+      let rankShift = Math.floor(((dx + dy) / 2) / 75);
+      let newRank = Math.max(1, Math.min(4, initialSizeRank + rankShift));
+      
+      const newSize = getRankSize(newRank);
+      if (resizingWidget.size !== newSize) {
+        resizingWidget.size = newSize;
+        renderHomepage();
+      }
+    }
+
+    async function onWidgetResizeEnd(e) {
+      document.removeEventListener('mousemove', onWidgetResizeMove);
+      document.removeEventListener('mouseup', onWidgetResizeEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      
+      if (resizingWidget) {
+        resizingWidget = null;
+        await saveHomepageDoc();
+      }
+    }
+
     async function saveWidgetEdit() {
       const id = document.getElementById('edit-widget-id').value;
       const theme = document.getElementById('edit-widget-theme').value;
@@ -3400,6 +3468,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           <div class="absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center gap-3 z-20 backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
              <button onclick="editWidget('${w.id}')" class="px-4 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-palette"></i> Style</button>
              <button onclick="deleteWidget('${w.id}')" class="px-4 py-1.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-trash"></i> Remove</button>
+             <div class="absolute bottom-0 right-0 w-10 h-10 cursor-nwse-resize flex items-center justify-center text-white/50 hover:text-white" onmousedown="startWidgetResize(event, '${w.id}')" title="Drag to resize">
+               <i class="fa-solid fa-up-right-and-down-left-from-center transform rotate-90 text-[12px]"></i>
+             </div>
           </div>
         ` : '';
 
