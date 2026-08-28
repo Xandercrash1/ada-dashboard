@@ -3403,8 +3403,19 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           </div>
         ` : '';
 
+        let spanClass = "col-span-2 row-span-1"; // default auto is 2x1 block
+        if (w.size === '1x1') spanClass = "col-span-1 row-span-1 sm:col-span-2 lg:col-span-2";
+        else if (w.size === '2x1') spanClass = "col-span-2 row-span-1 sm:col-span-4 lg:col-span-4";
+        else if (w.size === '2x2') spanClass = "col-span-2 row-span-2 sm:col-span-4 sm:row-span-2 lg:col-span-4 lg:row-span-2";
+        else if (w.size === 'full') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
+        else {
+          if (w.id === 'photo-frame') spanClass = "col-span-2 row-span-2 sm:col-span-4 sm:row-span-2 lg:col-span-4 lg:row-span-2";
+          else if (w.id === 'stat-todo' || w.id === 'stat-jobs') spanClass = "col-span-1 row-span-1 sm:col-span-2 lg:col-span-2";
+          else if (w.id === 'home-glance-banner') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
+        }
+
         return `
-          <div class="relative w-full h-full ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}>
+          <div class="relative w-full h-full ${spanClass} transition-all duration-500 ease-in-out ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}>
             ${w.html || ''}
             ${w.link && w.link.label && !window.isEditingLayout ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
             ${overlay}
