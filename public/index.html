@@ -3355,8 +3355,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (el) {
          const gridEl = document.getElementById('home-widgets');
          const style = window.getComputedStyle(gridEl);
-         const cols = style.gridTemplateColumns.split(' ').length;
-         colWidth = gridEl.clientWidth / cols;
+         let cols = 6;
+         if (style.gridTemplateColumns && style.gridTemplateColumns !== 'none') {
+             cols = style.gridTemplateColumns.split(' ').length;
+         }
+         colWidth = Math.max(50, gridEl.clientWidth / cols);
          
          const mCol = el.className.match(/col-span-(\d+)/);
          const mRow = el.className.match(/row-span-(\d+)/);
@@ -3481,7 +3484,16 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
         let spanClass = "col-span-2 row-span-1"; // default auto is 2x1 block
         if (w.cols && w.rows) {
-          spanClass = `col-span-${w.cols} row-span-${w.rows}`;
+          const colMap = {
+            1: 'col-span-1 sm:col-span-1 lg:col-span-1',
+            2: 'col-span-2 sm:col-span-2 lg:col-span-2',
+            3: 'col-span-2 sm:col-span-2 lg:col-span-3',
+            4: 'col-span-2 sm:col-span-4 lg:col-span-4',
+            5: 'col-span-2 sm:col-span-4 lg:col-span-5',
+            6: 'col-span-2 sm:col-span-4 lg:col-span-6'
+          };
+          const rowMap = {1:'row-span-1', 2:'row-span-2', 3:'row-span-3', 4:'row-span-4', 5:'row-span-5', 6:'row-span-6'};
+          spanClass = `${colMap[w.cols] || 'col-span-2'} ${rowMap[w.rows] || 'row-span-1'}`;
         } else if (w.size) { // legacy fallback
           if (w.size === '1x1') spanClass = "col-span-1 row-span-1 sm:col-span-2 lg:col-span-2";
           else if (w.size === '2x1') spanClass = "col-span-2 row-span-1 sm:col-span-4 lg:col-span-4";
