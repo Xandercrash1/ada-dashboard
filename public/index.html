@@ -178,7 +178,7 @@
           </button>
         </div>
       </div>
-      <div id="home-widgets" class="hidden grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense"></div>
+      <div id="home-widgets" class="hidden grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[120px]"></div>
 
       <!-- Hidden state store for live stats so Designer widgets can safely mirror them -->
       <div id="home-stats-state" style="display:none;">
@@ -3333,28 +3333,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       document.getElementById('widget-edit-modal').classList.add('hidden');
     }
 
-    // --- DRAG TO RESIZE ---
+    // --- PRECISE DRAG TO RESIZE ---
     let resizingWidget = null;
     let resizeStartX = 0;
     let resizeStartY = 0;
-    let initialSizeRank = 2;
-
-    function getWidgetSizeRank(size, id) {
-      if (size === '1x1') return 1;
-      if (size === '2x1') return 2;
-      if (size === '2x2') return 3;
-      if (size === 'full') return 4;
-      if (id === 'photo-frame') return 3;
-      if (id === 'stat-todo' || id === 'stat-jobs') return 1;
-      return 2;
-    }
-
-    function getRankSize(rank) {
-      if (rank <= 1) return '1x1';
-      if (rank === 2) return '2x1';
-      if (rank === 3) return '2x2';
-      return 'full';
-    }
+    let initialCols = 2;
+    let initialRows = 1;
+    let colWidth = 100;
 
     function startWidgetResize(e, id) {
       e.preventDefault();
@@ -3365,7 +3350,23 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       resizingWidget = w;
       resizeStartX = e.clientX;
       resizeStartY = e.clientY;
-      initialSizeRank = getWidgetSizeRank(w.size, w.id);
+      
+      const el = document.getElementById('home-widgets').children[homepageDoc.widgets.filter(x => !x.hidden).indexOf(w)];
+      if (el) {
+         const gridEl = document.getElementById('home-widgets');
+         const style = window.getComputedStyle(gridEl);
+         const cols = style.gridTemplateColumns.split(' ').length;
+         colWidth = gridEl.clientWidth / cols;
+         
+         const mCol = el.className.match(/col-span-(\d+)/);
+         const mRow = el.className.match(/row-span-(\d+)/);
+         initialCols = mCol ? parseInt(mCol[1]) : (w.cols || 2);
+         initialRows = mRow ? parseInt(mRow[1]) : (w.rows || 1);
+      } else {
+         initialCols = w.cols || 2;
+         initialRows = w.rows || 1;
+         colWidth = 100;
+      }
       
       document.addEventListener('mousemove', onWidgetResizeMove);
       document.addEventListener('mouseup', onWidgetResizeEnd);
@@ -3378,13 +3379,16 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const dx = e.clientX - resizeStartX;
       const dy = e.clientY - resizeStartY;
       
-      // Every ~75px of movement in the diagonal direction changes the rank
-      let rankShift = Math.floor(((dx + dy) / 2) / 75);
-      let newRank = Math.max(1, Math.min(4, initialSizeRank + rankShift));
+      let colShift = Math.round(dx / colWidth);
+      let rowShift = Math.round(dy / 120);
       
-      const newSize = getRankSize(newRank);
-      if (resizingWidget.size !== newSize) {
-        resizingWidget.size = newSize;
+      let newCols = Math.max(1, Math.min(6, initialCols + colShift));
+      let newRows = Math.max(1, initialRows + rowShift);
+      
+      if (resizingWidget.cols !== newCols || resizingWidget.rows !== newRows) {
+        resizingWidget.cols = newCols;
+        resizingWidget.rows = newRows;
+        delete resizingWidget.size; 
         renderHomepage();
       }
     }
@@ -3399,6 +3403,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         resizingWidget = null;
         await saveHomepageDoc();
       }
+    }    }
     }
 
     async function saveWidgetEdit() {
@@ -3475,11 +3480,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         ` : '';
 
         let spanClass = "col-span-2 row-span-1"; // default auto is 2x1 block
-        if (w.size === '1x1') spanClass = "col-span-1 row-span-1 sm:col-span-2 lg:col-span-2";
-        else if (w.size === '2x1') spanClass = "col-span-2 row-span-1 sm:col-span-4 lg:col-span-4";
-        else if (w.size === '2x2') spanClass = "col-span-2 row-span-2 sm:col-span-4 sm:row-span-2 lg:col-span-4 lg:row-span-2";
-        else if (w.size === 'full') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
-        else {
+        if (w.cols && w.rows) {
+          spanClass = `col-span-${w.cols} row-span-${w.rows}`;
+        } else if (w.size) { // legacy fallback
+          if (w.size === '1x1') spanClass = "col-span-1 row-span-1 sm:col-span-2 lg:col-span-2";
+          else if (w.size === '2x1') spanClass = "col-span-2 row-span-1 sm:col-span-4 lg:col-span-4";
+          else if (w.size === '2x2') spanClass = "col-span-2 row-span-2 sm:col-span-4 sm:row-span-2 lg:col-span-4 lg:row-span-2";
+          else if (w.size === 'full') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
+        } else {
           if (w.id === 'photo-frame') spanClass = "col-span-2 row-span-2 sm:col-span-4 sm:row-span-2 lg:col-span-4 lg:row-span-2";
           else if (w.id === 'stat-todo' || w.id === 'stat-jobs') spanClass = "col-span-1 row-span-1 sm:col-span-2 lg:col-span-2";
           else if (w.id === 'home-glance-banner') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
