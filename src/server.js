@@ -1944,6 +1944,8 @@ Finally, tell Alex what you built, and include the exact string ${PROMOTE_ACTION
     // surface a promote button. Its writes are ENFORCED to the page document
     // (tool-level walls in executeLocalTool and the Claude arg builder), so
     // the scope rules below are a description of real limits, not a request.
+    bridge: `${sharedMemoryContext}
+Role: Remote Bridge. (This role does not use the local LLM; messages are polled externally).`,
     designer: `${sharedMemoryContext}
 Role: Page Designer ("Designer"). RULING: you are containerized to exactly ONE page — this session is bound to the dashboard "${session.page || 'home'}" page, which renders entirely from the JSON document at ${PAGE_DOCS[session.page] || HOMEPAGE_FILE}. That file is your ONLY writable surface (enforced at the tool layer: no shell, writes outside it are denied). You may NOT edit code, other data files, cron jobs, or server state.
 CRITICAL: NEVER overwrite homepage.json from scratch! You MUST ALWAYS use read_file on it first, parse the existing widgets, and ONLY modify the specific widgets requested by the user, leaving the rest exactly as they were.
@@ -3294,6 +3296,33 @@ app.post('/api/scratchpad', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+
+// --- 15. REMOTE BRIDGE API ---
+app.get('/api/bridge/sync', (req, res) => {
+  const sessions = readSessions().filter(s => s.role === 'bridge');
+  let pending = [];
+  sessions.forEach(s => {
+    if (!s.messages) return;
+    const lastMsg = s.messages[s.messages.length - 1];
+    if (lastMsg && lastMsg.role === 'user') {
+      pending.push({ sessionId: s.id, text: lastMsg.text, timestamp: lastMsg.timestamp });
+    }
+  });
+  res.json({ pending });
+});
+
+app.post('/api/bridge/reply', (req, res) => {
+  const { sessionId, text } = req.body;
+  const sessions = readSessions();
+  const session = sessions.find(s => s.id === sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  
+  session.messages = session.messages || [];
+  session.messages.push({ role: 'agent', text, timestamp: new Date().toISOString() });
+  saveSessions(sessions);
+  res.json({ success: true });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
