@@ -3328,7 +3328,7 @@ app.post('/api/bridge/reply', (req, res) => {
   
   session.messages = session.messages || [];
   session.messages.push({ role: 'agent', text, timestamp: new Date().toISOString() });
-  saveSessions(sessions);
+  writeSessions(sessions);
   res.json({ success: true });
 });
 
