@@ -2126,6 +2126,51 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       setTimeout(() => container.scrollTop = container.scrollHeight, 10);
     }
 
+        // --- AGENT CHAT MEDIA ATTACHMENTS ---
+    document.getElementById('agent-media-upload').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const inputEl = document.getElementById('agent-chat-input');
+      const originalPlaceholder = inputEl.placeholder;
+      inputEl.placeholder = 'Uploading ' + file.name + '...';
+      inputEl.disabled = true;
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const res = await fetch('/api/media/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ library: 'chat', filename: file.name, base64: reader.result })
+          });
+          const result = await res.json();
+          if (result.error) throw new Error(result.error);
+          
+          inputEl.disabled = false;
+          inputEl.placeholder = originalPlaceholder;
+          
+          // Append markdown link to input
+          const isImage = file.type.startsWith('image/');
+          const md = isImage ? `![${file.name}](${result.path})` : `[${file.name}](${result.path})`;
+          inputEl.value = inputEl.value ? inputEl.value + ' ' + md : md;
+          inputEl.focus();
+        } catch (err) {
+          alert('Upload failed: ' + err.message);
+          inputEl.disabled = false;
+          inputEl.placeholder = originalPlaceholder;
+        }
+        e.target.value = '';
+      };
+      reader.onerror = () => {
+        alert('Failed to read file locally.');
+        inputEl.disabled = false;
+        inputEl.placeholder = originalPlaceholder;
+        e.target.value = '';
+      };
+      reader.readAsDataURL(file);
+    });
+
     async function submitAgentMessage(e) {
       if (e) e.preventDefault();
       if (!activeSessionId) return;
