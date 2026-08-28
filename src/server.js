@@ -3092,7 +3092,7 @@ app.delete('/api/media/files', (req, res) => {
   }
 });
 
-app.post('/api/media/upload', (req, res) => {
+app.post('/api/media/upload', async (req, res) => {
   try {
     const { library, filename, base64 } = req.body;
     if (!library || !filename || !base64) return res.status(400).json({ error: 'Missing library, filename, or base64 data' });
@@ -3105,15 +3105,29 @@ app.post('/api/media/upload', (req, res) => {
     const libDir = path.join(MEDIA_DIR, cleanLib);
     if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true });
 
-    // Base64 comes in as "data:image/png;base64,iVBORw0KGgo..."
     const matches = base64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
     if (!matches || matches.length !== 3) return res.status(400).json({ error: 'Invalid base64 string format' });
 
+    const mimeType = matches[1];
     const buffer = Buffer.from(matches[2], 'base64');
-    const targetPath = path.join(libDir, cleanName);
     
-    fs.writeFileSync(targetPath, buffer);
-    res.json({ success: true, path: `/media/${cleanLib}/${cleanName}` });
+    // Compress images automatically
+    if (mimeType.startsWith('image/')) {
+      const sharp = require('sharp');
+      const finalName = cleanName.replace(/\.[^/.]+$/, "") + ".webp";
+      const targetPath = path.join(libDir, finalName);
+      
+      await sharp(buffer)
+        .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toFile(targetPath);
+        
+      res.json({ success: true, path: `/media/${cleanLib}/${finalName}` });
+    } else {
+      const targetPath = path.join(libDir, cleanName);
+      fs.writeFileSync(targetPath, buffer);
+      res.json({ success: true, path: `/media/${cleanLib}/${cleanName}` });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
