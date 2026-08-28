@@ -287,8 +287,16 @@ const GLOBAL_KEY = '__global__';
 // requireAuth middleware
 // ---------------------------------------------------------------------
 
-function makeRequireAuth(getSecret) {
+function makeRequireAuth(getSecret, exempt) {
   return function requireAuth(req, res, next) {
+    // Caller-supplied exemption (e.g. the remote Mac bridge authenticating
+    // with a shared token instead of a browser session cookie). The predicate
+    // decides BOTH that the path is exempt-eligible AND that the credential
+    // is valid — a bare path check here would be an unauthenticated hole.
+    if (typeof exempt === 'function' && exempt(req)) {
+      return next();
+    }
+
     // Allow local tools (like the Antigravity Bridge Daemon) to bypass auth
     const ip = getClientIp(req);
     if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') {
@@ -438,7 +446,7 @@ function mountAuth(app, options = {}) {
   checkTrustProxyConfig(app, options.behindProxy);
 
   const getSecret = () => creds.sessionSecret;
-  const requireAuth = makeRequireAuth(getSecret);
+  const requireAuth = makeRequireAuth(getSecret, options.exempt);
 
   // GET /login — serve the login page itself (must stay reachable logged out)
   app.get('/login', (req, res) => {

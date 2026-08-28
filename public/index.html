@@ -789,85 +789,85 @@
 
   <!-- NEW AGENT MODAL (WITH ROLES & CLAUDE TOGGLE) -->
   <div id="new-agent-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
-    <div class="bg-dark-bg/60 backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-dark-border pb-3">
-        <h3 class="text-base font-bold text-white flex items-center gap-2">
-          <i class="fa-solid fa-robot text-purple-400"></i> Configure New Agent
+    <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-white/10 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-200 dark:border-dark-border pb-3">
+        <h3 class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <i class="fa-solid fa-robot text-purple-600 dark:text-purple-400"></i> Configure New Agent
         </h3>
-        <button onclick="closeNewAgentModal()" class="text-gray-400 hover:text-white text-lg">&times;</button>
+        <button type="button" onclick="closeNewAgentModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-white text-lg">&times;</button>
       </div>
 
       <form id="new-agent-form" onsubmit="submitNewAgent(event)" class="space-y-4">
         <div>
-          <label class="block text-xs font-semibold text-gray-300 mb-1">Agent Name</label>
-          <input type="text" id="new-agent-name" required placeholder="e.g. Server Debugger, Error Auditor..." class="w-full bg-black/20 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-purple-500 transition-colors" autocomplete="off">
+          <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Agent Name</label>
+          <input type="text" id="new-agent-name" required placeholder="e.g. Server Debugger, Error Auditor..." class="w-full bg-gray-50 dark:bg-black/20 border border-gray-300 dark:border-white/5 rounded-xl px-3.5 py-2 text-xs text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors" autocomplete="off">
         </div>
 
         <!-- Role Presets Cards -->
         <div>
-          <label class="block text-xs font-semibold text-gray-300 mb-2">Role & Permissions</label>
-          <div class="grid grid-cols-2 gap-2.5">
-            <label class="cursor-pointer border border-purple-500/80 bg-purple-950/20 p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-purple-400">
+          <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Role & Permissions</label>
+          <div id="new-session-role" class="grid grid-cols-2 gap-2.5">
+            <label class="cursor-pointer border border-purple-500 bg-purple-50 dark:bg-purple-950/20 p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-purple-400">
               <input type="radio" name="agent-role" value="debugger" checked class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
               <div>
-                <div class="text-xs font-bold text-white flex items-center gap-1.5">🛠️ Debugger</div>
-                <div class="text-[10px] text-gray-400">Full Read/Write & Bash tool access</div>
+                <div class="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">🛠️ Debugger</div>
+                <div class="text-[10px] text-gray-500 dark:text-gray-400">Full Read/Write & Bash tool access</div>
               </div>
             </label>
 
-            <label class="cursor-pointer border border-dark-border bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-600">
+            <label class="cursor-pointer border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-400 dark:hover:border-gray-600">
               <input type="radio" name="agent-role" value="query" class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
               <div>
-                <div class="text-xs font-bold text-white flex items-center gap-1.5">🔍 Inspector (Query)</div>
-                <div class="text-[10px] text-gray-400">Safe Read-Only queries (no edits)</div>
+                <div class="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">🔍 Inspector (Query)</div>
+                <div class="text-[10px] text-gray-500 dark:text-gray-400">Safe Read-Only queries (no edits)</div>
               </div>
             </label>
 
-            <label class="cursor-pointer border border-dark-border bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-600">
+            <label class="cursor-pointer border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-400 dark:hover:border-gray-600">
               <input type="radio" name="agent-role" value="automator" class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
               <div>
-                <div class="text-xs font-bold text-white flex items-center gap-1.5">⚡ Automator</div>
-                <div class="text-[10px] text-gray-400">Python scripts & cron pipelines</div>
+                <div class="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">⚡ Automator</div>
+                <div class="text-[10px] text-gray-500 dark:text-gray-400">Python scripts & cron pipelines</div>
               </div>
             </label>
 
-            <label class="cursor-pointer border border-dark-border bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-600">
+            <label class="cursor-pointer border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-400 dark:hover:border-gray-600">
               <input type="radio" name="agent-role" value="architect" class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
               <div>
-                <div class="text-xs font-bold text-white flex items-center gap-1.5">📐 Architect</div>
-                <div class="text-[10px] text-gray-400">System planning (Full Read/Write)</div>
+                <div class="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">📐 Architect</div>
+                <div class="text-[10px] text-gray-500 dark:text-gray-400">System planning (Full Read/Write)</div>
               </div>
             </label>
 
-            <label class="cursor-pointer border border-dark-border bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-600">
+            <label class="cursor-pointer border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-400 dark:hover:border-gray-600">
               <input type="radio" name="agent-role" value="designer" class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
               <div>
-                <div class="text-xs font-bold text-white flex items-center gap-1.5">🎨 Designer</div>
-                <div class="text-[10px] text-gray-400">Page design only — writes walled to the page document</div>
+                <div class="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">🎨 Designer</div>
+                <div class="text-[10px] text-gray-500 dark:text-gray-400">Page design only — writes walled to the page document</div>
               </div>
             </label>
 
-            <label class="cursor-pointer border border-dark-border bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-600">
+            <label class="cursor-pointer border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg p-3 rounded-xl flex items-start gap-2.5 transition-all hover:border-gray-400 dark:hover:border-gray-600">
               <input type="radio" name="agent-role" value="bridge" class="mt-1 text-purple-600 focus:ring-0" onchange="onRoleChange(this)">
               <div>
-                <div class="text-xs font-bold text-white flex items-center gap-1.5">💻 Mac Bridge</div>
-                <div class="text-[10px] text-gray-400">Messages sent here are pulled by Antigravity CLI on your laptop</div>
+                <div class="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">💻 Remote Bridge</div>
+                <div class="text-[10px] text-gray-500 dark:text-gray-400">Messages sent here are pulled by Antigravity CLI on your laptop</div>
               </div>
             </label>
           </div>
         </div>
 
         <!-- Model Picker -->
-        <div class="bg-dark-bg p-3 rounded-xl border border-dark-border space-y-1.5">
-          <label class="block text-xs font-semibold text-gray-300 mb-1 flex items-center gap-1.5">
-            <i class="fa-solid fa-brain text-amber-400"></i> Model
+        <div id="new-session-model" class="bg-gray-50 dark:bg-dark-bg p-3 rounded-xl border border-gray-200 dark:border-dark-border space-y-1.5">
+          <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-1.5">
+            <i class="fa-solid fa-brain text-amber-500 dark:text-amber-400"></i> Model
           </label>
           <div id="new-agent-model-picker" class="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar pr-1"></div>
-          <p class="text-[10px] text-gray-500 pl-0.5 pt-0.5">Antigravity — Gemini Flash Lite is the default (fast, free unlimited tokens via Cloudflare Proxy). Pick a different model only if you need it.</p>
+          <p class="text-[10px] text-gray-500 dark:text-gray-400 pl-0.5 pt-0.5">Antigravity — Gemini Flash Lite is the default (fast, free unlimited tokens via Cloudflare Proxy). Pick a different model only if you need it.</p>
         </div>
 
         <div class="flex justify-end gap-2.5 pt-2">
-          <button type="button" onclick="closeNewAgentModal()" class="px-4 py-2 rounded-xl bg-dark-bg border border-dark-border text-xs text-gray-300 hover:text-white">Cancel</button>
+          <button type="button" onclick="closeNewAgentModal()" class="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-dark-bg dark:hover:bg-gray-800 border border-gray-300 dark:border-dark-border text-xs text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">Cancel</button>
           <button type="submit" class="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-semibold text-white shadow-md shadow-purple-600/30">Create Agent</button>
         </div>
       </form>
@@ -1060,18 +1060,19 @@
       const sections = Object.keys(groups).filter(eng => groups[eng].length).map(eng => {
         const cards = groups[eng].map(m => {
           const checked = m.id === selectedId ? 'checked' : '';
-          const disabledClass = m.unavailable ? 'opacity-50 grayscale cursor-not-allowed pointer-events-none' : 'cursor-pointer hover:border-gray-600';
+          const disabledClass = m.unavailable ? 'opacity-50 grayscale cursor-not-allowed pointer-events-none' : 'cursor-pointer hover:border-gray-400 dark:hover:border-gray-600';
+          const selectedClasses = checked ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/20' : 'border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg';
           return `
-            <label class="border ${checked ? 'border-indigo-500 bg-indigo-950/20' : 'border-dark-border bg-dark-bg'} p-2.5 rounded-xl flex items-start gap-2 transition-all ${disabledClass}">
+            <label class="border ${selectedClasses} p-2.5 rounded-xl flex items-start gap-2 transition-all ${disabledClass}">
               <input type="radio" name="${radioName}" value="${m.id}" ${checked} ${m.unavailable ? 'disabled' : ''} class="mt-1 text-indigo-600 focus:ring-0" onchange="onModelPickerChange('${radioName}', this.value)">
               <div class="min-w-0">
-                <div class="text-xs font-bold text-white flex items-center gap-1.5">
-                  <i class="fa-solid ${tierIcons[m.tier] || 'fa-microchip'} text-[10px] text-indigo-400"></i>
+                <div class="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                  <i class="fa-solid ${tierIcons[m.tier] || 'fa-microchip'} text-[10px] text-indigo-500 dark:text-indigo-400"></i>
                   ${escapeHtml(m.label)}
-                  <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-dark-card border border-dark-border text-gray-400">${tierLabels[m.tier] || m.tier}</span>
-                  ${m.default ? '<span class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-950 border border-emerald-800 text-emerald-400">default</span>' : ''}
+                  <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-gray-100 dark:bg-dark-card border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-400">${tierLabels[m.tier] || m.tier}</span>
+                  ${m.default ? '<span class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-100 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400">default</span>' : ''}
                 </div>
-                <div class="text-[10px] text-gray-400 mt-0.5">${escapeHtml(m.description || '')}</div>
+                <div class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">${escapeHtml(m.description || '')}</div>
               </div>
             </label>`;
         }).join('');
@@ -1086,6 +1087,18 @@
     function onModelPickerChange(radioName, value) {
       if (radioName === 'new-agent-model') newAgentSelectedModel = value;
       else if (radioName === 'queue-switch-model') { if (queueContext) queueContext.selectedModel = value; }
+
+      document.querySelectorAll(`input[name="${radioName}"]`).forEach(r => {
+        const parent = r.closest('label');
+        if (!parent) return;
+        if (r.checked) {
+          parent.classList.remove('border-gray-200', 'dark:border-dark-border', 'bg-white', 'dark:bg-dark-bg', 'border-dark-border', 'bg-dark-bg');
+          parent.classList.add('border-indigo-500', 'bg-indigo-50', 'dark:bg-indigo-950/20');
+        } else {
+          parent.classList.add('border-gray-200', 'dark:border-dark-border', 'bg-white', 'dark:bg-dark-bg');
+          parent.classList.remove('border-indigo-500', 'bg-indigo-50', 'dark:bg-indigo-950/20');
+        }
+      });
     }
 
     // --- MAIN TAB SWITCHING ---
@@ -2741,7 +2754,19 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     function updateNewAgentModelPicker() {
-      const role = document.querySelector('input[name="agent-role"]:checked').value;
+      const roleRadio = document.querySelector('input[name="agent-role"]:checked');
+      const role = roleRadio ? roleRadio.value : 'debugger';
+
+      // Hide or show the model selector based on whether role is 'bridge'
+      const modelSection = document.getElementById('new-session-model') || document.getElementById('new-agent-model-container');
+      if (modelSection) {
+        if (role === 'bridge') {
+          modelSection.classList.add('hidden');
+        } else {
+          modelSection.classList.remove('hidden');
+        }
+      }
+
       const requiresWrite = ['debugger', 'automator', 'architect'].includes(role);
       
       const availableModels = modelRegistry.map(m => {
@@ -2766,21 +2791,37 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         newAgentSelectedModel = availableModels.find(m => !m.unavailable && m.default)?.id || availableModels.find(m => !m.unavailable)?.id;
       }
 
-      document.getElementById('new-agent-model-picker').innerHTML =
-        renderModelPickerHTML(availableModels, 'new-agent-model', newAgentSelectedModel);
+      const pickerEl = document.getElementById('new-agent-model-picker');
+      if (pickerEl) {
+        pickerEl.innerHTML = renderModelPickerHTML(availableModels, 'new-agent-model', newAgentSelectedModel);
+      }
     }
 
     function onRoleChange(radio) {
+      const selectedRole = typeof radio === 'string' ? radio : (radio && radio.value) || document.querySelector('input[name="agent-role"]:checked')?.value || 'debugger';
+
       document.querySelectorAll('input[name="agent-role"]').forEach(r => {
         const parent = r.closest('label');
-        if (r.checked) {
-          parent.classList.remove('border-dark-border', 'bg-dark-bg', 'hover:border-gray-600');
-          parent.classList.add('border-purple-500/80', 'bg-purple-950/20', 'hover:border-purple-400');
+        if (!parent) return;
+        if (r.value === selectedRole) {
+          r.checked = true;
+          parent.classList.remove('border-gray-200', 'dark:border-dark-border', 'bg-gray-50', 'dark:bg-dark-bg', 'border-dark-border', 'bg-dark-bg', 'hover:border-gray-600', 'dark:hover:border-gray-600');
+          parent.classList.add('border-purple-500', 'bg-purple-50', 'dark:bg-purple-950/20', 'hover:border-purple-400');
         } else {
-          parent.classList.add('border-dark-border', 'bg-dark-bg', 'hover:border-gray-600');
-          parent.classList.remove('border-purple-500/80', 'bg-purple-950/20', 'hover:border-purple-400');
+          parent.classList.add('border-gray-200', 'dark:border-dark-border', 'bg-gray-50', 'dark:bg-dark-bg');
+          parent.classList.remove('border-purple-500', 'bg-purple-50', 'dark:bg-purple-950/20', 'hover:border-purple-400', 'border-purple-500/80');
         }
       });
+
+      const modelSection = document.getElementById('new-session-model') || document.getElementById('new-agent-model-container');
+      if (modelSection) {
+        if (selectedRole === 'bridge') {
+          modelSection.classList.add('hidden');
+        } else {
+          modelSection.classList.remove('hidden');
+        }
+      }
+
       updateNewAgentModelPicker();
     }
     
@@ -2800,6 +2841,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
     
     function openNewAgentModal() {
+      const defaultRadio = document.querySelector('input[name="agent-role"][value="debugger"]');
+      if (defaultRadio) {
+        defaultRadio.checked = true;
+        onRoleChange(defaultRadio);
+      }
       newAgentSelectedModel = getDefaultModelId();
       updateNewAgentModelPicker();
       document.getElementById('new-agent-modal').classList.remove('hidden');
@@ -2808,6 +2854,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     function closeNewAgentModal() {
       document.getElementById('new-agent-modal').classList.add('hidden');
       document.getElementById('new-agent-form').reset();
+      const defaultRadio = document.querySelector('input[name="agent-role"][value="debugger"]');
+      if (defaultRadio) {
+        defaultRadio.checked = true;
+        onRoleChange(defaultRadio);
+      }
       // Clear pending feedback context on ANY close (submit captures what it
       // needs first). Without this, cancelling a summon-from-feedback modal
       // leaked the prompt/ticket into the next manually-created session.
