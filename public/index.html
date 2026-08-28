@@ -865,13 +865,16 @@
     <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
   </button>
   
+  <!-- SCHEDULED SIDEBAR OVERLAY -->
+  <div id="scheduled-sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 hidden transition-opacity"></div>
+  
   <!-- SCHEDULED SIDEBAR -->
   <div id="scheduled-sidebar" class="fixed right-0 top-0 h-screen w-80 max-w-full bg-dark-card border-l border-dark-border shadow-2xl transform translate-x-full transition-transform z-50 flex flex-col">
     <div class="p-4 border-b border-dark-border flex items-center justify-between bg-dark-bg/80 backdrop-blur-sm">
       <h3 class="text-sm font-bold text-white flex items-center gap-2">
         <i class="fa-solid fa-clock text-amber-400"></i> Scheduled Tasks
       </h3>
-      <button onclick="document.getElementById('scheduled-sidebar').classList.add('translate-x-full')" class="text-gray-400 hover:text-white transition-colors">
+      <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white transition-colors">
         <i class="fa-solid fa-xmark text-lg"></i>
       </button>
     </div>
@@ -3333,6 +3336,71 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       document.getElementById('widget-edit-modal').classList.add('hidden');
     }
 
+    // --- WIDGET REORDERING (DRAG & DROP) ---
+    let draggedWidgetId = null;
+
+    function handleWidgetDragStart(e, id) {
+      if (!window.isEditingLayout) return;
+      draggedWidgetId = id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+      e.target.style.opacity = '0.4';
+    }
+
+    function handleWidgetDragOver(e) {
+      if (!window.isEditingLayout) return;
+      e.preventDefault(); // Necessary to allow dropping
+      e.dataTransfer.dropEffect = 'move';
+    }
+    
+    function handleWidgetDragEnter(e) {
+      if (!window.isEditingLayout) return;
+      e.preventDefault();
+      const dropZone = e.target.closest('[draggable="true"]');
+      if (dropZone && draggedWidgetId) {
+        dropZone.classList.add('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
+      }
+    }
+    
+    function handleWidgetDragLeave(e) {
+      if (!window.isEditingLayout) return;
+      const dropZone = e.target.closest('[draggable="true"]');
+      if (dropZone) {
+        dropZone.classList.remove('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
+      }
+    }
+
+    async function handleWidgetDrop(e, targetId) {
+      if (!window.isEditingLayout) return;
+      e.preventDefault();
+      
+      const dropZone = e.target.closest('[draggable="true"]');
+      if (dropZone) {
+        dropZone.classList.remove('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
+      }
+      
+      if (!draggedWidgetId || draggedWidgetId === targetId) return;
+
+      const sourceIndex = homepageDoc.widgets.findIndex(w => w.id === draggedWidgetId);
+      const targetIndex = homepageDoc.widgets.findIndex(w => w.id === targetId);
+
+      if (sourceIndex > -1 && targetIndex > -1) {
+        const [movedWidget] = homepageDoc.widgets.splice(sourceIndex, 1);
+        homepageDoc.widgets.splice(targetIndex, 0, movedWidget);
+        renderHomepage();
+        await saveHomepageDoc();
+      }
+      draggedWidgetId = null;
+    }
+    
+    function handleWidgetDragEnd(e) {
+      e.target.style.opacity = '1';
+      document.querySelectorAll('[draggable="true"]').forEach(el => {
+        el.classList.remove('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
+      });
+      draggedWidgetId = null;
+    }
+
     // --- PRECISE DRAG TO RESIZE ---
     let resizingWidget = null;
     let resizeStartX = 0;
@@ -3474,6 +3542,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const overlay = window.isEditingLayout ? `
           <div class="absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center gap-3 z-20 backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
              <button onclick="editWidget('${w.id}')" class="px-4 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-palette"></i> Style</button>
+             <button onclick="duplicateWidget('${w.id}')" class="px-4 py-1.5 bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-clone"></i> Clone</button>
+             <button onclick="exportWidget('${w.id}')" class="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-download"></i> Export</button>
              <button onclick="deleteWidget('${w.id}')" class="px-4 py-1.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-trash"></i> Remove</button>
              <div class="absolute bottom-0 right-0 w-10 h-10 cursor-nwse-resize flex items-center justify-center text-white/50 hover:text-white" onmousedown="startWidgetResize(event, '${w.id}')" title="Drag to resize">
                <i class="fa-solid fa-up-right-and-down-left-from-center transform rotate-90 text-[12px]"></i>
@@ -3505,7 +3575,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         }
 
         return `
-          <div class="relative w-full h-full ${spanClass} transition-all duration-500 ease-in-out ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}>
+          <div class="relative w-full h-full ${spanClass} transition-all duration-500 ease-in-out ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}
+               ${window.isEditingLayout ? `draggable="true" ondragstart="handleWidgetDragStart(event, '${w.id}')" ondragover="handleWidgetDragOver(event)" ondrop="handleWidgetDrop(event, '${w.id}')" ondragenter="handleWidgetDragEnter(event)" ondragleave="handleWidgetDragLeave(event)" ondragend="handleWidgetDragEnd(event)"` : ''}>
             ${w.html || ''}
             ${w.link && w.link.label && !window.isEditingLayout ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
             ${overlay}
