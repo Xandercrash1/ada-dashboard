@@ -2181,11 +2181,24 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
                 </button>` : '';
 
         if (isUser) {
+          let statusHtml = '';
+          const st = m._status || 'sent'; // from server = implicitly sent
+          if (st === 'sending') {
+            statusHtml = `<div class="mt-1 flex items-center justify-end gap-1 text-[9px] text-gray-500 font-medium tracking-wide pr-1 opacity-70"><i class="fa-solid fa-circle-notch animate-spin"></i> SENDING</div>`;
+          } else if (st === 'failed') {
+            statusHtml = `<div class="mt-1 flex items-center justify-end gap-1 text-[9px] text-red-500/80 font-medium tracking-wide pr-1"><i class="fa-solid fa-circle-xmark"></i> FAILED</div>`;
+          } else if (st === 'sent') {
+            statusHtml = `<div class="mt-1 flex items-center justify-end gap-1 text-[9px] text-emerald-500/70 font-medium tracking-wide pr-1"><i class="fa-solid fa-check"></i> SENT</div>`;
+          }
+
           return `
-            <div class="flex justify-end">
-              <div class="bg-indigo-600 text-white text-xs rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-lg shadow-sm leading-relaxed">
-                ${escapeHtml(m.text)}
+            <div class="flex flex-col items-end w-full">
+              <div class="flex justify-end">
+                <div class="bg-indigo-600 text-white text-xs rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-lg shadow-sm leading-relaxed">
+                  ${escapeHtml(m.text)}
+                </div>
               </div>
+              ${statusHtml}
             </div>
           `;
         } else {
@@ -2266,7 +2279,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       // a switch-and-retry reuses the same prompt and it's already on screen.
       const session = agentSessions.find(s => s.id === activeSessionId);
       if (session) {
-        session.messages.push({ role: 'user', text, timestamp: new Date().toISOString() });
+        session.messages.push({ role: 'user', text, timestamp: new Date().toISOString(), _status: 'sending' });
         renderChatMessages(session.messages);
       }
 
@@ -2357,10 +2370,24 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
+        
+        if (!res.ok && res.status !== 409) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        
         const data = await res.json();
 
         const tb = document.getElementById('thinking-indicator');
         if (tb) tb.remove();
+        
+        // Mark optimistic message as sent
+        if (session && session.messages) {
+          const lastMsg = session.messages[session.messages.length - 1];
+          if (lastMsg && lastMsg.role === 'user' && lastMsg._status === 'sending') {
+            lastMsg._status = 'sent';
+            if (sessionId === activeSessionId) renderChatMessages(session.messages);
+          }
+        }
 
         // Async job path — covers both 202 (new job) and 409 (one was
         // already running for this session; attach rather than error).
@@ -2373,6 +2400,23 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             renderSessionsList();
           }
           startJobPolling(sessionId, data.jobId, data);
+          return;
+        }
+
+        // Bridge sessions: no local job — the message now sits queued until
+        // the remote (Mac) daemon polls it. Show a transient hint so the chat
+        // doesn't just look frozen; the reply lands via the async-message poll.
+        if (data && data.bridge) {
+          if (session && data.session) session.messages = data.session.messages;
+          if (session) renderChatMessages(session.messages);
+          const c = document.getElementById('chat-messages-container');
+          if (c) {
+            const hint = document.createElement('div');
+            hint.className = 'text-[11px] text-purple-400/80 px-4 py-2 flex items-center gap-2';
+            hint.innerHTML = '<i class="fa-solid fa-tower-broadcast animate-pulse"></i> Sent to remote bridge — waiting for the Mac agent to poll and reply…';
+            c.appendChild(hint);
+            c.scrollTop = c.scrollHeight;
+          }
           return;
         }
 
@@ -2394,6 +2438,16 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       } catch (err) {
         const tb = document.getElementById('thinking-indicator');
         if (tb) tb.remove();
+        
+        // Mark optimistic message as failed
+        if (session && session.messages) {
+          const lastMsg = session.messages[session.messages.length - 1];
+          if (lastMsg && lastMsg.role === 'user') {
+            lastMsg._status = 'failed';
+            if (sessionId === activeSessionId) renderChatMessages(session.messages);
+          }
+        }
+        
         // Network / server failure — still let the user queue the prompt for later.
         // Not a model-recoverable error, so no model picker (contract §3: recoverable: false).
         openQueueModal(sessionId, text, { message: 'Could not reach the server: ' + err.message, recoverable: false });
