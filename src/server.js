@@ -3268,6 +3268,30 @@ app.get('/api/calendar/events', (req, res) => {
   }
 });
 
+
+// --- 14. SCRATCHPAD API ---
+app.get('/api/scratchpad', (req, res) => {
+  try {
+    const spPath = path.join(DATA_DIR, 'scratchpad.txt');
+    if (require('fs').existsSync(spPath)) {
+      return res.json({ text: require('fs').readFileSync(spPath, 'utf8') });
+    }
+    res.json({ text: "" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/scratchpad', (req, res) => {
+  try {
+    const spPath = path.join(DATA_DIR, 'scratchpad.txt');
+    require('fs').writeFileSync(spPath, req.body.text || "");
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`================================================`);
   console.log(` Ada Operations Hub live on port ${PORT}`);
