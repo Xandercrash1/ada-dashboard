@@ -660,11 +660,11 @@ app.get('/api/glance', (req, res) => {
       weatherStr = `It's currently ${global.cachedWeather.temp}°C and ${global.cachedWeather.desc}.`;
     } else {
       // Async fetch to cache for next time so we don't block this request
-      fetch('https://wttr.in/?format=j1').then(r => r.json()).then(data => {
+      fetch('https://wttr.in/Windham,ME?format=j1').then(r => r.json()).then(data => {
         global.cachedWeather = {
           time: Date.now(),
           temp: data.current_condition[0].temp_C,
-          desc: data.current_condition[0].weatherDesc[0].value.toLowerCase()
+          desc: (data.current_condition[0].weatherDesc[0].value || '').trim().toLowerCase()
         };
       }).catch(() => {});
     }
@@ -3255,8 +3255,8 @@ app.get('/api/system/logs', (req, res) => {
 app.get('/api/weather', async (req, res) => {
   try {
     
-    // For simplicity, we use wttr.in based on the server IP, or passing a location query.
-    const q = req.query.q || '';
+    // Default location is Windham, ME, or query if passed.
+    const q = req.query.q || 'Windham,ME';
     const url = `https://wttr.in/${encodeURIComponent(q)}?format=j1`;
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Weather API failed: ${response.statusText}`);
@@ -3266,7 +3266,7 @@ app.get('/api/weather', async (req, res) => {
     res.json({
       temp_c: current.temp_C,
       temp_f: current.temp_F,
-      condition: current.weatherDesc[0].value,
+      condition: current.weatherDesc[0].value.trim(),
       icon: current.weatherIconUrl ? current.weatherIconUrl[0].value : ''
     });
   } catch (err) {
