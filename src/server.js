@@ -2453,6 +2453,13 @@ app.post('/api/agent/sessions/:id/chat', (req, res) => {
     // §3), so it renders instantly regardless of how long the turn takes.
     session.messages.push({ role: 'user', text: prompt.trim(), timestamp: new Date().toISOString() });
     writeSessions(sessions);
+    
+    // [BRIDGE INTERCEPT]
+    // If this session is the Remote Bridge, we DO NOT invoke the local Gemini/Claude
+    // agent logic. We just stop here and let the external python daemon poll it.
+    if (session.role === 'bridge') {
+      return res.json(session);
+    }
 
     const effectiveModelId = modelOverride || session.model || getDefaultModel().id;
     const modelInfo = getModelById(effectiveModelId) || getDefaultModel();
