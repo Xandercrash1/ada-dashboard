@@ -3047,6 +3047,32 @@ app.get('/api/media/libraries', (req, res) => {
   }
 });
 
+app.get('/api/media/files', (req, res) => {
+  try {
+    if (!fs.existsSync(MEDIA_DIR)) return res.json([]);
+    const { library } = req.query;
+    
+    let results = [];
+    const libs = (library && library !== 'all') ? [library] : fs.readdirSync(MEDIA_DIR, { withFileTypes: true }).filter(i => i.isDirectory()).map(i => i.name);
+    
+    for (const lib of libs) {
+      const libPath = path.join(MEDIA_DIR, lib);
+      if (!fs.existsSync(libPath)) continue;
+      const files = fs.readdirSync(libPath).filter(f => !f.startsWith('.'));
+      for (const f of files) {
+        results.push({
+          filename: f,
+          library: lib,
+          path: `/media/${lib}/${f}`
+        });
+      }
+    }
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/media/upload', (req, res) => {
   try {
     const { library, filename, base64 } = req.body;
