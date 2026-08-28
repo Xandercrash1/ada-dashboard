@@ -56,15 +56,14 @@
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    /* Theme tokens. The Tailwind dark.* palette points at these vars, so every
-       bg-dark-* / border-dark-* utility flips automatically per theme. */
+    /* Theme tokens. The Tailwind dark.* palette points at these vars. */
     :root, [data-theme="dark"] {
-      --bg: #090d16; --card: #0f172a; --border: #1e293b; --accent: #334155; --text: #f8fafc;
-      --scroll-track: #0f172a; --scroll-thumb: #334155;
+      --bg: #121212; --card: #121212; --border: rgba(255, 255, 255, 0.05); --accent: rgba(255, 255, 255, 0.08); --text: #e2e8f0;
+      --scroll-track: transparent; --scroll-thumb: rgba(255, 255, 255, 0.1);
     }
     [data-theme="light"] {
-      --bg: #f1f5f9; --card: #ffffff; --border: #e2e8f0; --accent: #cbd5e1; --text: #0f172a;
-      --scroll-track: #e2e8f0; --scroll-thumb: #94a3b8;
+      --bg: #ffffff; --card: #ffffff; --border: rgba(0, 0, 0, 0.06); --accent: rgba(0, 0, 0, 0.05); --text: #1e293b;
+      --scroll-track: transparent; --scroll-thumb: rgba(0, 0, 0, 0.15);
     }
     body {
       background-color: var(--bg);
@@ -254,22 +253,34 @@
     <!-- TAB 2: AUTOMATION & SCRIPT RUNNER                       -->
     <!-- ======================================================== -->
     <section id="view-tools" class="hidden space-y-5">
-      <div class="bg-dark-card p-4 rounded-2xl border border-dark-border flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div class="bg-dark-card p-4 rounded-2xl border border-dark-border flex items-center justify-between">
         <div>
           <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-            <i class="fa-solid fa-server text-indigo-400"></i> Server Operations Hub
+            <i class="fa-solid fa-bolt text-indigo-400"></i> Automation & Portfolio Scripts
           </h2>
-          <p class="text-xs text-gray-400">One-click execution of tools, scripts, and server media storage.</p>
-        </div>
-        <div class="flex bg-dark-bg p-1 rounded-xl border border-dark-border w-fit">
-          <button onclick="switchServerTab('scripts')" id="btn-server-scripts" class="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600/20 text-indigo-400 transition-all">Scripts & Tools</button>
-          <button onclick="switchServerTab('storage')" id="btn-server-storage" class="px-4 py-2 text-xs font-semibold rounded-lg text-gray-400 hover:text-white transition-all">Media Storage</button>
+          <p class="text-xs text-gray-400">One-click execution of freelance scrapers, data normalizers, and diagnostic tools.</p>
         </div>
       </div>
 
-      <div id="subview-scripts" class="space-y-5">
-
       <div id="scripts-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+
+      <!-- Media Manager -->
+      <div class="bg-dark-card border border-dark-border rounded-2xl p-5 shadow-sm mt-6 mb-6">
+        <h3 class="text-sm font-bold text-white mb-2"><i class="fa-solid fa-photo-film text-indigo-400 mr-2"></i>Media Uploader</h3>
+        <p class="text-xs text-gray-400 mb-4">Upload photos or audio straight to the server. These files become immediately available at <code>/media/library-name/filename.jpg</code> for your dashboard widgets to use.</p>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="flex-1">
+            <select id="media-library-select" class="w-full bg-dark-bg border border-dark-border text-white text-xs rounded-xl px-3 py-2.5 focus:border-indigo-500 outline-none">
+              <option value="default">Library: default</option>
+            </select>
+          </div>
+          <div class="flex-1 flex items-center justify-center w-full sm:w-auto relative overflow-hidden bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white text-xs font-semibold py-2.5 px-4 rounded-xl transition-all cursor-pointer shadow-sm">
+            <i class="fa-solid fa-cloud-arrow-up mr-2"></i> Browse & Upload File
+            <input type="file" id="media-file-input" class="absolute inset-0 opacity-0 cursor-pointer" accept="image/*, audio/*">
+          </div>
+        </div>
+        <div id="media-upload-status" class="text-[10px] text-gray-400 mt-3 hidden font-mono bg-dark-bg border border-dark-border p-2 rounded-lg"></div>
+      </div>
 
       <!-- Live Execution Console Drawer -->
       <div class="bg-black/95 rounded-2xl border border-dark-border p-4 shadow-2xl font-mono text-xs space-y-2.5">
@@ -288,40 +299,6 @@
           </div>
         </div>
         <pre id="console-output" class="text-emerald-400 whitespace-pre-wrap max-h-72 overflow-y-auto custom-scrollbar leading-relaxed font-mono">Console ready. Click "Run Script" on any card above to execute on the server.</pre>
-      </div>
-      </div> <!-- /subview-scripts -->
-
-      <div id="subview-storage" class="hidden space-y-5">
-        <!-- Media Manager Uploader -->
-        <div class="bg-dark-card border border-dark-border rounded-2xl p-5 shadow-sm">
-          <h3 class="text-sm font-bold text-white mb-2"><i class="fa-solid fa-photo-film text-indigo-400 mr-2"></i>Media Uploader</h3>
-          <p class="text-xs text-gray-400 mb-4">Upload photos or audio straight to the server. These files become immediately available at <code>/media/library-name/filename.jpg</code> for your dashboard widgets to use.</p>
-          <div class="flex flex-col sm:flex-row gap-3">
-            <div class="flex-1">
-              <select id="media-library-select" class="w-full bg-dark-bg border border-dark-border text-white text-xs rounded-xl px-3 py-2.5 focus:border-indigo-500 outline-none">
-                <option value="default">Library: default</option>
-              </select>
-            </div>
-            <div class="flex-1 flex items-center justify-center w-full sm:w-auto relative overflow-hidden bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white text-xs font-semibold py-2.5 px-4 rounded-xl transition-all cursor-pointer shadow-sm">
-              <i class="fa-solid fa-cloud-arrow-up mr-2"></i> Browse & Upload File
-              <input type="file" id="media-file-input" class="absolute inset-0 opacity-0 cursor-pointer" accept="image/*, audio/*">
-            </div>
-          </div>
-          <div id="media-upload-status" class="text-[10px] text-gray-400 mt-3 hidden font-mono bg-dark-bg border border-dark-border p-2 rounded-lg"></div>
-        </div>
-        
-        <!-- Media Viewer Grid -->
-        <div class="bg-dark-card border border-dark-border rounded-2xl p-5 shadow-sm">
-          <div class="flex items-center justify-between mb-4">
-             <h3 class="text-sm font-bold text-white"><i class="fa-solid fa-folder-open text-indigo-400 mr-2"></i>Storage Browser</h3>
-             <select id="storage-library-filter" onchange="loadStorageMedia()" class="bg-dark-bg border border-dark-border text-white text-xs rounded-xl px-3 py-1.5 focus:border-indigo-500 outline-none w-48">
-               <option value="all">All Libraries</option>
-             </select>
-          </div>
-          <div id="storage-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-             <!-- Populated via JS -->
-          </div>
-        </div>
       </div>
     </section>
 
@@ -541,15 +518,9 @@
 
             <!-- Chat Input Bar -->
             <div class="p-3 border-t border-dark-border bg-dark-card flex-shrink-0">
-              <form onsubmit="submitAgentMessage(event)" class="flex items-center gap-2 relative">
-                <div class="flex-1 relative flex items-center">
-                  <input type="text" id="agent-chat-input" placeholder="Give instructions, or click to attach media..." class="w-full bg-dark-bg border border-dark-border rounded-xl pl-4 pr-10 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors" autocomplete="off">
-                  <button type="button" onclick="document.getElementById('agent-media-upload').click()" class="absolute right-2 text-gray-500 hover:text-indigo-400 transition-colors" title="Attach Media">
-                    <i class="fa-solid fa-paperclip"></i>
-                  </button>
-                  <input type="file" id="agent-media-upload" class="hidden" accept="image/*, audio/*, application/pdf">
-                </div>
-                <button type="button" onclick="openScheduleModal()" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-3 py-2.5 rounded-xl transition-all shadow flex items-center justify-center gap-1.5" title="Schedule this prompt">
+              <form onsubmit="submitAgentMessage(event)" class="flex items-center gap-2">
+                <input type="text" id="agent-chat-input" placeholder="Give instructions or ask the agent to perform a task..." class="flex-1 bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors" autocomplete="off">
+                                <button type="button" onclick="openScheduleModal()" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-3 py-2.5 rounded-xl transition-all shadow flex items-center justify-center gap-1.5" title="Schedule this prompt">
                   <i class="fa-solid fa-clock text-[11px]"></i>
                 </button>
                 <button type="submit" id="btn-send-message" class="bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition-all shadow flex items-center gap-1.5">
@@ -753,14 +724,8 @@
         </div>
 
         <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="block text-xs font-semibold text-gray-300">Notes (Markdown Supported)</label>
-            <button type="button" onclick="document.getElementById('todo-media-upload').click()" class="text-gray-500 hover:text-indigo-400 transition-colors text-[10px] font-semibold tracking-wide uppercase" title="Attach Media">
-              <i class="fa-solid fa-paperclip mr-1"></i> Attach
-            </button>
-            <input type="file" id="todo-media-upload" class="hidden" accept="image/*, audio/*, application/pdf">
-          </div>
-          <textarea id="todo-notes" rows="3" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors resize-none" placeholder="Optional details or context..." autocomplete="off"></textarea>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Notes</label>
+          <textarea id="todo-notes" rows="2" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors resize-none" placeholder="Optional..." autocomplete="off"></textarea>
         </div>
 
         <div id="todo-form-error" class="hidden bg-rose-950/40 border border-rose-800/60 text-rose-300 text-[11px] rounded-xl p-2.5"></div>
@@ -1260,32 +1225,32 @@
     function todoRowHtml(t, sameDay) {
       if (todoIsFlagged(t)) {
         return `
-          <div id="todo-row-${escapeHtml(t.id || '')}" class="bg-amber-950/20 border border-amber-800/50 rounded-2xl p-3.5 flex items-start gap-3">
-            <i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5"></i>
+          <div id="todo-row-${escapeHtml(t.id || '')}" class="bg-amber-950/10 rounded-2xl p-3.5 flex items-start gap-3 group">
+            <i class="fa-solid fa-triangle-exclamation text-amber-500/80 mt-0.5"></i>
             <div class="flex-1 min-w-0 text-xs">
-              <div class="text-amber-300 font-semibold">${escapeHtml(t.name || t.id || 'Unrecognized task')}</div>
-              <div class="text-amber-400/80">${escapeHtml(t.error || 'This row could not be parsed. Edit or delete it in Manage.')}</div>
+              <div class="text-amber-300/90 font-semibold">${escapeHtml(t.name || t.id || 'Unrecognized task')}</div>
+              <div class="text-amber-500/60">${escapeHtml(t.error || 'This row could not be parsed. Edit or delete it in Manage.')}</div>
             </div>
           </div>`;
       }
       const emoji = todoEmoji(t);
       const dateLabel = todoDateLabel(t, sameDay);
       return `
-        <div id="todo-row-${escapeHtml(t.id)}" class="bg-dark-card border border-dark-border hover:border-gray-700 transition-all rounded-2xl p-4 flex items-start gap-3.5 group shadow-sm">
-          <button onclick="completeTodoTask('${escapeHtml(t.id)}')" class="mt-0.5 w-5 h-5 rounded-lg border border-gray-600 hover:border-indigo-400 hover:bg-indigo-500/10 text-transparent flex items-center justify-center transition-all flex-shrink-0" title="Complete">
+        <div id="todo-row-${escapeHtml(t.id)}" class="hover:bg-white/5 transition-all rounded-2xl p-3 flex items-start gap-3.5 group relative">
+          <button onclick="completeTodoTask('${escapeHtml(t.id)}')" class="mt-0.5 w-5 h-5 rounded border border-gray-600/50 hover:border-indigo-400/80 hover:bg-indigo-500/10 text-transparent flex items-center justify-center transition-all flex-shrink-0" title="Complete">
             <i class="fa-solid fa-check text-[10px]"></i>
           </button>
-          <div class="flex-1 min-w-0 space-y-1.5">
+          <div class="flex-1 min-w-0 space-y-1">
             <div class="flex items-center justify-between gap-2">
-              <h4 class="text-sm font-semibold text-gray-100 truncate">
+              <h4 class="text-sm font-medium text-gray-200 truncate">
                 <span class="mr-1">${emoji}</span>${escapeHtml(t.name)}
               </h4>
-              <div class="flex items-center gap-1.5 flex-shrink-0">
-                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${todoPriorityBadgeClass(t.priority)}">${escapeHtml(t.priority || 'Low')}</span>
-                <button onclick="openEditTodoModal('${escapeHtml(t.id)}')" class="text-gray-600 hover:text-indigo-400 text-xs p-1 opacity-0 group-hover:opacity-100 transition-opacity" title="Edit">
+              <div class="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity absolute right-4 top-3 bg-dark-bg/80 backdrop-blur-sm pl-2 rounded-l-lg">
+                <span class="px-2 py-0.5 rounded text-[9px] font-semibold border ${todoPriorityBadgeClass(t.priority)}">${escapeHtml(t.priority || 'Low')}</span>
+                <button onclick="openEditTodoModal('${escapeHtml(t.id)}')" class="text-gray-500 hover:text-indigo-400 text-xs p-1 transition-colors" title="Edit">
                   <i class="fa-solid fa-pen"></i>
                 </button>
-                <button onclick="deleteTodoTask('${escapeHtml(t.id)}')" class="text-gray-600 hover:text-rose-400 text-xs p-1 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete">
+                <button onclick="deleteTodoTask('${escapeHtml(t.id)}')" class="text-gray-500 hover:text-rose-400 text-xs p-1 transition-colors" title="Delete">
                   <i class="fa-solid fa-trash-can"></i>
                 </button>
               </div>
@@ -1536,51 +1501,6 @@
       return null;
     }
 
-    // --- TODO MEDIA ATTACHMENTS ---
-    document.getElementById('todo-media-upload').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      
-      const inputEl = document.getElementById('todo-notes');
-      const originalPlaceholder = inputEl.placeholder;
-      inputEl.placeholder = 'Uploading ' + file.name + '...';
-      inputEl.disabled = true;
-
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const res = await fetch('/api/media/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ library: 'tasks', filename: file.name, base64: reader.result })
-          });
-          const result = await res.json();
-          if (result.error) throw new Error(result.error);
-          
-          inputEl.disabled = false;
-          inputEl.placeholder = originalPlaceholder;
-          
-          // Append markdown link to input
-          const isImage = file.type.startsWith('image/');
-          const md = isImage ? `![${file.name}](${result.path})` : `[${file.name}](${result.path})`;
-          inputEl.value = inputEl.value ? inputEl.value + '\n\n' + md : md;
-          inputEl.focus();
-        } catch (err) {
-          alert('Upload failed: ' + err.message);
-          inputEl.disabled = false;
-          inputEl.placeholder = originalPlaceholder;
-        }
-        e.target.value = '';
-      };
-      reader.onerror = () => {
-        alert('Failed to read file locally.');
-        inputEl.disabled = false;
-        inputEl.placeholder = originalPlaceholder;
-        e.target.value = '';
-      };
-      reader.readAsDataURL(file);
-    });
-
     function updateTodoTypeVisibility() {
       const type = document.getElementById('todo-type').value;
       document.getElementById('todo-recurring-fields').classList.toggle('hidden', type !== 'recurring');
@@ -1724,83 +1644,13 @@
       await loadTodoDaily();
     }
 
-    // --- 1.5 MEDIA UPLOADER & STORAGE ---
-    function switchServerTab(tab) {
-      if (tab === 'scripts') {
-        document.getElementById('subview-scripts').classList.remove('hidden');
-        document.getElementById('subview-storage').classList.add('hidden');
-        document.getElementById('btn-server-scripts').classList.add('bg-indigo-600/20', 'text-indigo-400');
-        document.getElementById('btn-server-scripts').classList.remove('text-gray-400');
-        document.getElementById('btn-server-storage').classList.remove('bg-indigo-600/20', 'text-indigo-400');
-        document.getElementById('btn-server-storage').classList.add('text-gray-400');
-      } else {
-        document.getElementById('subview-scripts').classList.add('hidden');
-        document.getElementById('subview-storage').classList.remove('hidden');
-        document.getElementById('btn-server-storage').classList.add('bg-indigo-600/20', 'text-indigo-400');
-        document.getElementById('btn-server-storage').classList.remove('text-gray-400');
-        document.getElementById('btn-server-scripts').classList.remove('bg-indigo-600/20', 'text-indigo-400');
-        document.getElementById('btn-server-scripts').classList.add('text-gray-400');
-        loadStorageMedia();
-      }
-    }
-
-    async function loadStorageMedia() {
-      try {
-        const lib = document.getElementById('storage-library-filter').value;
-        const res = await fetch(`/api/media/files?library=${lib}`);
-        const files = await res.json();
-        const grid = document.getElementById('storage-grid');
-        
-        if (files.length === 0) {
-          grid.innerHTML = `<div class="col-span-full text-center text-gray-500 text-xs py-10 border border-dashed border-dark-border rounded-xl">No media found in this library.</div>`;
-          return;
-        }
-
-        grid.innerHTML = files.map(f => `
-          <div class="block group relative aspect-square bg-dark-bg rounded-xl border border-dark-border overflow-hidden hover:border-indigo-500 transition-colors">
-            <a href="${f.path}" target="_blank" class="block w-full h-full">
-              <img src="${f.path}" alt="${f.filename}" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" loading="lazy">
-            </a>
-            <button onclick="deleteStorageMedia('${f.library}', '${f.filename}')" class="absolute top-2 right-2 bg-rose-600/90 hover:bg-rose-500 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg">
-              <i class="fa-solid fa-xmark text-xs"></i>
-            </button>
-            <div class="absolute inset-x-0 bottom-0 pointer-events-none bg-gradient-to-t from-black/90 to-transparent p-2 pt-6 translate-y-full group-hover:translate-y-0 transition-transform">
-              <p class="text-[10px] text-white truncate">${f.filename}</p>
-              <p class="text-[9px] text-indigo-300">${f.library}</p>
-            </div>
-          </div>
-        `).join('');
-      } catch (err) {
-        console.error('Failed to load media files', err);
-      }
-    }
-
-    async function deleteStorageMedia(library, filename) {
-      if (!confirm(`Are you sure you want to permanently delete ${filename}?`)) return;
-      try {
-        const res = await fetch('/api/media/files', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ library, filename })
-        });
-        const result = await res.json();
-        if (result.error) throw new Error(result.error);
-        loadStorageMedia();
-      } catch (err) {
-        alert('Failed to delete media: ' + err.message);
-      }
-    }
-
+    // --- 1.5 MEDIA UPLOADER ---
     async function loadMediaLibraries() {
       try {
         const res = await fetch('/api/media/libraries');
         const libs = await res.json();
-        
         const select = document.getElementById('media-library-select');
         select.innerHTML = libs.map(l => `<option value="${l}">Library: ${l}</option>`).join('');
-        
-        const filter = document.getElementById('storage-library-filter');
-        filter.innerHTML = `<option value="all">All Libraries</option>` + libs.map(l => `<option value="${l}">${l}</option>`).join('');
       } catch (err) {
         console.error('Failed to load libraries', err);
       }
@@ -1835,9 +1685,6 @@
         }
         // Reset input so the same file can be uploaded again if needed
         e.target.value = '';
-        if (!document.getElementById('subview-storage').classList.contains('hidden')) {
-          loadStorageMedia();
-        }
       };
       reader.onerror = () => {
         statusDiv.innerHTML = `<span class="text-rose-500">Failed to read file on the client.</span>`;
@@ -2182,51 +2029,6 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
       setTimeout(() => container.scrollTop = container.scrollHeight, 10);
     }
-
-        // --- AGENT CHAT MEDIA ATTACHMENTS ---
-    document.getElementById('agent-media-upload').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      
-      const inputEl = document.getElementById('agent-chat-input');
-      const originalPlaceholder = inputEl.placeholder;
-      inputEl.placeholder = 'Uploading ' + file.name + '...';
-      inputEl.disabled = true;
-
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const res = await fetch('/api/media/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ library: 'chat', filename: file.name, base64: reader.result })
-          });
-          const result = await res.json();
-          if (result.error) throw new Error(result.error);
-          
-          inputEl.disabled = false;
-          inputEl.placeholder = originalPlaceholder;
-          
-          // Append markdown link to input
-          const isImage = file.type.startsWith('image/');
-          const md = isImage ? `![${file.name}](${result.path})` : `[${file.name}](${result.path})`;
-          inputEl.value = inputEl.value ? inputEl.value + ' ' + md : md;
-          inputEl.focus();
-        } catch (err) {
-          alert('Upload failed: ' + err.message);
-          inputEl.disabled = false;
-          inputEl.placeholder = originalPlaceholder;
-        }
-        e.target.value = '';
-      };
-      reader.onerror = () => {
-        alert('Failed to read file locally.');
-        inputEl.disabled = false;
-        inputEl.placeholder = originalPlaceholder;
-        e.target.value = '';
-      };
-      reader.readAsDataURL(file);
-    });
 
     async function submitAgentMessage(e) {
       if (e) e.preventDefault();
