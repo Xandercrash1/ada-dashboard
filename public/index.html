@@ -265,6 +265,24 @@
 
       <div id="scripts-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
 
+      <!-- Media Manager -->
+      <div class="bg-dark-card border border-dark-border rounded-2xl p-5 shadow-sm mt-6 mb-6">
+        <h3 class="text-sm font-bold text-white mb-2"><i class="fa-solid fa-photo-film text-indigo-400 mr-2"></i>Media Uploader</h3>
+        <p class="text-xs text-gray-400 mb-4">Upload photos or audio straight to the server. These files become immediately available at <code>/media/library-name/filename.jpg</code> for your dashboard widgets to use.</p>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="flex-1">
+            <select id="media-library-select" class="w-full bg-dark-bg border border-dark-border text-white text-xs rounded-xl px-3 py-2.5 focus:border-indigo-500 outline-none">
+              <option value="default">Library: default</option>
+            </select>
+          </div>
+          <div class="flex-1 flex items-center justify-center w-full sm:w-auto relative overflow-hidden bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white text-xs font-semibold py-2.5 px-4 rounded-xl transition-all cursor-pointer shadow-sm">
+            <i class="fa-solid fa-cloud-arrow-up mr-2"></i> Browse & Upload File
+            <input type="file" id="media-file-input" class="absolute inset-0 opacity-0 cursor-pointer" accept="image/*, audio/*">
+          </div>
+        </div>
+        <div id="media-upload-status" class="text-[10px] text-gray-400 mt-3 hidden font-mono bg-dark-bg border border-dark-border p-2 rounded-lg"></div>
+      </div>
+
       <!-- Live Execution Console Drawer -->
       <div class="bg-black/95 rounded-2xl border border-dark-border p-4 shadow-2xl font-mono text-xs space-y-2.5">
         <div class="flex items-center justify-between border-b border-dark-border pb-2.5">
@@ -1626,6 +1644,55 @@
       await loadTodoManage();
       await loadTodoDaily();
     }
+
+    // --- 1.5 MEDIA UPLOADER ---
+    async function loadMediaLibraries() {
+      try {
+        const res = await fetch('/api/media/libraries');
+        const libs = await res.json();
+        const select = document.getElementById('media-library-select');
+        select.innerHTML = libs.map(l => `<option value="${l}">Library: ${l}</option>`).join('');
+      } catch (err) {
+        console.error('Failed to load libraries', err);
+      }
+    }
+
+    document.getElementById('media-file-input').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const library = document.getElementById('media-library-select').value;
+      const statusDiv = document.getElementById('media-upload-status');
+      
+      statusDiv.classList.remove('hidden');
+      statusDiv.innerHTML = `<span class="text-amber-400">Processing ${file.name} (converting to Base64)...</span>`;
+
+      // Read as DataURL (Base64)
+      const reader = new FileReader();
+      reader.onload = async () => {
+        statusDiv.innerHTML = `<span class="text-amber-400">Uploading ${file.name} to /media/${library}/...</span>`;
+        try {
+          const res = await fetch('/api/media/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ library, filename: file.name, base64: reader.result })
+          });
+          const result = await res.json();
+          if (result.error) throw new Error(result.error);
+          
+          statusDiv.innerHTML = `<span class="text-emerald-400">Successfully uploaded! File available at:<br/><a href="${result.path}" target="_blank" class="underline hover:text-emerald-300">${result.path}</a></span>`;
+        } catch (err) {
+          statusDiv.innerHTML = `<span class="text-rose-500">Upload failed: ${err.message}</span>`;
+        }
+        // Reset input so the same file can be uploaded again if needed
+        e.target.value = '';
+      };
+      reader.onerror = () => {
+        statusDiv.innerHTML = `<span class="text-rose-500">Failed to read file on the client.</span>`;
+        e.target.value = '';
+      };
+      reader.readAsDataURL(file);
+    });
 
     // --- 2. AUTOMATION & SCRIPT RUNNER ---
     async function loadScripts() {
@@ -2992,6 +3059,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     loadTodoDaily();
     loadTodoProjects();
     loadScripts();
+    loadMediaLibraries();
     refreshTelemetry();
     // ===================== HOMEPAGE LIVE DOCUMENT (fb-1787801162107) ==========
     // The Home tab's banner + widgets render from GET /api/homepage, backed by

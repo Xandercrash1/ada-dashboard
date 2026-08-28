@@ -21,20 +21,22 @@ const PORT = process.env.PORT || 3000;
 //      anonymous visitors before any auth check runs.
 app.set('trust proxy', 1);            // single Caddy hop on the same host
 app.use(cors());
-app.use(express.json());              // must precede mountAuth: /api/login reads req.body
+app.use(express.json({ limit: '50mb' }));              // must precede mountAuth: /api/login reads req.body
 const { requireAuth } = mountAuth(app, {
   loginHtmlFile: path.join(__dirname, '../public/login.html'),
   behindProxy: true,                  // throws at startup if trust proxy is unset
 });
 app.use(requireAuth);                 // everything below requires a session
 app.use(express.static(path.join(__dirname, '../public')));
+const MEDIA_DIR = path.join(__dirname, '../data/media');
+app.use('/media', express.static(MEDIA_DIR));
 
 // Directories
 const DATA_DIR = path.join(__dirname, '../data');
 const PLANS_DIR = path.join(__dirname, '../plans');
 const SCRIPTS_DIR = path.join(__dirname, '../scripts');
 
-[DATA_DIR, PLANS_DIR].forEach(dir => {
+[DATA_DIR, PLANS_DIR, MEDIA_DIR].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -3027,6 +3029,46 @@ app.get('/api/todo/projects', (req, res) => {
     const tasks = todoStore.readTasks();
     const projects = Array.from(new Set(tasks.map(t => t.project))).filter(Boolean).sort();
     res.json(projects);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 10. MEDIA MANAGER API ---
+app.get('/api/media/libraries', (req, res) => {
+  try {
+    if (!fs.existsSync(MEDIA_DIR)) return res.json(['default']);
+    const items = fs.readdirSync(MEDIA_DIR, { withFileTypes: true });
+    const libs = items.filter(i => i.isDirectory()).map(i => i.name);
+    if (!libs.includes('default')) libs.unshift('default');
+    res.json(libs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/media/upload', (req, res) => {
+  try {
+    const { library, filename, base64 } = req.body;
+    if (!library || !filename || !base64) return res.status(400).json({ error: 'Missing library, filename, or base64 data' });
+    
+    // Sanitize
+    const cleanLib = library.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+    const cleanName = filename.replace(/[^a-zA-Z0-9_.-]/g, '');
+    if (!cleanName) return res.status(400).json({ error: 'Invalid filename' });
+
+    const libDir = path.join(MEDIA_DIR, cleanLib);
+    if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true });
+
+    // Base64 comes in as "data:image/png;base64,iVBORw0KGgo..."
+    const matches = base64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) return res.status(400).json({ error: 'Invalid base64 string format' });
+
+    const buffer = Buffer.from(matches[2], 'base64');
+    const targetPath = path.join(libDir, cleanName);
+    
+    fs.writeFileSync(targetPath, buffer);
+    res.json({ success: true, path: `/media/${cleanLib}/${cleanName}` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
