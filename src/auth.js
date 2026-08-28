@@ -289,6 +289,12 @@ const GLOBAL_KEY = '__global__';
 
 function makeRequireAuth(getSecret) {
   return function requireAuth(req, res, next) {
+    // Allow local tools (like the Antigravity Bridge Daemon) to bypass auth
+    const ip = getClientIp(req);
+    if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') {
+      return next();
+    }
+
     const cookies = parseCookies(req);
     const token = cookies[COOKIE_NAME];
     const session = token ? verifyToken(token, getSecret()) : null;
