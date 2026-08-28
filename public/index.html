@@ -753,8 +753,14 @@
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-gray-300 mb-1">Notes</label>
-          <textarea id="todo-notes" rows="2" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors resize-none" placeholder="Optional..." autocomplete="off"></textarea>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-gray-300">Notes (Markdown Supported)</label>
+            <button type="button" onclick="document.getElementById('todo-media-upload').click()" class="text-gray-500 hover:text-indigo-400 transition-colors text-[10px] font-semibold tracking-wide uppercase" title="Attach Media">
+              <i class="fa-solid fa-paperclip mr-1"></i> Attach
+            </button>
+            <input type="file" id="todo-media-upload" class="hidden" accept="image/*, audio/*, application/pdf">
+          </div>
+          <textarea id="todo-notes" rows="3" class="w-full bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors resize-none" placeholder="Optional details or context..." autocomplete="off"></textarea>
         </div>
 
         <div id="todo-form-error" class="hidden bg-rose-950/40 border border-rose-800/60 text-rose-300 text-[11px] rounded-xl p-2.5"></div>
@@ -1529,6 +1535,51 @@
       if (m) return { type: 'Monthly', monthDay: m[1] };
       return null;
     }
+
+    // --- TODO MEDIA ATTACHMENTS ---
+    document.getElementById('todo-media-upload').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const inputEl = document.getElementById('todo-notes');
+      const originalPlaceholder = inputEl.placeholder;
+      inputEl.placeholder = 'Uploading ' + file.name + '...';
+      inputEl.disabled = true;
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const res = await fetch('/api/media/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ library: 'tasks', filename: file.name, base64: reader.result })
+          });
+          const result = await res.json();
+          if (result.error) throw new Error(result.error);
+          
+          inputEl.disabled = false;
+          inputEl.placeholder = originalPlaceholder;
+          
+          // Append markdown link to input
+          const isImage = file.type.startsWith('image/');
+          const md = isImage ? `![${file.name}](${result.path})` : `[${file.name}](${result.path})`;
+          inputEl.value = inputEl.value ? inputEl.value + '\n\n' + md : md;
+          inputEl.focus();
+        } catch (err) {
+          alert('Upload failed: ' + err.message);
+          inputEl.disabled = false;
+          inputEl.placeholder = originalPlaceholder;
+        }
+        e.target.value = '';
+      };
+      reader.onerror = () => {
+        alert('Failed to read file locally.');
+        inputEl.disabled = false;
+        inputEl.placeholder = originalPlaceholder;
+        e.target.value = '';
+      };
+      reader.readAsDataURL(file);
+    });
 
     function updateTodoTypeVisibility() {
       const type = document.getElementById('todo-type').value;
