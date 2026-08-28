@@ -598,6 +598,16 @@
             <input type="text" id="feedback-title" required placeholder="What's up? (e.g. Timeout dumps raw command into chat)" class="flex-1 min-w-0 bg-dark-bg border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-rose-500 transition-colors" autocomplete="off">
           </div>
           <textarea id="feedback-body" rows="2" placeholder="Optional details..." class="w-full bg-black/20 border border-white/5 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-rose-500 transition-colors resize-none" autocomplete="off"></textarea>
+          <div class="flex items-center gap-2">
+            <label for="feedback-media" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-dark-bg border border-dark-border text-xs text-gray-300 hover:text-white hover:border-rose-500/50 cursor-pointer transition-all">
+              <i class="fa-solid fa-paperclip text-rose-400"></i>
+              <span id="feedback-media-label">Attach screenshot</span>
+            </label>
+            <input type="file" id="feedback-media" accept="image/*" class="hidden" onchange="document.getElementById('feedback-media-label').innerText = this.files[0] ? this.files[0].name : 'Attach screenshot'; const clr = document.getElementById('feedback-media-clear'); if (clr) clr.classList.toggle('hidden', !this.files[0]);">
+            <button type="button" id="feedback-media-clear" class="hidden text-xs text-gray-500 hover:text-rose-400 p-1" onclick="document.getElementById('feedback-media').value=''; document.getElementById('feedback-media-label').innerText='Attach screenshot'; this.classList.add('hidden');" title="Remove attachment">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
           <button type="submit" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5">
             <i class="fa-solid fa-paper-plane text-[11px]"></i> Submit
           </button>
@@ -3320,7 +3330,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
               </div>
             </div>
             <h4 class="text-sm font-semibold text-gray-100">${escapeHtml(f.title)}</h4>
-            ${f.body ? `<p class="text-xs text-gray-400 leading-relaxed">${escapeHtml(f.body)}</p>` : ''}
+            ${f.body ? `<div class="text-xs text-gray-400 leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-img:max-h-60 prose-img:rounded-xl">${marked.parse(f.body)}</div>` : ''}
             ${f.notes ? `<div class="text-[11px] text-gray-400 bg-dark-bg border border-dark-border rounded-lg px-2.5 py-1.5 flex items-start gap-1.5"><i class="fa-solid fa-robot text-purple-400 mt-0.5"></i><span><span class="text-purple-300 font-semibold">${f.processedBy ? escapeHtml(f.processedBy) + ': ' : 'Agent note: '}</span>${escapeHtml(f.notes)}</span></div>` : ''}
             <div class="text-[10px] text-gray-500">${escapeHtml(created)}</div>
           </div>
@@ -3333,8 +3343,20 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const type = document.getElementById('feedback-type').value;
       const urgency = document.getElementById('feedback-urgency').value;
       const title = document.getElementById('feedback-title').value.trim();
-      const body = document.getElementById('feedback-body').value.trim();
+      let body = document.getElementById('feedback-body').value.trim();
       if (!title) return;
+
+      const mediaInput = document.getElementById('feedback-media');
+      if (mediaInput && mediaInput.files && mediaInput.files[0]) {
+        const file = mediaInput.files[0];
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = (err) => reject(err);
+          reader.readAsDataURL(file);
+        });
+        body = body ? `${body}\n\n![Screenshot](${base64})` : `\n\n![Screenshot](${base64})`;
+      }
 
       const payload = { type, title, urgency };
       if (body) payload.body = body;
@@ -3354,6 +3376,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         }
         document.getElementById('feedback-title').value = '';
         document.getElementById('feedback-body').value = '';
+        if (mediaInput) {
+          mediaInput.value = '';
+          const label = document.getElementById('feedback-media-label');
+          if (label) label.innerText = 'Attach screenshot';
+          const clr = document.getElementById('feedback-media-clear');
+          if (clr) clr.classList.add('hidden');
+        }
         document.getElementById('feedback-type').value = feedbackTypes.some(t => t.value === 'bug') ? 'bug' : feedbackTypes[0].value;
         await loadFeedback();
       } catch (err) {
