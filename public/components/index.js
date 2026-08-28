@@ -9,3 +9,4 @@ import './ScriptRunnerWidget.js';
 import './GlanceWidget.js';
 import './PhotoFrameWidget.js';
 import './CalendarWidget.js';
+import './SysmonWidget.js';
