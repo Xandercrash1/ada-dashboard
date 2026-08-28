@@ -1,5 +1,5 @@
 class PhotoFrameWidget extends HTMLElement {
-  connectedCallback() {
+  connectedCallback() { this.classList.add("block", "w-full", "h-full");
     this.images = [];
     this.currentIndex = 0;
     this.intervalId = null;
@@ -7,7 +7,7 @@ class PhotoFrameWidget extends HTMLElement {
     this.loadImages();
   }
 
-  disconnectedCallback() {
+  disconnectedCallback() { this.classList.add("block", "w-full", "h-full");
     if (this.intervalId) clearInterval(this.intervalId);
   }
 
