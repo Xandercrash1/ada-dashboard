@@ -106,6 +106,9 @@
     [data-theme="light"] [class*="bg-sky-"].text-white,
     [data-theme="light"] [class*="bg-black"].text-white,
     [data-theme="light"] [class*="bg-gradient"].text-white { color: #ffffff; }
+    /* …except bg-black/20 boxes: they're remapped to light gray below, so their
+       text must flip dark. Wins the [class*="bg-black"] exception by source order. */
+    [data-theme="light"] .bg-black\/20.text-white { color: #0f172a; }
     /* Translucent black/white utilities assume a dark page. Remap the subtle ones
        (inputs, cards, hairline borders) so they read as light-gray on white.
        Scrims and terminal panes (bg-black/40+) intentionally stay dark. */
