@@ -586,10 +586,19 @@ app.get('/api/scripts', (req, res) => {
 
 app.post('/api/scripts/run', (req, res) => {
   const { id, customArgs } = req.body;
-  const scripts = {};
-
-  const selected = scripts[id];
+  
+  const scriptsPath = path.join(DATA_DIR, 'scripts.json');
+  let scriptList = [];
+  if (require('fs').existsSync(scriptsPath)) {
+      scriptList = JSON.parse(require('fs').readFileSync(scriptsPath, 'utf8'));
+  }
+  
+  const selected = scriptList.find(s => s.id === id);
   if (!selected) return res.status(404).json({ error: 'Unknown script ID' });
+
+  // Map the new schema to the old executor logic
+  selected.rawCmd = selected.command;
+  
 
   const startTime = Date.now();
   if (selected.rawCmd) {
