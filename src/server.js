@@ -1673,6 +1673,66 @@ function geminiToOpenAITools(geminiToolsDecl) {
   });
 }
 
+// --- Ollama model auto-pull (fb-1787942756993) ---
+// A chat against a not-yet-downloaded local model used to dead-end with a raw
+// 404 from Ollama. The 404 handler in runOllamaOpenAITurn now kicks off a
+// background pull (deduped here — concurrent chats against the same missing
+// model share one download) and the reply embeds an <ada-widget> gauge that
+// polls /api/ollama/pull-status for live progress.
+const ollamaPulls = new Map(); // apiModel -> { status, percent, error, startedAt }
+
+function startOllamaPull(model) {
+  const existing = ollamaPulls.get(model);
+  if (existing && existing.status === 'downloading') return existing;
+  const entry = { status: 'downloading', percent: 0, error: null, startedAt: new Date().toISOString() };
+  ollamaPulls.set(model, entry);
+  (async () => {
+    try {
+      const res = await fetch('http://127.0.0.1:11434/api/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: model, stream: true })
+      });
+      if (!res.ok || !res.body) throw new Error(`pull request failed (HTTP ${res.status})`);
+      // NDJSON stream: one status object per line. Layers reset completed/total
+      // as they start, so percent can step back briefly — the big weights layer
+      // dominates, which makes it an honest progress signal overall.
+      const decoder = new TextDecoder();
+      let buf = '';
+      for await (const chunk of res.body) {
+        buf += decoder.decode(chunk, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) !== -1) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          let j;
+          try { j = JSON.parse(line); } catch { continue; }
+          if (j.error) throw new Error(j.error);
+          if (typeof j.total === 'number' && typeof j.completed === 'number' && j.total > 0) {
+            entry.percent = Math.round((j.completed / j.total) * 100);
+          }
+          if (j.status === 'success') { entry.status = 'done'; entry.percent = 100; }
+        }
+      }
+      if (entry.status !== 'done') { entry.status = 'done'; entry.percent = 100; }
+      console.log(`[ollama] pull complete: ${model}`);
+    } catch (e) {
+      entry.status = 'error';
+      entry.error = e.message;
+      console.error(`[ollama] pull failed: ${model}: ${e.message}`);
+    }
+  })();
+  return entry;
+}
+
+app.get('/api/ollama/pull-status', (req, res) => {
+  const model = String(req.query.model || '');
+  const entry = ollamaPulls.get(model);
+  if (!entry) return res.json({ model, status: 'none', percent: 0 });
+  res.json({ model, ...entry });
+});
+
 async function runOllamaOpenAITurn(session, promptText, systemInstruction, modelId, apiModel, ctrl, engine) {
   const toolExecutions = (ctrl && ctrl.toolExecutions) || [];
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
@@ -1686,7 +1746,7 @@ async function runOllamaOpenAITurn(session, promptText, systemInstruction, model
   if (modelId === 'gemma2-local' || modelId === 'llama3.2-local') {
     allowedTools = allowedTools.filter(t => !['run_bash', 'write_file'].includes(t.name));
   }
-  const tools = geminiToOpenAITools(allowedTools);
+  let tools = geminiToOpenAITools(allowedTools);
   const messages = [{ role: 'system', content: systemInstruction }];
   session.messages.slice(-6).forEach(msg => {
     if (msg.role === 'user' || msg.role === 'agent') {
@@ -1705,7 +1765,8 @@ async function runOllamaOpenAITurn(session, promptText, systemInstruction, model
   while (true) {
     if (ctrl && ctrl.cancelled) break;
     
-    const reqBody = { model: apiModel, messages, tools, stream: false };
+    const reqBody = { model: apiModel, messages, stream: false };
+    if (tools) reqBody.tools = tools;
     const headers = { 'Content-Type': 'application/json' };
     if (engine === 'openai') headers['Authorization'] = `Bearer ${OPENAI_API_KEY}`;
     
@@ -1721,6 +1782,23 @@ async function runOllamaOpenAITurn(session, promptText, systemInstruction, model
       const res = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(reqBody), signal: ac.signal });
       if (!res.ok) {
         const errText = await res.text();
+        // Missing local model: auto-pull instead of surfacing a raw 404
+        // (fb-1787942756993). The gauge widget gives the downloading state.
+        if (engine === 'ollama' && res.status === 404 && /not found/i.test(errText)) {
+          const pull = startOllamaPull(apiModel);
+          const enc = encodeURIComponent(apiModel);
+          const text = pull.status === 'error'
+            ? `⚠️ The local model **${apiModel}** isn't downloaded, and the automatic pull failed: ${pull.error}. Check that Ollama is running and has disk space, then try again.`
+            : `⏳ The local model **${apiModel}** isn't downloaded on the VPS yet, so I've started pulling it automatically. The download continues in the background — live progress:\n\n<ada-widget type="gauge" label="Downloading ${apiModel}" endpoint="/api/ollama/pull-status?model=${enc}" path="percent" unit="%" refresh="3" accent="sky"></ada-widget>\n\nRe-send your message once it reaches 100%.`;
+          return { agentMsg: { role: 'agent', text, timestamp: new Date().toISOString(), toolExecutions, errorType: 'model-downloading' }, errorInfo: null };
+        }
+        // Some local models (e.g. gemma2:2b) reject any request carrying a
+        // tools array. Drop tools and retry the turn as plain chat — found
+        // while e2e-testing the auto-pull path on 2026-09-02.
+        if (engine === 'ollama' && res.status === 400 && /does not support tools/i.test(errText) && tools) {
+          tools = null;
+          continue;
+        }
         return { agentMsg: { role: 'agent', text: `⚠️ API error (${res.status}): ${errText}`, timestamp: new Date().toISOString(), toolExecutions, errorType: 'api' }, errorInfo: null };
       }
       resData = await res.json();
