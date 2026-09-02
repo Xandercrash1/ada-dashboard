@@ -2025,7 +2025,8 @@ Finally, tell Alex what you built, and include the exact string ${PROMOTE_ACTION
 7. ASYNC COMMUNICATION & AUTONOMY: You can send messages to the chat asynchronously without ending your turn by POSTing to http://127.0.0.1:3001/api/agent/sessions/<your-session-id>/messages with body {"text": "your message", "role": "agent"}. (Gemini can also use the 'send_message' tool).
 8. SCHEDULING & DEFERRING WORK: You can queue tasks to run autonomously later by POSTing to http://127.0.0.1:3001/api/agent/scheduled with body {"sessionId": "<your-session-id>", "prompt": "task description", "runAt": "ISO8601-timestamp", "frequencyMinutes": <optional-integer-minutes>, "source": "agent", "model": "<model-id>"}. (Gemini can also use the 'schedule_prompt' tool). Set frequencyMinutes (10 to 129600) to make it recurring. This allows you to split large tasks, retry after rate limits, or run background loops.
 9. HOMEPAGE LIVE DOCUMENT: The dashboard Home tab (announcement banner + widget cards) renders entirely from the JSON file at ${HOMEPAGE_FILE}. Schema: { announcement: {title, text, icon, visible}, sections: {stats, quickLinks} (booleans to hide the built-in stat boxes / quick links), widgets: [{id, title, icon (FontAwesome class like fa-chart-line), accent (indigo|purple|emerald|rose|amber|sky), html (trusted HTML for the card body; may embed live stats via <span data-home-stat="todo|jobs|cpu|bugs"></span>), link: {label, tab (home|todo|tools|server) OR href (URL)}, hidden}] }. Max 24 widgets. Homepage design work belongs to the dedicated "designer" role/agent when possible. To redesign the homepage, edit this file directly (Claude: bash; Gemini: file tools) — changes appear on the next browser refresh with NO server restart and NO promote, because data/ is never synced by promote.sh. Keep it valid JSON; malformed content is dropped by the server's sanitizer. A homepage widget's html body MAY embed the chat widget element (see rule 10) — e.g. <ada-widget type="countdown" id="x" target="ISO" remove-on-complete="true"></ada-widget> — which is the ONLY way to get self-deleting/conditional behavior on the homepage (the ada-countdown component does NOT self-delete; note remove-on-complete only hides the card body client-side, the JSON entry remains until deleted). WARNING: homepage.json is last-writer-wins with no merge — ALWAYS re-read the file immediately before writing, because another agent or the dashboard UI may have changed it since you last looked (a stale write clobbered a sibling agent's widget on 2026-09-02).
-10. GENERATIVE UI IN CHAT: You can embed live interactive widgets directly in your chat replies by writing <ada-widget> tags in your markdown (raw HTML passes through). Always put the tag on its own line and ALWAYS close it explicitly with </ada-widget> (never self-close). Types: (a) button — invokes a script or API when Alex clicks it: <ada-widget type="button" label="Restart Crawler" icon="fa-rotate" accent="emerald" script-id="my-script"></ada-widget> or with endpoint="/api/..." method="POST" payload='{"key":"val"}' (single-quote the payload attribute; endpoint must start with /api/; add confirm="Are you sure?" for dangerous actions). (b) photo: <ada-widget type="photo" src="/media/chat/x.png" caption="..."></ada-widget>. (c) countdown: <ada-widget type="countdown" target="2026-09-03T00:00:00Z" label="Deploy window"></ada-widget>. (d) gauge — static value="42" max="100" unit="%" label="CPU", or live with endpoint="/api/system" path="cpu.usage" refresh="10". Accents: indigo|purple|emerald|rose|amber|sky|cyan|red. Use widgets when they beat plain text (one-click follow-up actions, visual status, timers); do not use them decoratively. IMPORTANT WIDGET RULES: script-id MUST be one of the registered ids — currently: ${scriptRegistryNote} — anything else fails with "Unknown script ID". For a harmless demo/preview button, use endpoint="/api/system" method="GET" instead of inventing a script. Never describe behavior the widget's attributes do not declare (a button only self-deletes if you set remove-on-success="true"). CONDITIONAL ATTRS (any type): id="x" (identity — required for the following state to persist across page refreshes); start-hidden="true" (invisible until revealed); show-after="ISO" / show-until="ISO" (time-window visibility, e.g. a message that only appears on a specific date); remove-on-success="true" on buttons (self-deletes after a successful press, e.g. one-shot action buttons); remove-on-complete="true" on countdowns (self-deletes ~3s after hitting zero); on-success-show="targetId" / on-complete-show="targetId" (reveals the start-hidden widget with that id — lets a countdown or button trigger the next widget to appear).`;
+10. GENERATIVE UI IN CHAT: You can embed live interactive widgets directly in your chat replies by writing <ada-widget> tags in your markdown (raw HTML passes through). Always put the tag on its own line and ALWAYS close it explicitly with </ada-widget> (never self-close). Types: (a) button — invokes a script or API when Alex clicks it: <ada-widget type="button" label="Restart Crawler" icon="fa-rotate" accent="emerald" script-id="my-script"></ada-widget> or with endpoint="/api/..." method="POST" payload='{"key":"val"}' (single-quote the payload attribute; endpoint must start with /api/; add confirm="Are you sure?" for dangerous actions). (b) photo: <ada-widget type="photo" src="/media/chat/x.png" caption="..."></ada-widget>. (c) countdown: <ada-widget type="countdown" target="2026-09-03T00:00:00Z" label="Deploy window"></ada-widget>. (d) gauge — static value="42" max="100" unit="%" label="CPU", or live with endpoint="/api/system" path="cpu.usage" refresh="10". Accents: indigo|purple|emerald|rose|amber|sky|cyan|red. Use widgets when they beat plain text (one-click follow-up actions, visual status, timers); do not use them decoratively. IMPORTANT WIDGET RULES: script-id MUST be one of the registered ids — currently: ${scriptRegistryNote} — anything else fails with "Unknown script ID". For a harmless demo/preview button, use endpoint="/api/system" method="GET" instead of inventing a script. Never describe behavior the widget's attributes do not declare (a button only self-deletes if you set remove-on-success="true"). CONDITIONAL ATTRS (any type): id="x" (identity — required for the following state to persist across page refreshes); start-hidden="true" (invisible until revealed); show-after="ISO" / show-until="ISO" (time-window visibility, e.g. a message that only appears on a specific date); remove-on-success="true" on buttons (self-deletes after a successful press, e.g. one-shot action buttons); remove-on-complete="true" on countdowns (self-deletes ~3s after hitting zero); on-success-show="targetId" / on-complete-show="targetId" (reveals the start-hidden widget with that id — lets a countdown or button trigger the next widget to appear).
+11. AGENDA / CALENDAR: GET /api/agenda?days=N merges Alex's Google Calendar (secret ICS feed URLs in data/calendar-feeds.json — NEVER print, log, or echo these URLs) with local dashboard events in data/calendar.json. To put an event on Alex's agenda widget, append to the data/calendar.json array: {"id":"unique","title":"...","startsAt":"ISO8601","endsAt":"ISO8601 optional","allDay":false,"location":"optional","addedBy":"your name"}. data/ files apply immediately (no restart, no promote). The homepage widget is <ada-calendar> and reads /api/agenda itself.`;
 
   // Proactive promote-button behavior, appended to CODE-CAPABLE roles only.
   // Read-only 'query' is intentionally excluded — it cannot stage changes, so it
@@ -3369,19 +3370,280 @@ app.get('/api/weather', async (req, res) => {
 
 
 // --- 13. CALENDAR API ---
-app.get('/api/calendar/events', (req, res) => {
+// --- Agenda: Google Calendar ICS feeds + local server events (fb-1788188240701) ---
+// Plan agreed with Alex 2026-09-03: his real calendar stays in Google, read
+// via the secret ICS URL(s) in data/calendar-feeds.json; dashboard/agent
+// events live in data/calendar.json. GET /api/agenda merges both. Feed URLs
+// are SECRETS: data/ is gitignored and promote.sh never syncs it — never log
+// or echo the URLs.
+const AGENDA_CACHE_TTL_MS = 5 * 60 * 1000;
+const agendaFeedCache = new Map(); // feed.id -> { fetchedAt, events, error }
+
+function readCalendarFeeds() {
   try {
-    const eventsPath = path.join(DATA_DIR, 'events.json');
-    if (require('fs').existsSync(eventsPath)) {
-      const events = JSON.parse(require('fs').readFileSync(eventsPath, 'utf8'));
-      // Filter for today only, or just return them all if it's a simple list
-      return res.json(events);
-    }
-    // Return empty list if no file yet
-    res.json([]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const j = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'calendar-feeds.json'), 'utf8'));
+    return Array.isArray(j.feeds) ? j.feeds.filter(f => f && f.id && f.url) : [];
+  } catch { return []; }
+}
+
+function readLocalCalendarEvents() {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'calendar.json'), 'utf8'));
+    return Array.isArray(j) ? j : [];
+  } catch { return []; }
+}
+
+// Minutes-offset of a timezone at a given instant, via Intl (no dependencies).
+function tzOffsetMs(ms, tz) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hour12: false, year: 'numeric', month: '2-digit',
+      day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).formatToParts(new Date(ms)).map(p => [p.type, p.value])
+  );
+  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day,
+    parts.hour === '24' ? 0 : +parts.hour, +parts.minute, +parts.second);
+  return asUtc - ms;
+}
+
+// Convert wall-clock fields in a named zone to a UTC ms timestamp. Two passes
+// so instants near a DST jump resolve against the offset actually in force.
+function zonedToUtcMs(f, tz) {
+  let ms = Date.UTC(f.y, f.mo - 1, f.d, f.h, f.mi, f.s);
+  for (let i = 0; i < 2; i++) ms = Date.UTC(f.y, f.mo - 1, f.d, f.h, f.mi, f.s) - tzOffsetMs(ms, tz);
+  return ms;
+}
+
+// Step wall-clock fields by calendar units; Date.UTC normalizes overflow, so
+// recurrence keeps its wall time across DST instead of drifting an hour.
+function wallAdd(f, { days = 0, months = 0, years = 0 }) {
+  const dt = new Date(Date.UTC(f.y + years, f.mo - 1 + months, f.d + days, f.h, f.mi, f.s));
+  return { y: dt.getUTCFullYear(), mo: dt.getUTCMonth() + 1, d: dt.getUTCDate(),
+           h: dt.getUTCHours(), mi: dt.getUTCMinutes(), s: dt.getUTCSeconds() };
+}
+
+// Parse one ICS date/date-time value into {fields, tz, allDay, ms}.
+function parseIcsDate(value, params, defaultTz) {
+  if (/^\d{8}$/.test(value)) {
+    const f = { y: +value.slice(0, 4), mo: +value.slice(4, 6), d: +value.slice(6, 8), h: 0, mi: 0, s: 0 };
+    return { fields: f, tz: defaultTz, allDay: true, ms: zonedToUtcMs(f, defaultTz) };
   }
+  const m = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/);
+  if (!m) return null;
+  const f = { y: +m[1], mo: +m[2], d: +m[3], h: +m[4], mi: +m[5], s: +m[6] };
+  const tz = m[7] === 'Z' ? 'UTC' : (params.TZID || defaultTz);
+  return { fields: f, tz, allDay: false, ms: zonedToUtcMs(f, tz) };
+}
+
+// Minimal ICS parser: unfolds lines, walks VEVENTs, returns normalized events
+// with enough recurrence info for window expansion. Handles the shapes Google
+// Calendar actually exports (UTC + TZID datetimes, all-day dates, RRULE with
+// FREQ/INTERVAL/BYDAY/UNTIL/COUNT, EXDATE, RECURRENCE-ID overrides).
+function parseIcs(text, defaultTzHint) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\n[ \t]/g, '').split('\n');
+  const events = [];
+  let cur = null;
+  let calTz = defaultTzHint || 'America/New_York';
+  for (const line of lines) {
+    const ci = line.indexOf(':');
+    if (ci === -1) continue;
+    const left = line.slice(0, ci);
+    const value = line.slice(ci + 1);
+    const [name, ...paramParts] = left.split(';');
+    const params = {};
+    for (const p of paramParts) {
+      const eq = p.indexOf('=');
+      if (eq !== -1) params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1);
+    }
+    const prop = name.toUpperCase();
+    if (prop === 'X-WR-TIMEZONE' && !cur) { calTz = value.trim() || calTz; continue; }
+    if (prop === 'BEGIN' && value === 'VEVENT') { cur = { exdates: [] }; continue; }
+    if (prop === 'END' && value === 'VEVENT') {
+      if (cur && cur.start && cur.summary !== undefined) events.push(cur);
+      cur = null; continue;
+    }
+    if (!cur) continue;
+    if (prop === 'SUMMARY') cur.summary = value.replace(/\\([,;nN])/g, (m2, c) => (c === ',' || c === ';') ? c : '\n');
+    else if (prop === 'LOCATION') cur.location = value.replace(/\\([,;nN])/g, (m2, c) => (c === ',' || c === ';') ? c : '\n');
+    else if (prop === 'UID') cur.uid = value;
+    else if (prop === 'DTSTART') cur.start = parseIcsDate(value, params, calTz);
+    else if (prop === 'DTEND') cur.end = parseIcsDate(value, params, calTz);
+    else if (prop === 'STATUS') cur.status = value;
+    else if (prop === 'RECURRENCE-ID') cur.recurrenceId = parseIcsDate(value, params, calTz);
+    else if (prop === 'EXDATE') {
+      for (const v of value.split(',')) {
+        const d = parseIcsDate(v.trim(), params, calTz);
+        if (d) cur.exdates.push(d.ms);
+      }
+    } else if (prop === 'RRULE') {
+      const rr = {};
+      for (const kv of value.split(';')) {
+        const eq = kv.indexOf('=');
+        if (eq !== -1) rr[kv.slice(0, eq).toUpperCase()] = kv.slice(eq + 1);
+      }
+      cur.rrule = rr;
+    }
+  }
+  return events;
+}
+
+const ICS_WEEKDAYS = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
+// Expand one parsed VEVENT into concrete occurrences inside [winStart, winEnd).
+function expandIcsEvent(ev, winStartMs, winEndMs, overridesByUid) {
+  const out = [];
+  if (!ev.start) return out;
+  if (ev.status === 'CANCELLED') return out;
+  const durMs = ev.end ? Math.max(0, ev.end.ms - ev.start.ms) : (ev.start.allDay ? 86400000 : 0);
+  const exdates = new Set(ev.exdates);
+  const overridden = new Set((overridesByUid.get(ev.uid) || []).map(o => o.recurrenceId.ms));
+
+  const push = (startMs) => {
+    if (exdates.has(startMs) || overridden.has(startMs)) return;
+    if (startMs < winEndMs && startMs + durMs > winStartMs) {
+      out.push({ startMs, endMs: startMs + durMs, allDay: ev.start.allDay,
+                 title: ev.summary || '(untitled)', location: ev.location || '' });
+    }
+  };
+
+  if (!ev.rrule) { push(ev.start.ms); return out; }
+
+  const rr = ev.rrule;
+  const interval = Math.max(1, parseInt(rr.INTERVAL, 10) || 1);
+  const untilMs = rr.UNTIL ? (parseIcsDate(rr.UNTIL, {}, ev.start.tz) || {}).ms ?? Infinity : Infinity;
+  let remaining = rr.COUNT ? Math.max(0, parseInt(rr.COUNT, 10) || 0) : Infinity;
+  const hardStopMs = Math.min(winEndMs, untilMs === Infinity ? winEndMs : untilMs + 1);
+  let f = { ...ev.start.fields };
+  const tz = ev.start.tz;
+  let guard = 0;
+
+  const emit = (fields) => {
+    const ms = zonedToUtcMs(fields, tz);
+    if (ms > untilMs) return false;
+    if (remaining <= 0) return false;
+    remaining--;
+    if (ms >= winEndMs) return false;
+    push(ms);
+    return true;
+  };
+
+  if (rr.FREQ === 'WEEKLY' && rr.BYDAY) {
+    const days = rr.BYDAY.split(',').map(d => ICS_WEEKDAYS[d.trim().slice(-2)]).filter(d => d !== undefined).sort();
+    // Anchor at the Sunday of DTSTART's week, then emit requested weekdays.
+    const startDow = new Date(zonedToUtcMs(f, tz) + tzOffsetMs(zonedToUtcMs(f, tz), tz)).getUTCDay();
+    let weekAnchor = wallAdd(f, { days: -startDow });
+    while (guard++ < 3000) {
+      let done = false;
+      for (const dow of days) {
+        const occ = wallAdd(weekAnchor, { days: dow });
+        const occMs = zonedToUtcMs(occ, tz);
+        if (occMs < ev.start.ms) continue; // before the series started
+        if (!emit(occ)) { if (occMs > hardStopMs || remaining <= 0) { done = true; break; } }
+      }
+      if (done) break;
+      weekAnchor = wallAdd(weekAnchor, { days: 7 * interval });
+      if (zonedToUtcMs(weekAnchor, tz) > hardStopMs) break;
+    }
+    return out;
+  }
+
+  const step = rr.FREQ === 'DAILY' ? { days: interval }
+    : rr.FREQ === 'WEEKLY' ? { days: 7 * interval }
+    : rr.FREQ === 'MONTHLY' ? { months: interval }
+    : rr.FREQ === 'YEARLY' ? { years: interval }
+    : null;
+  if (!step) { push(ev.start.ms); return out; }
+  while (guard++ < 3000) {
+    if (!emit(f)) {
+      const ms = zonedToUtcMs(f, tz);
+      if (ms > hardStopMs || remaining <= 0) break;
+    }
+    f = wallAdd(f, step);
+  }
+  return out;
+}
+
+async function fetchFeedEvents(feed) {
+  const cached = agendaFeedCache.get(feed.id);
+  if (cached && Date.now() - cached.fetchedAt < AGENDA_CACHE_TTL_MS) return cached;
+  try {
+    const res = await fetch(feed.url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const entry = { fetchedAt: Date.now(), events: parseIcs(await res.text()), error: null };
+    agendaFeedCache.set(feed.id, entry);
+    return entry;
+  } catch (e) {
+    // Keep serving the last good parse; surface the error in feed status.
+    const entry = { fetchedAt: Date.now(), events: cached ? cached.events : [], error: e.message };
+    agendaFeedCache.set(feed.id, entry);
+    return entry;
+  }
+}
+
+app.get('/api/agenda', async (req, res) => {
+  const days = Math.min(31, Math.max(1, parseInt(req.query.days, 10) || 7));
+  const TZ = 'America/New_York';
+  // Window: start of today (Eastern) through `days` days out.
+  const nowParts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
+      .formatToParts(new Date()).map(p => [p.type, p.value]));
+  const todayF = { y: +nowParts.year, mo: +nowParts.month, d: +nowParts.day, h: 0, mi: 0, s: 0 };
+  const winStartMs = zonedToUtcMs(todayF, TZ);
+  const winEndMs = zonedToUtcMs(wallAdd(todayF, { days }), TZ);
+
+  const events = [];
+  const feedStatus = [];
+  for (const feed of readCalendarFeeds()) {
+    const { events: parsed, error, fetchedAt } = await fetchFeedEvents(feed);
+    const overridesByUid = new Map();
+    for (const ev of parsed) {
+      if (ev.uid && ev.recurrenceId) {
+        if (!overridesByUid.has(ev.uid)) overridesByUid.set(ev.uid, []);
+        overridesByUid.get(ev.uid).push(ev);
+      }
+    }
+    for (const ev of parsed) {
+      if (ev.recurrenceId) { // override instance stands alone
+        const durMs = ev.end ? Math.max(0, ev.end.ms - ev.start.ms) : 0;
+        if (ev.status !== 'CANCELLED' && ev.start.ms < winEndMs && ev.start.ms + durMs > winStartMs) {
+          events.push({ startMs: ev.start.ms, endMs: ev.start.ms + durMs, allDay: ev.start.allDay,
+                        title: ev.summary || '(untitled)', location: ev.location || '',
+                        source: 'feed', calendar: feed.label || feed.id });
+        }
+        continue;
+      }
+      for (const occ of expandIcsEvent(ev, winStartMs, winEndMs, overridesByUid)) {
+        events.push({ ...occ, source: 'feed', calendar: feed.label || feed.id });
+      }
+    }
+    feedStatus.push({ id: feed.id, label: feed.label || feed.id, ok: !error, error, fetchedAt });
+  }
+
+  for (const ev of readLocalCalendarEvents()) {
+    const startMs = Date.parse(ev.startsAt);
+    if (Number.isNaN(startMs) || !ev.title) continue;
+    const endMs = Date.parse(ev.endsAt) || (ev.allDay ? startMs + 86400000 : startMs);
+    if (startMs < winEndMs && endMs > winStartMs) {
+      events.push({ startMs, endMs, allDay: !!ev.allDay, title: String(ev.title),
+                    location: ev.location ? String(ev.location) : '',
+                    source: 'local', calendar: ev.addedBy || 'dashboard' });
+    }
+  }
+
+  events.sort((a, b) => a.startMs - b.startMs || a.title.localeCompare(b.title));
+  res.json({
+    windowStart: new Date(winStartMs).toISOString(),
+    windowEnd: new Date(winEndMs).toISOString(),
+    events: events.map(e => ({ title: e.title, startsAt: new Date(e.startMs).toISOString(),
+                               endsAt: new Date(e.endMs).toISOString(), allDay: e.allDay,
+                               location: e.location, source: e.source, calendar: e.calendar })),
+    feeds: feedStatus
+  });
+});
+
+// Legacy alias — the old mock read data/events.json; the agenda is real now.
+app.get('/api/calendar/events', async (req, res) => {
+  res.redirect(302, '/api/agenda' + (req.query.days ? `?days=${encodeURIComponent(req.query.days)}` : ''));
 });
 
 
