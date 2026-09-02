@@ -62,9 +62,9 @@ class ScratchpadWidget extends HTMLElement {
 
     this.adjustHeight();
     this.typingTimer = setTimeout(() => this.saveText(), 1000);
-    // Markdown renders only after typing goes quiet for 5s, so the swap
-    // never fights the keystroke flow (fb-1787944441070).
-    this.mdTimer = setTimeout(() => this.showPreview(), 5000);
+    // Markdown renders only after typing goes quiet, so the swap never
+    // fights the keystroke flow (fb-1787944441070; tightened 5s→2s per Alex).
+    this.mdTimer = setTimeout(() => this.showPreview(), 2000);
   }
 
   showPreview() {
@@ -73,9 +73,33 @@ class ScratchpadWidget extends HTMLElement {
     const preview = this.querySelector('[data-md-preview]');
     if (!textarea || !preview || !textarea.value.trim()) return;
     preview.innerHTML = marked.parse(textarea.value);
+    this.wireCheckboxes(preview, textarea);
     textarea.classList.add('hidden');
     preview.classList.remove('hidden');
     this.previewing = true;
+  }
+
+  // GFM task-list checkboxes come out of marked disabled. Re-enable them and
+  // write toggles back into the markdown source — the i-th rendered checkbox
+  // corresponds to the i-th task marker in the text, top to bottom.
+  wireCheckboxes(preview, textarea) {
+    preview.querySelectorAll('input[type="checkbox"]').forEach((box, i) => {
+      box.disabled = false;
+      box.classList.add('cursor-pointer');
+      box.addEventListener('change', () => {
+        let n = -1;
+        textarea.value = textarea.value.replace(
+          /(^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\[)([ xX])(\])/gm,
+          (m, pre, state, post) => {
+            n++;
+            if (n !== i) return m;
+            return pre + (state === ' ' ? 'x' : ' ') + post;
+          }
+        );
+        this.saveText();
+        this.showPreview(); // re-render so done-item styling stays in sync
+      });
+    });
   }
 
   showEditor() {
