@@ -16,21 +16,45 @@
 //   gauge     — attrs: value, max, label, unit, accent
 //               optional live mode: endpoint="/api/..." path="cpu.usage" refresh="10"
 //
-// Lifecycle hooks (consumed by the conditional-widget layer, ticket
-// fb-1787940012904): on completion/press a widget dispatches a bubbling
-// 'ada-widget-event' CustomEvent with {widgetType, action, id} so future
-// trigger logic can chain, hide, or remove widgets without touching this file.
+// Conditional / self-managing layer (fb-1787940012904) — attrs on any type:
+//   id="x"                  — identity; REQUIRED for removal/reveal state to
+//                             persist across re-renders (stored in localStorage,
+//                             so per-browser, not per-account)
+//   start-hidden="true"     — invisible until another widget reveals it
+//   show-after / show-until — ISO time window; outside it the widget hides,
+//                             re-checked every 30s (e.g. birthday messages)
+//   remove-on-success="true"  (button)    — fade out + self-delete after a
+//                                           successful press (e.g. deploy btn)
+//   remove-on-complete="true" (countdown) — fade out + self-delete ~3s after zero
+//   on-success-show="id" / on-complete-show="id" — reveal the start-hidden
+//                             widget(s) with that id when this one fires
+//
+// Every press/complete also dispatches a bubbling 'ada-widget-event'
+// CustomEvent with {widgetType, action, id} for future orchestration.
 //
 // NOTE for agents: always close the tag explicitly (</ada-widget>). A
 // self-closing <ada-widget /> does not exist in HTML and will swallow the
 // rest of the message into the element.
 
 const ACCENTS = ['indigo', 'purple', 'emerald', 'rose', 'amber', 'sky', 'cyan', 'red'];
+const STATE_KEY = 'adaWidgetState';
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
+}
+
+function loadState() {
+  try { return JSON.parse(localStorage.getItem(STATE_KEY)) || {}; }
+  catch { return {}; }
+}
+
+function saveState(id, patch) {
+  if (!id) return; // anonymous widgets keep no persistent state
+  const all = loadState();
+  all[id] = { ...(all[id] || {}), ...patch };
+  try { localStorage.setItem(STATE_KEY, JSON.stringify(all)); } catch { /* full/blocked */ }
 }
 
 class ChatWidget extends HTMLElement {
@@ -40,8 +64,14 @@ class ChatWidget extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this.clearTimers();
+  }
+
+  clearTimers() {
     if (this._timer) clearInterval(this._timer);
+    if (this._visTimer) clearInterval(this._visTimer);
     this._timer = null;
+    this._visTimer = null;
   }
 
   attr(name, fallback = '') {
@@ -54,16 +84,81 @@ class ChatWidget extends HTMLElement {
     return ACCENTS.includes(a) ? a : 'indigo';
   }
 
+  widgetId() {
+    return this.attr('id', null);
+  }
+
+  state() {
+    return (this.widgetId() && loadState()[this.widgetId()]) || {};
+  }
+
   emit(action, detail = {}) {
     this.dispatchEvent(new CustomEvent('ada-widget-event', {
       bubbles: true,
-      detail: { widgetType: this.attr('type'), action, id: this.attr('id', null), ...detail }
+      detail: { widgetType: this.attr('type'), action, id: this.widgetId(), ...detail }
     }));
   }
 
+  // --- conditional visibility ----------------------------------------------
+  inTimeWindow() {
+    const after = Date.parse(this.attr('show-after'));
+    const until = Date.parse(this.attr('show-until'));
+    const now = Date.now();
+    if (!Number.isNaN(after) && now < after) return false;
+    if (!Number.isNaN(until) && now > until) return false;
+    return true;
+  }
+
+  isVisible() {
+    const st = this.state();
+    if (st.removed) return false;
+    if (this.attr('start-hidden') === 'true' && !st.revealed && !this._revealedLive) return false;
+    return this.inTimeWindow();
+  }
+
+  applyVisibility() {
+    this.style.display = this.isVisible() ? '' : 'none';
+  }
+
+  revealNow() {
+    this._revealedLive = true;
+    saveState(this.widgetId(), { revealed: true });
+    this.applyVisibility();
+    this.style.opacity = '0';
+    this.style.transition = 'opacity 0.6s';
+    requestAnimationFrame(() => { this.style.opacity = '1'; });
+  }
+
+  revealTargets(attrName) {
+    const targetId = this.attr(attrName);
+    if (!targetId) return;
+    saveState(targetId, { revealed: true }); // persists even if target not on screen yet
+    document.querySelectorAll('ada-widget').forEach((w) => {
+      if (w !== this && w.getAttribute('id') === targetId && typeof w.revealNow === 'function') w.revealNow();
+    });
+  }
+
+  fadeRemove() {
+    saveState(this.widgetId(), { removed: true });
+    this.style.transition = 'opacity 0.8s';
+    this.style.opacity = '0';
+    setTimeout(() => {
+      this.clearTimers();
+      this.style.display = 'none';
+      this.innerHTML = '';
+      this.emit('removed');
+    }, 850);
+  }
+
+  // --- render dispatch ------------------------------------------------------
   render() {
-    if (this._timer) clearInterval(this._timer);
-    this._timer = null;
+    this.clearTimers();
+    if (this.state().removed) {
+      this.style.display = 'none';
+      this.innerHTML = '';
+      return;
+    }
+
     const type = this.attr('type');
     if (type === 'button') this.renderButton();
     else if (type === 'photo') this.renderPhoto();
@@ -74,6 +169,13 @@ class ChatWidget extends HTMLElement {
         <span class="inline-flex items-center gap-1.5 text-[10px] text-amber-400 border border-amber-700/50 bg-amber-950/30 rounded-lg px-2 py-1 my-1">
           <i class="fa-solid fa-puzzle-piece"></i> Unknown widget type: ${esc(type || '(none)')}
         </span>`;
+    }
+
+    this.applyVisibility();
+    // Time-windowed widgets re-evaluate while the page sits open, so a
+    // show-after boundary crossing reveals them without a refresh.
+    if (this.getAttribute('show-after') || this.getAttribute('show-until')) {
+      this._visTimer = setInterval(() => this.applyVisibility(), 30000);
     }
   }
 
@@ -146,6 +248,13 @@ class ChatWidget extends HTMLElement {
       out.classList.remove('hidden');
       if (window.showToast) window.showToast(res.ok ? 'Widget action completed' : `Action failed (HTTP ${res.status})`, res.ok ? 'success' : 'error');
       this.emit('pressed', { ok: res.ok, status: res.status });
+      if (res.ok) {
+        this.revealTargets('on-success-show');
+        if (this.attr('remove-on-success') === 'true') {
+          // Leave the output visible long enough to read before self-deleting.
+          setTimeout(() => this.fadeRemove(), 2500);
+        }
+      }
     } catch (e) {
       out.textContent = `Error: ${e.message}`;
       out.classList.remove('hidden');
@@ -197,11 +306,15 @@ class ChatWidget extends HTMLElement {
     const tick = () => {
       let diff = targetMs - Date.now();
       if (diff <= 0) {
-        clearInterval(this._timer);
+        if (this._timer) clearInterval(this._timer);
         this._timer = null;
         timeEl.innerHTML = `<i class="fa-solid fa-check"></i> Done`;
-        // Fires once; the conditional layer (ticket 2) listens for this.
+        // Fires once per render; chained widgets reveal, then optional cleanup.
         this.emit('complete');
+        this.revealTargets('on-complete-show');
+        if (this.attr('remove-on-complete') === 'true') {
+          setTimeout(() => this.fadeRemove(), 3000);
+        }
         return;
       }
       const d = Math.floor(diff / 86400000);
