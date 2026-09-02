@@ -3,6 +3,8 @@ class ScratchpadWidget extends HTMLElement {
     super();
     this.text = "";
     this.typingTimer = null;
+    this.mdTimer = null;
+    this.previewing = false;
   }
 
   connectedCallback() {
@@ -23,6 +25,9 @@ class ScratchpadWidget extends HTMLElement {
         if (textarea && document.activeElement !== textarea) {
           textarea.value = this.text;
           setTimeout(() => this.adjustHeight(), 50); // wait for render
+          // Existing notes open already rendered (fb-1787944441070); one
+          // click on the preview drops back into the editor.
+          if (this.text.trim()) this.showPreview();
         }
       }
     } catch (e) {}
@@ -51,11 +56,38 @@ class ScratchpadWidget extends HTMLElement {
 
   handleInput() {
     clearTimeout(this.typingTimer);
+    clearTimeout(this.mdTimer);
     const statusIcon = this.querySelector('#scratchpad-status');
     if (statusIcon) statusIcon.className = 'fa-solid fa-pen text-amber-500';
-    
+
     this.adjustHeight();
     this.typingTimer = setTimeout(() => this.saveText(), 1000);
+    // Markdown renders only after typing goes quiet for 5s, so the swap
+    // never fights the keystroke flow (fb-1787944441070).
+    this.mdTimer = setTimeout(() => this.showPreview(), 5000);
+  }
+
+  showPreview() {
+    if (typeof marked === 'undefined') return;
+    const textarea = this.querySelector('textarea');
+    const preview = this.querySelector('[data-md-preview]');
+    if (!textarea || !preview || !textarea.value.trim()) return;
+    preview.innerHTML = marked.parse(textarea.value);
+    textarea.classList.add('hidden');
+    preview.classList.remove('hidden');
+    this.previewing = true;
+  }
+
+  showEditor() {
+    const textarea = this.querySelector('textarea');
+    const preview = this.querySelector('[data-md-preview]');
+    if (!textarea || !preview) return;
+    preview.classList.add('hidden');
+    textarea.classList.remove('hidden');
+    this.previewing = false;
+    textarea.focus();
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
   }
 
   adjustHeight() {
@@ -128,11 +160,13 @@ class ScratchpadWidget extends HTMLElement {
           <i id="scratchpad-status" class="fa-solid fa-cloud text-gray-600 text-[10px] transition-colors"></i>
         </div>
         
-        <textarea class="flex-1 w-full bg-transparent border-none resize-none focus:outline-none text-gray-200 text-sm placeholder-gray-600 custom-scrollbar" placeholder="Type a quick note here... It syncs instantly across all your devices."></textarea>
+        <textarea class="flex-1 w-full bg-transparent border-none resize-none focus:outline-none text-gray-200 text-sm placeholder-gray-600 custom-scrollbar" placeholder="Type a quick note here... It syncs instantly across all your devices. Markdown renders when you pause."></textarea>
+        <div data-md-preview class="hidden flex-1 w-full overflow-y-auto custom-scrollbar cursor-text prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 marker:text-${accent}-400 prose-a:text-${accent}-400" title="Click to edit"></div>
       </div>
     `;
-    
+
     this.querySelector('textarea').addEventListener('input', () => this.handleInput());
+    this.querySelector('[data-md-preview]').addEventListener('click', () => this.showEditor());
   }
 }
 
