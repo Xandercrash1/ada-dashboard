@@ -357,6 +357,10 @@
           <button onclick="switchServerSubTab('feedback')" id="subtab-btn-feedback" title="Tickets" aria-label="Tickets" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
             <i class="fa-solid fa-ticket text-rose-400"></i> <span class="hidden sm:inline">Tickets</span>
           </button>
+          <button onclick="switchServerSubTab('scheduled')" id="subtab-btn-scheduled" title="Scheduler" aria-label="Scheduler" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-clock text-amber-400"></i> <span class="hidden sm:inline">Scheduler</span>
+            <span id="subtab-scheduled-badge" class="hidden bg-amber-900 border border-amber-500 text-amber-200 text-[9px] font-bold px-1.5 py-0.5 rounded-full">0</span>
+          </button>
         </div>
 
         <button onclick="refreshTelemetry()" class="flex-shrink-0 text-xs bg-dark-bg border border-dark-border hover:bg-dark-accent text-gray-300 px-3.5 py-2 rounded-xl transition-colors flex items-center gap-1.5">
@@ -572,6 +576,54 @@
                 </button>
               </form>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====================================================== -->
+      <!-- SUB-TAB 4: SCHEDULER (moved from the floating bubble,  -->
+      <!-- fb-1788201858978)                                      -->
+      <!-- ====================================================== -->
+      <div id="server-sub-scheduled" class="hidden space-y-4">
+        <div class="bg-dark-card p-4 rounded-2xl border border-dark-border space-y-3 shadow-md">
+          <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <i class="fa-solid fa-clock text-amber-400"></i> Schedule a Prompt
+          </h2>
+          <p class="text-[11px] text-gray-500">Queue a prompt for any agent — run it at a set time, on a recurring interval, or hold it for manual release. Pre-approving deploy lets an overnight run push its own staged work live when it ends with the deploy token.</p>
+          <div class="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-1.5">Agent Session</label>
+              <select id="sched-session" class="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"></select>
+            </div>
+            <div>
+              <label class="block text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-1.5">When to run (Local Time)</label>
+              <input type="datetime-local" id="sched-new-runat" class="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500">
+            </div>
+          </div>
+          <div>
+            <label class="block text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-1.5">Prompt</label>
+            <textarea id="sched-new-prompt" rows="3" placeholder="What should the agent do?" class="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 placeholder-gray-600 resize-none"></textarea>
+          </div>
+          <div class="flex flex-wrap items-center gap-4">
+            <div class="w-40">
+              <label class="block text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-1.5">Recurring (Minutes)</label>
+              <input type="number" id="sched-new-freq" min="10" max="129600" placeholder="optional" class="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 placeholder-gray-600">
+            </div>
+            <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer select-none mt-4">
+              <input type="checkbox" id="sched-new-preapprove" class="accent-emerald-500 w-4 h-4">
+              <span><i class="fa-solid fa-rocket text-emerald-400 mr-1"></i>Pre-approve deploy <span class="text-gray-500">(auto-push staging → live if the run ends with the deploy token)</span></span>
+            </label>
+            <button onclick="submitDirectSchedule()" class="ml-auto bg-amber-600 hover:bg-amber-500 text-white px-4 py-2.5 rounded-xl text-xs font-semibold shadow transition-all flex items-center gap-1.5 mt-4">
+              <i class="fa-solid fa-plus"></i> Schedule
+            </button>
+          </div>
+        </div>
+        <div class="bg-dark-card p-4 rounded-2xl border border-dark-border shadow-md">
+          <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 mb-3">
+            <i class="fa-solid fa-list-check text-amber-400"></i> Queue
+          </h2>
+          <div id="scheduled-list" class="space-y-2">
+            <div class="text-center py-10 text-gray-500 text-xs">No scheduled prompts yet.</div>
           </div>
         </div>
       </div>
@@ -885,41 +937,17 @@
   </div>
 
   
-  <!-- FLOATING SCHEDULED BUTTON -->
-  <button onclick="document.getElementById('scheduled-sidebar').classList.toggle('translate-x-full')" class="fixed bottom-24 right-5 w-12 h-12 bg-amber-600 text-white rounded-full shadow-lg hover:bg-amber-500 hover:scale-110 transition-all flex flex-col items-center justify-center z-40 group">
-    <i class="fa-solid fa-clock text-lg"></i>
-    <span id="floating-sched-badge" class="absolute -top-1 -right-1 bg-amber-900 border border-amber-400 text-[9px] font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
-  </button>
+  <!-- The scheduler floating bubble + slide-in sidebar moved to the Server →
+       Scheduler sub-tab (fb-1788201858978). -->
 
-  <!-- FLOATING DESIGNER BUTTON — same pattern as the scheduler FAB above.
-       Visible only on pages that have a designer-editable page document
-       (DESIGNER_PAGES); the bubble it opens is bound to that page. -->
+  <!-- FLOATING DESIGNER BUTTON — visible only on pages that have a
+       designer-editable page document (DESIGNER_PAGES); the bubble it opens
+       is bound to that page. -->
   <button id="designer-fab" onclick="openPageDesigner()" title="Page Designer" class="fixed bottom-40 right-5 w-12 h-12 bg-purple-600 text-white rounded-full shadow-lg hover:bg-purple-500 hover:scale-110 transition-all flex items-center justify-center z-40">
     <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
   </button>
-  
-  <!-- SCHEDULED SIDEBAR OVERLAY -->
-  <div id="scheduled-sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 hidden transition-opacity"></div>
-  
-  <!-- SCHEDULED SIDEBAR -->
-  <div id="scheduled-sidebar" class="fixed right-0 top-0 h-screen w-80 max-w-full bg-dark-card border-l border-dark-border shadow-2xl transform translate-x-full transition-transform z-50 flex flex-col">
-    <div class="p-4 border-b border-dark-border flex items-center justify-between bg-dark-bg/80 backdrop-blur-sm">
-      <h3 class="text-sm font-bold text-white flex items-center gap-2">
-        <i class="fa-solid fa-clock text-amber-400"></i> Scheduled Tasks
-      </h3>
-      <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white transition-colors">
-        <i class="fa-solid fa-xmark text-lg"></i>
-      </button>
-    </div>
-    
-    <div class="p-4 flex-1 overflow-y-auto custom-scrollbar">
-      <div id="scheduled-list" class="space-y-2">
-        <div class="text-center py-10 text-gray-500 text-xs">No scheduled prompts yet.</div>
-      </div>
-    </div>
-  </div>
 
-  
+
   <!-- SCHEDULE MODAL -->
   <div id="schedule-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
     <div class="bg-dark-card border border-dark-border rounded-2xl p-5 w-full max-w-md shadow-2xl space-y-4">
@@ -937,6 +965,10 @@
           <input type="number" id="schedule-frequency" min="10" max="129600" placeholder="e.g. 60 for hourly" class="w-full bg-black/20 border border-white/5 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 placeholder-gray-600">
           <p class="text-[10px] text-gray-500 mt-1">Optional. Re-queues itself this many minutes after each run (min 10, max 129600).</p>
         </div>
+        <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer select-none">
+          <input type="checkbox" id="schedule-preapprove" class="accent-emerald-500 w-4 h-4">
+          <span><i class="fa-solid fa-rocket text-emerald-400 mr-1"></i>Pre-approve deploy — if the run ends with the deploy token, push staging → live without waiting for me</span>
+        </label>
         <div class="flex items-center justify-end gap-2 pt-2 border-t border-dark-border">
           <button type="button" onclick="document.getElementById('schedule-modal').classList.add('hidden')" class="px-4 py-2 rounded-xl text-gray-400 hover:text-white text-xs font-semibold transition-colors">Cancel</button>
           <button type="submit" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow transition-all flex items-center gap-1.5">
@@ -1148,7 +1180,7 @@
 
     // --- SERVER SUB-TAB SWITCHING ---
     function switchServerSubTab(sub) {
-      ['health', 'agents', 'feedback'].forEach(s => {
+      ['health', 'agents', 'feedback', 'scheduled'].forEach(s => {
         document.getElementById(`server-sub-${s}`).classList.add('hidden');
         const btn = document.getElementById(`subtab-btn-${s}`);
         if (btn) {
@@ -1164,6 +1196,10 @@
 
       if (sub === 'agents' && agentSessions.length === 0) {
         loadAgentSessions();
+      }
+      if (sub === 'scheduled') {
+        if (agentSessions.length === 0) loadAgentSessions().then(() => populateSchedSessions());
+        loadScheduled();
       }
       if (sub === 'feedback') {
         loadFeedback();
@@ -3033,7 +3069,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
     function renderScheduled() {
       const container = document.getElementById('scheduled-list');
-      const badge = document.getElementById('floating-sched-badge');
+      const badge = document.getElementById('subtab-scheduled-badge');
       const pending = scheduledItems.filter(i => i.status === 'pending').length;
       if (badge) {
         badge.textContent = pending;
@@ -3059,6 +3095,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           ? `Auto-run: ${new Date(item.runAt).toLocaleString()}`
           : 'Manual approval';
         const freqText = item.frequencyMinutes ? `<span class="text-amber-400 ml-1"><i class="fa-solid fa-rotate text-[9px]"></i> every ${item.frequencyMinutes}m</span>` : '';
+        const deployTag = item.preApproveDeploy ? `<span class="text-emerald-400 ml-1" title="Pre-approved: a run ending with the deploy token pushes staging → live automatically"><i class="fa-solid fa-rocket text-[9px]"></i> auto-deploy</span>` : '';
         const src = { 'auto-recovery': '⚠️ retry', 'agent': '🤖 agent', 'manual': '✍️ manual' }[item.source] || item.source;
         return `
           <div class="bg-dark-bg border border-dark-border rounded-xl p-3 space-y-2">
@@ -3071,7 +3108,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             </div>
             <p class="text-xs text-gray-200 break-words">${escapeHtml(item.prompt)}</p>
             <div class="text-[10px] text-gray-500 flex items-center gap-2 flex-wrap">
-              <span><i class="fa-regular fa-clock"></i> ${escapeHtml(when)}${freqText}</span>
+              <span><i class="fa-regular fa-clock"></i> ${escapeHtml(when)}${freqText}${deployTag}</span>
               ${item.attempts ? `<span>· ${item.attempts} attempt(s)</span>` : ''}
             </div>
             ${item.result ? `<p class="text-[10px] text-gray-400 bg-dark-card border border-dark-border rounded-lg px-2 py-1 break-words">${escapeHtml(item.result)}</p>` : ''}
@@ -3092,6 +3129,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (!prompt) return alert('Enter a prompt in the chat box first.');
       document.getElementById('schedule-runat').value = '';
       document.getElementById('schedule-frequency').value = '';
+      document.getElementById('schedule-preapprove').checked = false;
       document.getElementById('schedule-modal').classList.remove('hidden');
     }
 
@@ -3102,19 +3140,50 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const runAt = runAtLocal ? new Date(runAtLocal).toISOString() : null;
       const freqVal = document.getElementById('schedule-frequency').value;
       const frequencyMinutes = freqVal ? parseInt(freqVal, 10) : null;
-      
+      const preApproveDeploy = document.getElementById('schedule-preapprove').checked;
+
       try {
         const res = await fetch('/api/agent/scheduled', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: activeSessionId, prompt, runAt, frequencyMinutes, source: 'manual' })
+          body: JSON.stringify({ sessionId: activeSessionId, prompt, runAt, frequencyMinutes, preApproveDeploy, source: 'manual' })
         });
         if (!res.ok) { const err = await res.json(); return alert(err.error || 'Failed to schedule.'); }
-        
+
         document.getElementById('agent-chat-input').value = '';
         document.getElementById('schedule-frequency').value = '';
         document.getElementById('schedule-modal').classList.add('hidden');
-        document.getElementById('scheduled-sidebar').classList.remove('translate-x-full');
+        switchServerSubTab('scheduled');
+        await loadScheduled();
+      } catch (err) {
+        alert('Failed to schedule: ' + err.message);
+      }
+    }
+
+    // Direct creation from the Scheduler sub-tab — unlike the modal above,
+    // this one doesn't depend on the agent chat input (fb-1788201858978).
+    async function submitDirectSchedule() {
+      const sessionId = document.getElementById('sched-session').value;
+      const prompt = document.getElementById('sched-new-prompt').value.trim();
+      if (!sessionId) return alert('Pick an agent session first.');
+      if (!prompt) return alert('Enter a prompt.');
+      const runAtLocal = document.getElementById('sched-new-runat').value;
+      const runAt = runAtLocal ? new Date(runAtLocal).toISOString() : null;
+      const freqVal = document.getElementById('sched-new-freq').value;
+      const frequencyMinutes = freqVal ? parseInt(freqVal, 10) : null;
+      const preApproveDeploy = document.getElementById('sched-new-preapprove').checked;
+
+      try {
+        const res = await fetch('/api/agent/scheduled', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, prompt, runAt, frequencyMinutes, preApproveDeploy, source: 'manual' })
+        });
+        if (!res.ok) { const err = await res.json(); return alert(err.error || 'Failed to schedule.'); }
+        document.getElementById('sched-new-prompt').value = '';
+        document.getElementById('sched-new-runat').value = '';
+        document.getElementById('sched-new-freq').value = '';
+        document.getElementById('sched-new-preapprove').checked = false;
         await loadScheduled();
       } catch (err) {
         alert('Failed to schedule: ' + err.message);
@@ -4055,7 +4124,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     loadScheduled();
     loadFeedbackTypes().then(loadFeedback);
     setInterval(refreshTelemetry, 5000);
-    setInterval(() => { if (!document.getElementById('scheduled-sidebar').classList.contains('translate-x-full')) loadScheduled(); }, 15000);
+    // Auto-refresh the queue while the Scheduler sub-tab is on screen.
+    setInterval(() => {
+      const panel = document.getElementById('server-sub-scheduled');
+      if (panel && !panel.classList.contains('hidden')) loadScheduled();
+    }, 15000);
 
     // --- Staging health banner (added 2026-08-26) ----------------------------
     // Shows ONLY when staging is broken. A card that is always present becomes

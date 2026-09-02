@@ -388,24 +388,41 @@ app.get('/api/staging/status', (req, res) => {
 // control is OS privilege separation (run the agent as a separate low-priv
 // user). This endpoint therefore adds NO new capability an agent lacked; it
 // just gives the human a button. Do not mistake it for an agent sandbox.
-app.post('/api/staging/promote', (req, res) => {
-  if (req.get('X-Promote-Confirm') !== '1') {
-    return res.status(403).json({ error: 'Refused: promotion must be initiated from the dashboard button.' });
+// Shared by the dashboard button endpoint below and the scheduler's
+// pre-approved deploy path (fb-1788201858978). promote.sh self-detaches
+// (setsid nohup) and returns in <1s, then runs the real validate → snapshot →
+// sync → restart → auto-rollback on its own, so callers never wait across the
+// dashboard restart. Only the LIVE instance may promote: the staging server
+// runs this same file, and a staging-side auto-deploy would ship whatever
+// half-finished work happens to be in the staging tree.
+function startPromotion(triggerLabel) {
+  if (String(PORT) !== '3000') {
+    console.log(`[promote] SKIPPED (${triggerLabel}): this is not the live instance (port ${PORT})`);
+    return { started: false, skipped: 'not-live-instance' };
   }
-  // promote.sh self-detaches (setsid nohup) and returns in <1s, then runs the
-  // real validate → snapshot → sync → restart → auto-rollback on its own. So we
-  // don't hold this request open across the dashboard restart; we kick it off
-  // and reply immediately.
+  console.log(`[promote] starting promotion (${triggerLabel})`);
   execFile('bash', ['/home/ubuntu/ops/promote.sh'], { timeout: 15000 }, (err, stdout, stderr) => {
     if (err) console.error('[promote] launch error:', err.message, (stderr || '').trim());
     else console.log('[promote]', (stdout || '').trim());
   });
-  // Feedback lifecycle Step 3: the human click is the completion signal.
+  // Feedback lifecycle Step 3: the promote trigger is the completion signal —
+  // a human click, or a pre-approval the human gave when scheduling.
   try {
     const closed = closeStagedFeedbackOnPromote(new Date().toISOString());
     if (closed.length) console.log('[promote] auto-closed staged feedback:', closed.join(', '));
   } catch (e) {
     console.error('[promote] feedback auto-close failed:', e.message);
+  }
+  return { started: true };
+}
+
+app.post('/api/staging/promote', (req, res) => {
+  if (req.get('X-Promote-Confirm') !== '1') {
+    return res.status(403).json({ error: 'Refused: promotion must be initiated from the dashboard button.' });
+  }
+  const result = startPromotion('dashboard button');
+  if (!result.started) {
+    return res.status(409).json({ error: `Promotion refused: ${result.skipped}` });
   }
   return res.status(202).json({
     ok: true,
@@ -2023,7 +2040,7 @@ Second, use git to add, commit, and push your changes to GitHub from the staging
 Finally, tell Alex what you built, and include the exact string ${PROMOTE_ACTION_TOKEN} in your message. The UI will render this as a clickable button that pulls the latest main branch from GitHub into the Live server.
 6. A feedback store exists at /home/ubuntu/dashboard/data/feedback.json. Work items in priority order: bug > improvement > feature > chore > idea. If using Gemini, use the 'feedback' tool. If using Claude, read and modify the JSON file directly via bash. ALWAYS set status="done", processedBy="your name", and notes="what you did" when finishing an item.
 7. ASYNC COMMUNICATION & AUTONOMY: You can send messages to the chat asynchronously without ending your turn by POSTing to http://127.0.0.1:3001/api/agent/sessions/<your-session-id>/messages with body {"text": "your message", "role": "agent"}. (Gemini can also use the 'send_message' tool).
-8. SCHEDULING & DEFERRING WORK: You can queue tasks to run autonomously later by POSTing to http://127.0.0.1:3001/api/agent/scheduled with body {"sessionId": "<your-session-id>", "prompt": "task description", "runAt": "ISO8601-timestamp", "frequencyMinutes": <optional-integer-minutes>, "source": "agent", "model": "<model-id>"}. (Gemini can also use the 'schedule_prompt' tool). Set frequencyMinutes (10 to 129600) to make it recurring. This allows you to split large tasks, retry after rate limits, or run background loops.
+8. SCHEDULING & DEFERRING WORK: You can queue tasks to run autonomously later by POSTing to http://127.0.0.1:3001/api/agent/scheduled with body {"sessionId": "<your-session-id>", "prompt": "task description", "runAt": "ISO8601-timestamp", "frequencyMinutes": <optional-integer-minutes>, "source": "agent", "model": "<model-id>"}. (Gemini can also use the 'schedule_prompt' tool). Set frequencyMinutes (10 to 129600) to make it recurring. This allows you to split large tasks, retry after rate limits, or run background loops. The preApproveDeploy flag on scheduled items is reserved for Alex via the dashboard Scheduler tab — agents must NEVER set it; the server strips it from non-manual sources.
 9. HOMEPAGE LIVE DOCUMENT: The dashboard Home tab (announcement banner + widget cards) renders entirely from the JSON file at ${HOMEPAGE_FILE}. Schema: { announcement: {title, text, icon, visible}, sections: {stats, quickLinks} (booleans to hide the built-in stat boxes / quick links), widgets: [{id, title, icon (FontAwesome class like fa-chart-line), accent (indigo|purple|emerald|rose|amber|sky), html (trusted HTML for the card body; may embed live stats via <span data-home-stat="todo|jobs|cpu|bugs"></span>), link: {label, tab (home|todo|tools|server) OR href (URL)}, hidden}] }. Max 24 widgets. Homepage design work belongs to the dedicated "designer" role/agent when possible. To redesign the homepage, edit this file directly (Claude: bash; Gemini: file tools) — changes appear on the next browser refresh with NO server restart and NO promote, because data/ is never synced by promote.sh. Keep it valid JSON; malformed content is dropped by the server's sanitizer. A homepage widget's html body MAY embed the chat widget element (see rule 10) — e.g. <ada-widget type="countdown" id="x" target="ISO" remove-on-complete="true"></ada-widget> — which is the ONLY way to get self-deleting/conditional behavior on the homepage (the ada-countdown component does NOT self-delete; note remove-on-complete only hides the card body client-side, the JSON entry remains until deleted). WARNING: homepage.json is last-writer-wins with no merge — ALWAYS re-read the file immediately before writing, because another agent or the dashboard UI may have changed it since you last looked (a stale write clobbered a sibling agent's widget on 2026-09-02).
 10. GENERATIVE UI IN CHAT: You can embed live interactive widgets directly in your chat replies by writing <ada-widget> tags in your markdown (raw HTML passes through). Always put the tag on its own line and ALWAYS close it explicitly with </ada-widget> (never self-close). Types: (a) button — invokes a script or API when Alex clicks it: <ada-widget type="button" label="Restart Crawler" icon="fa-rotate" accent="emerald" script-id="my-script"></ada-widget> or with endpoint="/api/..." method="POST" payload='{"key":"val"}' (single-quote the payload attribute; endpoint must start with /api/; add confirm="Are you sure?" for dangerous actions). (b) photo: <ada-widget type="photo" src="/media/chat/x.png" caption="..."></ada-widget>. (c) countdown: <ada-widget type="countdown" target="2026-09-03T00:00:00Z" label="Deploy window"></ada-widget>. (d) gauge — static value="42" max="100" unit="%" label="CPU", or live with endpoint="/api/system" path="cpu.usage" refresh="10". Accents: indigo|purple|emerald|rose|amber|sky|cyan|red. Use widgets when they beat plain text (one-click follow-up actions, visual status, timers); do not use them decoratively. IMPORTANT WIDGET RULES: script-id MUST be one of the registered ids — currently: ${scriptRegistryNote} — anything else fails with "Unknown script ID". For a harmless demo/preview button, use endpoint="/api/system" method="GET" instead of inventing a script. Never describe behavior the widget's attributes do not declare (a button only self-deletes if you set remove-on-success="true"). CONDITIONAL ATTRS (any type): id="x" (identity — required for the following state to persist across page refreshes); start-hidden="true" (invisible until revealed); show-after="ISO" / show-until="ISO" (time-window visibility, e.g. a message that only appears on a specific date); remove-on-success="true" on buttons (self-deletes after a successful press, e.g. one-shot action buttons); remove-on-complete="true" on countdowns (self-deletes ~3s after hitting zero); on-success-show="targetId" / on-complete-show="targetId" (reveals the start-hidden widget with that id — lets a countdown or button trigger the next widget to appear).
 11. AGENDA / CALENDAR: GET /api/agenda?days=N merges Alex's Google Calendar (secret ICS feed URLs in data/calendar-feeds.json — NEVER print, log, or echo these URLs) with local dashboard events in data/calendar.json. To put an event on Alex's agenda widget, append to the data/calendar.json array: {"id":"unique","title":"...","startsAt":"ISO8601","endsAt":"ISO8601 optional","allDay":false,"location":"optional","addedBy":"your name"}. data/ files apply immediately (no restart, no promote). The homepage widget is <ada-calendar> and reads /api/agenda itself.`;
@@ -2718,7 +2735,20 @@ async function runScheduledItem(item, opts = {}) {
     item.status = 'sent';
     item.result = (agentMsg.text || '').slice(0, 500);
   }
-  return { success: true, item };
+
+  // Pre-approved deploy (fb-1788201858978): Alex checked the box when
+  // scheduling, so an agent run that ends with the promote token deploys
+  // without waiting for a button click he isn't around to press. We only
+  // REQUEST it here — the caller persists the queue first, then calls
+  // startPromotion(), because promote restarts this very process and an
+  // unpersisted item would re-run (and re-deploy) after the restart.
+  let deployRequested = false;
+  if (item.preApproveDeploy && containsPromoteToken(agentMsg.text)) {
+    deployRequested = true;
+    item.autoDeployedAt = new Date().toISOString();
+    item.result = `[auto-deploy] Promote token detected; deploy triggered at ${item.autoDeployedAt}. ` + (item.result || '');
+  }
+  return { success: true, item, deployRequested };
 }
 
 app.get('/api/agent/scheduled', (req, res) => res.json(readScheduled()));
@@ -2742,6 +2772,7 @@ app.post('/api/agent/scheduled', (req, res) => {
   }
 
   const scheduled = readScheduled();
+  const itemSource = source || 'manual'; // 'manual' | 'agent' | 'auto-recovery'
   const item = {
     id: `sched-${Date.now()}`,
     sessionId,
@@ -2751,7 +2782,12 @@ app.post('/api/agent/scheduled', (req, res) => {
     runAt: runAt || null,               // ISO string => auto-run at that time; null => manual run-now
     frequencyMinutes: frequencyMinutes ? Math.max(10, Math.min(129600, parseInt(frequencyMinutes, 10))) : null,
     status: 'pending',
-    source: source || 'manual',         // 'manual' | 'agent' | 'auto-recovery'
+    source: itemSource,
+    // Deploy pre-approval is Alex's call at scheduling time, made in the
+    // dashboard UI — agent- and recovery-created items can never carry it
+    // (fb-1788201858978). App-layer only (see the promote endpoint's threat
+    // notes above), but it keeps honest agents honest.
+    preApproveDeploy: itemSource === 'manual' && req.body.preApproveDeploy === true,
     reason: reason || null,
     attempts: 0,
     createdAt: new Date().toISOString(),
@@ -2776,6 +2812,7 @@ app.post('/api/agent/scheduled/:id/run', async (req, res) => {
 
     const result = await runScheduledItem(item, { isAuto: false });
     writeScheduled(scheduled);
+    if (result.deployRequested) startPromotion('manual run of pre-approved scheduled item');
     res.json({ ...result, scheduled });
   } catch (err) {
     // Same rationale as the chat handler above — async, so a thrown parse
@@ -2800,10 +2837,15 @@ setInterval(async () => {
     const due = scheduled.filter(s => s.status === 'pending' && s.runAt && new Date(s.runAt).getTime() <= now);
     if (!due.length) return;
 
+    let deployRequested = false;
     for (const item of due) {
-      await runScheduledItem(item, { isAuto: true });
+      const result = await runScheduledItem(item, { isAuto: true });
+      // Persist after EVERY item, not once at the end: a pre-approved deploy
+      // restarts this process, and an unpersisted ranAt would re-run items.
+      writeScheduled(scheduled);
+      if (result.deployRequested) deployRequested = true;
     }
-    writeScheduled(scheduled);
+    if (deployRequested) startPromotion('scheduled item (pre-approved by Alex)');
   } catch (err) {
     console.error('Scheduler error:', err.message);
   } finally {
