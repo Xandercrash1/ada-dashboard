@@ -1228,8 +1228,8 @@ app.post('/api/agent/sessions', (req, res) => {
   // to the page document), so it defaults to the cheapest fast model instead
   // of the registry default. An explicit model in the request still wins, and
   // the model can be switched later like any session.
-  if (sessionRole === 'designer' && !model && getModelById('antigravity-flash')) {
-    sessionModel = 'antigravity-flash';
+  if (sessionRole === 'designer' && !model && getModelById('gpt-4o-mini')) {
+    sessionModel = 'gpt-4o-mini'; // fb-1788040125569: ChatGPT mini over flash-lite
   }
 
   // Designer sessions are bound to one page for their whole life — the write
