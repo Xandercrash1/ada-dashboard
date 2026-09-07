@@ -118,50 +118,9 @@ class ScratchpadWidget extends HTMLElement {
     const textarea = this.querySelector('textarea');
     if (!textarea) return;
     
-    // To get true text height, we must remove flex/height constraints
-    // that force the textarea to stretch to the parent container.
-    const originalFlex = textarea.style.flex;
-    const originalHeight = textarea.style.height;
-    
-    textarea.style.flex = 'none';
     textarea.style.height = '0px';
     const contentHeight = textarea.scrollHeight;
-    
-    textarea.style.flex = originalFlex;
-    textarea.style.height = originalHeight;
-    
-    // Header is ~30px, padding is 32px. 
-    const requiredHeight = contentHeight + 65;
-    
-    // Row 1 = 120px, Row 2 = 256px, Row 3 = 392px, Row 4 = 528px
-    let requiredRows = 1; 
-    if (requiredHeight > 392) requiredRows = 4;
-    else if (requiredHeight > 256) requiredRows = 3;
-    else if (requiredHeight > 120) requiredRows = 2;
-    
-    const wrapper = this.parentElement;
-    if (wrapper) {
-      let currentRows = 2;
-      const classesToRemove = [];
-      wrapper.classList.forEach(cls => {
-        if (cls.startsWith('row-span-')) classesToRemove.push(cls);
-      });
-      classesToRemove.forEach(cls => {
-        currentRows = parseInt(cls.replace('row-span-', '')) || currentRows;
-        wrapper.classList.remove(cls);
-      });
-      
-      wrapper.classList.add(`row-span-${requiredRows}`);
-      
-      // Persist the size without triggering a full re-render
-      if (currentRows !== requiredRows && window.homepageDoc) {
-        const widgetDef = window.homepageDoc.widgets.find(w => w.id === 'scratchpad');
-        if (widgetDef && widgetDef.rows !== requiredRows) {
-           widgetDef.rows = requiredRows;
-           if (window.saveHomepageDoc) window.saveHomepageDoc();
-        }
-      }
-    }
+    textarea.style.height = contentHeight + 'px';
   }
 
   render() {
@@ -175,7 +134,7 @@ class ScratchpadWidget extends HTMLElement {
                    `bg-dark-bg/60 backdrop-blur-xl border border-white/10`; 
 
     this.innerHTML = `
-      <div class="${bgClass} rounded-2xl p-4 flex flex-col h-full overflow-hidden transition-all duration-300 group">
+      <div class="${bgClass} rounded-2xl p-4 flex flex-col transition-all duration-300 group">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-2 text-${accent}-400">
             <i class="fa-solid fa-note-sticky text-sm"></i>

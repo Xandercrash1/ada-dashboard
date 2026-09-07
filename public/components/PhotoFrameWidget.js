@@ -1,5 +1,5 @@
 class PhotoFrameWidget extends HTMLElement {
-  connectedCallback() { this.classList.add("block", "w-full", "h-full");
+  connectedCallback() { this.classList.add("block", "w-full");
     this.images = [];
     this.currentIndex = 0;
     this.intervalId = null;
@@ -7,7 +7,7 @@ class PhotoFrameWidget extends HTMLElement {
     this.loadImages();
   }
 
-  disconnectedCallback() { this.classList.add("block", "w-full", "h-full");
+  disconnectedCallback() { this.classList.add("block", "w-full");
     if (this.intervalId) clearInterval(this.intervalId);
   }
 
@@ -70,8 +70,8 @@ class PhotoFrameWidget extends HTMLElement {
     }
     
     this.innerHTML = `
-      <div class="relative rounded-xl overflow-hidden shadow-lg h-full min-h-[12rem] group border border-dark-border bg-dark-bg">
-        <img src="${this.images[this.currentIndex]}" class="w-full h-full object-cover transition-opacity duration-300" style="opacity: 1;" loading="lazy">
+      <div class="relative rounded-xl overflow-hidden shadow-lg group border border-dark-border bg-dark-bg w-full">
+        <img src="${this.images[this.currentIndex]}" class="w-full h-auto object-cover transition-opacity duration-300" style="opacity: 1;" loading="lazy">
         <div class="absolute inset-0 shadow-[inset_0_0_20px_rgba(0,0,0,0.5)] pointer-events-none"></div>
         <div class="absolute top-2 right-2 bg-black/50 backdrop-blur-md rounded px-2 py-1 text-[9px] text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity">
           <i class="fa-solid fa-folder-open mr-1 text-indigo-400"></i> ${this.getAttribute('library') || 'default'}
