@@ -2178,7 +2178,7 @@
       // Without this it still holds the PREVIOUS session's signature, so the
       // next poll either redraws needlessly or (on a coincidental match) skips
       // a real message.
-      lastMessagesSignature = messagesSignature(session.messages);
+      globalSessionSignatures[session.id] = messagesSignature(session.messages);
 
       // §5 reconnect: if a poll for this session is already tracked in this
       // page's JS state (tab-switch, not reload), just redraw it; otherwise
@@ -2658,7 +2658,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           renderChatMessages(session.messages);
           // Keep the async poller in sync so it doesn't immediately redraw what
           // was just drawn here.
-          lastMessagesSignature = messagesSignature(session.messages);
+          globalSessionSignatures[session.id] = messagesSignature(session.messages);
         }
         return session;
       } catch (err) {
@@ -2677,40 +2677,54 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     // This deliberately runs DURING a job as well as when idle — reporting
     // progress mid-task is the main thing async chat is for, and gating it on
     // idle would hide exactly the messages that matter most.
-    let lastMessagesSignature = '';
+    let globalSessionSignatures = {};
 
     // Cheap change detector. Re-rendering unconditionally every few seconds
-    // would yank the scroll position to the bottom while Alex is reading back
-    // through a long chat, and collapse any open tool-output <details>.
-    function messagesSignature(messages) {
-      if (!messages || !messages.length) return '0';
-      const last = messages[messages.length - 1];
-      return `${messages.length}|${last.timestamp || ''}|${(last.text || '').length}`;
+    // burns battery, breaks text selection, and flickers images.
+    function messagesSignature(msgs) {
+      if (!msgs || !msgs.length) return '0';
+      return msgs.length + '-' + msgs[msgs.length - 1].text.length;
     }
 
     async function pollForAsyncMessages() {
-      if (!activeSessionId) return;
       try {
         const res = await fetch('/api/agent/sessions');
         if (!res.ok) return;
         const sessions = await res.json();
-        const session = sessions.find(s => s.id === activeSessionId);
-        if (!session) return;
-
-        const sig = messagesSignature(session.messages);
-        if (sig === lastMessagesSignature) return; // nothing new — leave the DOM alone
-        lastMessagesSignature = sig;
+        
+        let changedActiveSession = false;
+        
+        for (const session of sessions) {
+          const sig = messagesSignature(session.messages);
+          const oldSig = globalSessionSignatures[session.id];
+          
+          if (oldSig && oldSig !== sig) {
+            // New message arrived in this session!
+            console.log('[Global Poller] New message detected for session:', session.id);
+            window.dispatchEvent(new CustomEvent('agentMessageReceived', { detail: { session } }));
+            if (session.id === activeSessionId) {
+              changedActiveSession = true;
+            }
+          }
+          globalSessionSignatures[session.id] = sig;
+        }
 
         agentSessions = sessions;
-        renderSessionsList();
-        renderChatMessages(session.messages);
+        
+        if (changedActiveSession) {
+          const activeSession = sessions.find(s => s.id === activeSessionId);
+          if (activeSession) {
+            renderSessionsList();
+            renderChatMessages(activeSession.messages);
 
-        // renderChatMessages replaces the container's innerHTML, which destroys
-        // the in-flight job bubble. Put it back, or a job would appear to
-        // vanish (and take its Cancel button with it) the moment the agent
-        // posted a progress message.
-        const poll = jobPolls[activeSessionId];
-        if (poll) renderJobProgress(activeSessionId, poll.lastJob);
+            // renderChatMessages replaces the container's innerHTML, which destroys
+            // the in-flight job bubble. Put it back, or a job would appear to
+            // vanish (and take its Cancel button with it) the moment the agent
+            // posted a progress message.
+            const poll = jobPolls[activeSessionId];
+            if (poll) renderJobProgress(activeSessionId, poll.lastJob);
+          }
+        }
       } catch (err) {
         console.error('Async message poll failed', err);
       }
