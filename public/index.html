@@ -3827,9 +3827,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
                ${window.isEditingLayout ? `draggable="true" ondragstart="handleWidgetDragStart(event, '${w.id}')" ondragover="handleWidgetDragOver(event)" ondrop="handleWidgetDrop(event, '${w.id}')" ondragenter="handleWidgetDragEnter(event)" ondragleave="handleWidgetDragLeave(event)" ondragend="handleWidgetDragEnd(event)"` : ''}>
             <div class="widget-measurer block w-full relative ${heightClass}">
               ${w.html || ''}
+              ${overlay}
             </div>
             ${w.link && w.link.label && !window.isEditingLayout ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
-            ${overlay}
           </div>`;
       }).join('');
       
@@ -3845,14 +3845,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (window.widgetResizeObserver) window.widgetResizeObserver.disconnect();
       window.widgetResizeObserver = new ResizeObserver((entries) => {
          for (let entry of entries) {
-           const measurer = entry.target.querySelector('.widget-measurer');
-           if (!measurer) continue;
+           const measurer = entry.target;
+           const container = measurer.closest('.widget-container');
+           if (!container) continue;
            const height = measurer.getBoundingClientRect().height;
            const span = Math.ceil((height + 16) / 26); // 10px row + 16px gap
-           entry.target.style.gridRowEnd = `span ${span}`;
+           container.style.gridRowEnd = `span ${span}`;
          }
       });
-      grid.querySelectorAll('.widget-container').forEach(w => window.widgetResizeObserver.observe(w));
+      grid.querySelectorAll('.widget-measurer').forEach(w => window.widgetResizeObserver.observe(w));
       
       syncHomeStatMirrors();
     }
