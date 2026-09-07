@@ -466,9 +466,6 @@
             <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow flex items-center gap-1.5">
               <i class="fa-solid fa-play text-[10px]"></i> Run
             </button>
-          </form>
-
-          <div class="bg-black/95 rounded-xl border border-dark-border p-3.5 font-mono text-xs space-y-2">
             <div class="flex items-center justify-between border-b border-dark-border/50 pb-2 text-[11px] text-gray-400">
               <span id="term-status-label">Terminal Output (CWD: /home/ubuntu)</span>
               <button onclick="clearTerminalOutput()" class="text-gray-400 hover:text-white">&times; Clear</button>
@@ -587,9 +584,6 @@
                   <span>Send</span>
                   <i class="fa-regular fa-paper-plane text-[11px]"></i>
                 </button>
-              </form>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -676,9 +670,6 @@
           <button type="submit" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5">
             <i class="fa-solid fa-paper-plane text-[11px]"></i> Submit
           </button>
-        </form>
-      </div>
-
       <!-- Filters -->
       <div class="bg-dark-card p-3.5 rounded-2xl border border-dark-border flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
         <div class="flex items-center space-x-1 bg-dark-bg p-1 rounded-xl border border-dark-border overflow-x-auto text-xs font-medium custom-scrollbar">
@@ -858,9 +849,6 @@
           <button type="button" onclick="closeAddTodoModal()" class="px-4 py-2 rounded-xl bg-dark-bg border border-dark-border text-xs text-gray-300 hover:text-white">Cancel</button>
           <button type="submit" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow-md shadow-indigo-600/30">Save Task</button>
         </div>
-      </form>
-    </div>
-  </div>
 
   <!-- NEW AGENT MODAL (WITH ROLES & CLAUDE TOGGLE) -->
   <div id="new-agent-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
@@ -945,9 +933,6 @@
           <button type="button" onclick="closeNewAgentModal()" class="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-dark-bg dark:hover:bg-gray-800 border border-gray-300 dark:border-dark-border text-xs text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">Cancel</button>
           <button type="submit" class="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-semibold text-white shadow-md shadow-purple-600/30">Create Agent</button>
         </div>
-      </form>
-    </div>
-  </div>
 
   
   <!-- The scheduler floating bubble + slide-in sidebar moved to the Server →
@@ -985,9 +970,6 @@
             <i class="fa-solid fa-check"></i> Schedule
           </button>
         </div>
-      </form>
-    </div>
-  </div>
 
   <!-- QUEUE-ON-FAILURE MODAL -->
   <div id="queue-prompt-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
@@ -2682,7 +2664,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     // This deliberately runs DURING a job as well as when idle — reporting
     // progress mid-task is the main thing async chat is for, and gating it on
     // idle would hide exactly the messages that matter most.
-    let globalSessionSignatures = {};
+    let globalSessionSignatures = null;
 
     // Cheap change detector. Re-rendering unconditionally every few seconds
     // burns battery, breaks text selection, and flickers images.
@@ -2699,6 +2681,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         
         let changedActiveSession = false;
         
+        // Initialize from localStorage if it's the first poll
+        if (globalSessionSignatures === null) {
+          try {
+            globalSessionSignatures = JSON.parse(localStorage.getItem('ada_readSignatures') || '{}');
+          } catch(e) {
+            globalSessionSignatures = {};
+          }
+        }
+        
         for (const session of sessions) {
           const sig = messagesSignature(session.messages);
           const oldSig = globalSessionSignatures[session.id];
@@ -2710,6 +2701,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             if (session.id === activeSessionId) {
               changedActiveSession = true;
             }
+          } else if (!oldSig && session.messages && session.messages.length > 0) {
+             // New session entirely! We should pop it if they aren't looking at it.
+             window.dispatchEvent(new CustomEvent('agentMessageReceived', { detail: { session } }));
           }
           globalSessionSignatures[session.id] = sig;
         }
@@ -3964,26 +3958,22 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       designerBubblePage = page;
       designerSessionId = null;
       try { designerSessionId = localStorage.getItem(designerStorageKey(page)); } catch (e) {}
-      document.getElementById('designer-bubble-title').textContent = cfg.title;
-      document.getElementById('designer-bubble-messages').innerHTML = '';
-      document.getElementById('designer-bubble').classList.remove('hidden');
+      
       try {
         await ensureDesignerSession(page);
+        if (designerSessionId && window.bubbleManager) {
+          window.bubbleManager.forceBubble(designerSessionId);
+        }
       } catch (err) {
-        renderDesignerNotice('Could not start the Designer: ' + err.message);
-        return;
+        console.error('Could not start the Designer: ' + err.message);
       }
-      renderDesignerMessages();
-      populateDesignerModelSelect();
-      attachToRunningDesignerJob(); // bubble reopened mid-turn → reattach, don't lose it
-      document.getElementById('designer-bubble-input').focus();
     }
 
     // The banner wand predates the FAB and stays as a Home-page shortcut.
     function openHomepageDesigner() { openPageDesigner(); }
 
     function closeDesignerBubble() {
-      document.getElementById('designer-bubble').classList.add('hidden');
+      if(window.bubbleManager) window.bubbleManager.closeBubble(designerSessionId);
     }
 
     async function ensureDesignerSession(page) {
@@ -4030,7 +4020,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     function renderDesignerMessages() {
-      const box = document.getElementById('designer-bubble-messages');
+      const box = document.getElementById('designer-bubble-messages'); if(!box) return;
       const msgs = (designerSession && designerSession.messages) || [];
       box.innerHTML = msgs.map(m => m.role === 'user'
         ? `<div class="flex justify-end"><div class="max-w-[85%] bg-indigo-600/80 text-white rounded-xl rounded-br-sm px-3 py-2 whitespace-pre-wrap break-words">${escapeHtml(m.text)}</div></div>`
@@ -4040,7 +4030,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     function renderDesignerNotice(text) {
-      const box = document.getElementById('designer-bubble-messages');
+      const box = document.getElementById('designer-bubble-messages'); if(!box) return;
       const div = document.createElement('div');
       div.className = 'text-center text-[10px] text-gray-500 py-1';
       div.textContent = text;
@@ -4049,7 +4039,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     function prefillDesignerInput(text) {
-      const inp = document.getElementById('designer-bubble-input');
+      const inp = document.getElementById('designer-bubble-input'); if(!inp) return;
       inp.value = text;
       inp.focus();
     }
@@ -4057,14 +4047,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     function setDesignerBusy(busy, statusText) {
       designerBusy = busy;
       if (typeof updateAgentTabBadge === "function") updateAgentTabBadge();
-      document.getElementById('designer-bubble-send').disabled = busy;
+      if(document.getElementById('designer-bubble-send')) document.getElementById('designer-bubble-send').disabled = busy;
       document.getElementById('designer-bubble-status').classList.toggle('hidden', !busy);
       if (statusText) document.getElementById('designer-bubble-status-text').textContent = statusText;
     }
 
     function submitDesignerForm(e) {
       e.preventDefault();
-      const inp = document.getElementById('designer-bubble-input');
+      const inp = document.getElementById('designer-bubble-input'); if(!inp) return;
       const text = inp.value.trim();
       if (!text) return;
       inp.value = '';
@@ -4295,55 +4285,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           <button type="button" onclick="closeAnnouncementModal()" class="px-4 py-2 rounded-xl text-gray-400 hover:text-white text-xs font-semibold transition-colors">Cancel</button>
           <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all shadow-md shadow-indigo-600/20">Save</button>
         </div>
-      </form>
-    </div>
-  </div>
 
-  <!-- DESIGNER BUBBLE — a compact, page-anchored chat with the Designer agent
-       (role: designer, walled to the homepage live document). The session it
-       drives is a normal agent session, so the full conversation also appears
-       under Server → Agents. Opened by the wand button on the banner. -->
-  <div id="designer-bubble" class="hidden fixed bottom-24 md:bottom-6 right-4 z-40 w-[24rem] max-w-[calc(100vw-2rem)] bg-dark-card border border-purple-800/60 rounded-2xl shadow-2xl shadow-purple-950/50 flex flex-col overflow-hidden">
-    <div class="flex items-center justify-between gap-2 px-4 py-3 bg-gradient-to-r from-purple-950/60 to-indigo-950/60 border-b border-dark-border">
-      <div class="flex items-center gap-2 min-w-0">
-        <i class="fa-solid fa-wand-magic-sparkles text-purple-400"></i>
-        <span id="designer-bubble-title" class="text-sm font-bold text-white truncate">Homepage Designer</span>
-      </div>
-      <div class="flex items-center gap-1.5 flex-shrink-0">
-        <select id="designer-model-select" onchange="changeDesignerModel(this.value)" title="Designer model" class="bg-dark-bg border border-dark-border rounded-lg text-[10px] text-gray-300 px-1.5 py-1 focus:outline-none focus:border-purple-500 max-w-[8rem]"></select>
-        <button onclick="openDesignerInAgentsTab()" title="Open full conversation in Agents tab" class="w-6 h-6 rounded-lg text-gray-400 hover:text-white hover:bg-dark-bg text-xs flex items-center justify-center transition-colors">
-          <i class="fa-solid fa-up-right-from-square"></i>
-        </button>
-        <button onclick="closeDesignerBubble()" title="Close" class="w-6 h-6 rounded-lg text-gray-400 hover:text-white hover:bg-dark-bg text-sm flex items-center justify-center transition-colors">&times;</button>
-      </div>
-    </div>
-
-    <!-- Quick edit actions: chips that prefill or fire common design requests -->
-    <div class="flex items-center gap-1.5 px-3 py-2 border-b border-dark-border overflow-x-auto custom-scrollbar">
-      <button onclick="openAnnouncementModal()" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-indigo-500 transition-colors"><i class="fa-solid fa-pen mr-1"></i>Banner</button>
-      <button onclick="prefillDesignerInput('Add a new widget that ')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-indigo-500 transition-colors"><i class="fa-solid fa-plus mr-1"></i>New widget</button>
-      <button onclick="prefillDesignerInput('Redesign the stats section: ')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-indigo-500 transition-colors"><i class="fa-solid fa-chart-simple mr-1"></i>Stats</button>
-      <button onclick="sendDesignerMessage('Undo your most recent change to the page document — restore it to how it was before your last edit.')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-rose-500 transition-colors"><i class="fa-solid fa-rotate-left mr-1"></i>Undo</button>
-      <button onclick="sendDesignerMessage('Look at what exists on this server (tools, scripts, TODOs, projects) and propose 2-3 new homepage widget ideas. Just propose — do not apply yet.')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-emerald-500 transition-colors"><i class="fa-solid fa-lightbulb mr-1"></i>Ideas</button>
-    </div>
-
-    <div id="designer-bubble-messages" class="h-72 overflow-y-auto custom-scrollbar px-3 py-3 space-y-2 text-xs"></div>
-
-    <div id="designer-bubble-status" class="hidden px-4 py-1.5 text-[10px] text-purple-300 border-t border-dark-border flex items-center justify-between gap-2">
-      <div class="flex items-center gap-2 flex-1 min-w-0">
-        <i id="designer-bubble-spinner" class="fa-solid fa-circle-notch fa-spin"></i> <span id="designer-bubble-status-text" class="truncate">Designing…</span>
-      </div>
-      <button onclick="cancelDesignerJob()" id="designer-bubble-cancel-btn" class="px-2 py-1 rounded bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 transition-colors flex items-center gap-1 flex-shrink-0">
-        <i class="fa-solid fa-stop"></i> Cancel
-      </button>
-    </div>
-
-    <form onsubmit="submitDesignerForm(event)" class="flex items-center gap-2 p-3 border-t border-dark-border">
-      <input type="text" id="designer-bubble-input" placeholder="Describe a design change…" autocomplete="off" class="flex-1 bg-dark-bg border border-dark-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors">
-      <button type="submit" id="designer-bubble-send" class="w-8 h-8 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs flex items-center justify-center transition-all flex-shrink-0">
-        <i class="fa-solid fa-paper-plane"></i>
-      </button>
-    </form>
   </div>
 
   <!-- THEME CONTROLLER — cycle dark → light → auto, live-follow OS in auto -->

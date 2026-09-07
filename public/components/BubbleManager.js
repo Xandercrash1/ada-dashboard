@@ -20,7 +20,11 @@ class BubbleManager {
 
   onMessageReceived(session) {
     // If the user is currently looking at this session in the Agents tab, don't show a bubble.
-    if (localStorage.getItem("ada_activeTab") === 'server' && localStorage.getItem('ada_activeServerSubTab') === 'agents' && window.activeSessionId === session.id) {
+    if (localStorage.getItem('ada_activeTab') === 'server' && 
+        localStorage.getItem('ada_activeServerSubTab') === 'agents' && 
+        window.activeSessionId === session.id) {
+      // Mark as read automatically since they are looking at it
+      this.markAsRead(session.id, session);
       return;
     }
     
@@ -35,12 +39,20 @@ class BubbleManager {
     }
   }
   
+  markAsRead(sessionId, session) {
+    if (!session || !session.messages || session.messages.length === 0) return;
+    try {
+      const sig = session.messages.length + '-' + session.messages[session.messages.length - 1].text.length;
+      const readMap = JSON.parse(localStorage.getItem('ada_readSignatures') || '{}');
+      readMap[sessionId] = sig;
+      localStorage.setItem('ada_readSignatures', JSON.stringify(readMap));
+    } catch(e) {}
+  }
+  
   spawnBubble(session) {
     // Enforce max bubbles: remove the oldest if we're at max
     const keys = Object.keys(this.bubbles);
     if (keys.length >= this.maxBubbles) {
-      // Find the oldest (the one appended first).
-      // Since we just use DOM order, the first child is the oldest.
       const oldestId = this.container.firstChild.dataset.sessionId;
       this.closeBubble(oldestId);
     }
@@ -91,6 +103,7 @@ class BubbleManager {
     const b = this.bubbles[sessionId];
     if (!b) return;
     b.expanded = true;
+    this.markAsRead(sessionId, b.session); // Mark read when expanding
     this.renderBubble(sessionId);
     this.resetTimer(sessionId); // Activity resets timer
   }
@@ -101,10 +114,8 @@ class BubbleManager {
     clearTimeout(b.timer);
     
     if (b.expanded) {
-      // If expanded, it stays open until 5 mins of inactivity, then minimizes
       b.timer = setTimeout(() => this.minimizeBubble(sessionId), 5 * 60 * 1000);
     } else {
-      // If minimized, it stays until 5 mins of inactivity, then closes
       b.timer = setTimeout(() => this.closeBubble(sessionId), 5 * 60 * 1000);
     }
   }
@@ -126,7 +137,7 @@ class BubbleManager {
       // Render minimized bubble
       b.el.innerHTML = `
         <div class="bubble-minimized cursor-pointer w-12 h-12 rounded-full bg-dark-card border border-indigo-500/50 shadow-lg shadow-indigo-900/30 flex items-center justify-center hover:bg-indigo-950 transition-colors relative" onclick="window.bubbleManager.expandBubble('${sessionId}')">
-          <i class="fa-solid fa-robot text-indigo-400 text-lg"></i>
+          <i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-indigo-400 text-lg"></i>
           <div class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 rounded-full border-2 border-dark-card"></div>
         </div>
       `;
@@ -137,11 +148,22 @@ class BubbleManager {
         : `<div class="flex"><div class="max-w-[85%] bg-dark-bg border border-dark-border text-gray-800 dark:text-gray-200 rounded-xl rounded-bl-sm px-3 py-2 break-words prose prose-sm dark:prose-invert prose-p:leading-snug prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-a:text-indigo-500 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600 text-xs">${marked.parse(m.text)}</div></div>`
       ).join('');
       
+      let chipsHtml = '';
+      if (session.role === 'designer') {
+        chipsHtml = `
+          <div class="flex items-center gap-1.5 px-3 py-2 overflow-x-auto custom-scrollbar border-b border-dark-border bg-dark-bg/50">
+            <button onclick="window.bubbleManager.prefillInput('${sessionId}', 'Redesign the stats section: ')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-indigo-500 transition-colors"><i class="fa-solid fa-chart-simple mr-1"></i>Stats</button>
+            <button onclick="window.bubbleManager.prefillInput('${sessionId}', 'Undo your most recent change to the page document — restore it to how it was before your last edit.')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-rose-500 transition-colors"><i class="fa-solid fa-rotate-left mr-1"></i>Undo</button>
+            <button onclick="window.bubbleManager.prefillInput('${sessionId}', 'Look at what exists on this server (tools, scripts, TODOs, projects) and propose 2-3 new homepage widget ideas. Just propose — do not apply yet.')" class="designer-chip flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-dark-bg border border-dark-border text-gray-300 hover:text-white hover:border-emerald-500 transition-colors"><i class="fa-solid fa-lightbulb mr-1"></i>Ideas</button>
+          </div>
+        `;
+      }
+      
       b.el.innerHTML = `
         <div class="bubble-expanded w-[24rem] max-w-[calc(100vw-2rem)] bg-dark-card border border-indigo-800/60 rounded-2xl shadow-2xl shadow-indigo-950/50 flex flex-col overflow-hidden">
           <div class="flex items-center justify-between gap-2 px-4 py-3 bg-gradient-to-r from-indigo-950/60 to-purple-950/60 border-b border-dark-border cursor-pointer" onclick="window.bubbleManager.minimizeBubble('${sessionId}')">
             <div class="flex items-center gap-2 min-w-0">
-              <i class="fa-solid fa-robot text-indigo-400"></i>
+              <i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-indigo-400"></i>
               <span class="text-sm font-bold text-white truncate">${this.escapeHtml(session.name || 'Agent')}</span>
             </div>
             <div class="flex items-center gap-1.5 flex-shrink-0">
@@ -151,6 +173,8 @@ class BubbleManager {
               <button onclick="event.stopPropagation(); window.bubbleManager.closeBubble('${sessionId}')" title="Close" class="w-6 h-6 rounded-lg text-gray-400 hover:text-white hover:bg-dark-bg text-sm flex items-center justify-center transition-colors">&times;</button>
             </div>
           </div>
+          
+          ${chipsHtml}
           
           <div class="bubble-messages-box h-72 overflow-y-auto custom-scrollbar px-3 py-3 space-y-2 text-xs" id="bubble-msgs-${sessionId}">
             ${msgsHtml}
@@ -173,6 +197,14 @@ class BubbleManager {
     }
   }
   
+  prefillInput(sessionId, text) {
+    const inp = document.getElementById(`bubble-input-${sessionId}`);
+    if (inp) {
+      inp.value = text;
+      inp.focus();
+    }
+  }
+  
   onOutsideClick(e) {
     // If the click is inside the dynamic-bubbles-container, ignore it
     if (this.container.contains(e.target)) return;
@@ -190,8 +222,15 @@ class BubbleManager {
     const inp = document.getElementById(`bubble-input-${sessionId}`);
     const text = inp.value.trim();
     if (!text) return;
-    inp.value = '';
     
+    // Prefill the UI eagerly
+    const session = this.bubbles[sessionId].session;
+    if (session.messages) {
+      session.messages.push({ role: 'user', text: text, timestamp: new Date().toISOString() });
+      this.renderBubble(sessionId);
+    }
+    
+    inp.value = '';
     this.resetTimer(sessionId);
     
     try {
@@ -200,8 +239,7 @@ class BubbleManager {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: text })
       });
-      // The global poller will pick up the new message and update the UI!
-      // But we can eagerly update our own UI if we want. For now, rely on poller.
+      // The global poller will pick up the new message and update the UI
     } catch (err) {
       console.error('Failed to send bubble message', err);
     }
@@ -221,11 +259,9 @@ class BubbleManager {
   }
   
   forceBubble(sessionId) {
-    // Pop out manually from the Agents tab
     if (this.bubbles[sessionId]) {
       this.expandBubble(sessionId);
     } else {
-      // Need to fetch the session first
       fetch(`/api/agent/sessions/${sessionId}`)
         .then(res => res.json())
         .then(session => {
