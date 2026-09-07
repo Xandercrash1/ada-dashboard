@@ -127,6 +127,17 @@ class BubbleManager {
     this.renderBubble(sessionId);
   }
   
+  isUnread(sessionId, session) {
+    if (!session || !session.messages || session.messages.length === 0) return false;
+    const sig = session.messages.length + '-' + session.messages[session.messages.length - 1].text.length;
+    try {
+      const readMap = JSON.parse(localStorage.getItem('ada_readSignatures') || '{}');
+      return readMap[sessionId] !== sig;
+    } catch(e) {
+      return false;
+    }
+  }
+
   renderBubble(sessionId) {
     const b = this.bubbles[sessionId];
     if (!b) return;
@@ -135,10 +146,13 @@ class BubbleManager {
     
     if (!b.expanded) {
       // Render minimized bubble
+      const unread = this.isUnread(sessionId, session);
+      const badgeHtml = unread ? `<div class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 rounded-full border-2 border-dark-card"></div>` : '';
+      
       b.el.innerHTML = `
         <div class="bubble-minimized cursor-pointer w-12 h-12 rounded-full bg-dark-card border border-indigo-500/50 shadow-lg shadow-indigo-900/30 flex items-center justify-center hover:bg-indigo-950 transition-colors relative" onclick="window.bubbleManager.expandBubble('${sessionId}')">
           <i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-indigo-400 text-lg"></i>
-          <div class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 rounded-full border-2 border-dark-card"></div>
+          ${badgeHtml}
         </div>
       `;
     } else {
