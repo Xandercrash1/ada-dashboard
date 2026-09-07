@@ -675,12 +675,13 @@ app.get('/api/glance', (req, res) => {
       }
     }
     
-    const hour = new Date().getHours();
+    const hourStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false });
+    const hour = parseInt(hourStr, 10);
     let greeting = 'Good evening';
     let icon = 'fa-moon';
     let color = 'indigo';
-    if (hour < 12) { greeting = 'Good morning'; icon = 'fa-sun'; color = 'amber'; }
-    else if (hour < 18) { greeting = 'Good afternoon'; icon = 'fa-cloud-sun'; color = 'sky'; }
+    if (hour < 12 && hour >= 4) { greeting = 'Good morning'; icon = 'fa-sun'; color = 'amber'; }
+    else if (hour >= 12 && hour < 18) { greeting = 'Good afternoon'; icon = 'fa-cloud-sun'; color = 'sky'; }
     
     let weatherStr = "All systems nominal.";
     if (global.cachedWeather && global.cachedWeather.time > Date.now() - 3600000) {
