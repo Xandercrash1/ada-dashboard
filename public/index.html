@@ -4185,12 +4185,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     refreshStagingHealth();
     setInterval(refreshStagingHealth, 20000);
 
-    try {
-      const activeTab = localStorage.getItem('ada_activeTab') || 'home';
-      switchTab(activeTab);
-    } catch (e) {
-      switchTab('home');
-    }
+    window.addEventListener('DOMContentLoaded', () => {
+      try {
+        const activeTab = localStorage.getItem('ada_activeTab') || 'home';
+        switchTab(activeTab);
+      } catch (e) {
+        // Fallback to default state if localStorage or DOM throws
+      }
+    });
   </script>
 
   <!-- TRIP PLANNER MODAL (SHELL) -->
