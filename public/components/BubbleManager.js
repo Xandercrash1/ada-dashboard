@@ -20,7 +20,7 @@ class BubbleManager {
 
   onMessageReceived(session) {
     // If the user is currently looking at this session in the Agents tab, don't show a bubble.
-    if (window.activeTab === 'server' && window.activeServerSubTab === 'agents' && window.activeSessionId === session.id) {
+    if (localStorage.getItem("ada_activeTab") === 'server' && localStorage.getItem('ada_activeServerSubTab') === 'agents' && window.activeSessionId === session.id) {
       return;
     }
     

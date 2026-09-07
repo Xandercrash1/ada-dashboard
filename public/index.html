@@ -2151,6 +2151,7 @@
     }
     function selectSession(id) {
       activeSessionId = id;
+      window.activeSessionId = id;
       
       const leftPane = document.getElementById('agent-left-pane');
       const rightPane = document.getElementById('agent-right-pane');
