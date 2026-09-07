@@ -466,6 +466,9 @@
             <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow flex items-center gap-1.5">
               <i class="fa-solid fa-play text-[10px]"></i> Run
             </button>
+          </form>
+
+          <div class="bg-black/95 rounded-xl border border-dark-border p-3.5 font-mono text-xs space-y-2">
             <div class="flex items-center justify-between border-b border-dark-border/50 pb-2 text-[11px] text-gray-400">
               <span id="term-status-label">Terminal Output (CWD: /home/ubuntu)</span>
               <button onclick="clearTerminalOutput()" class="text-gray-400 hover:text-white">&times; Clear</button>
@@ -584,6 +587,9 @@
                   <span>Send</span>
                   <i class="fa-regular fa-paper-plane text-[11px]"></i>
                 </button>
+              </form>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -670,6 +676,9 @@
           <button type="submit" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5">
             <i class="fa-solid fa-paper-plane text-[11px]"></i> Submit
           </button>
+        </form>
+      </div>
+
       <!-- Filters -->
       <div class="bg-dark-card p-3.5 rounded-2xl border border-dark-border flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
         <div class="flex items-center space-x-1 bg-dark-bg p-1 rounded-xl border border-dark-border overflow-x-auto text-xs font-medium custom-scrollbar">
@@ -849,6 +858,9 @@
           <button type="button" onclick="closeAddTodoModal()" class="px-4 py-2 rounded-xl bg-dark-bg border border-dark-border text-xs text-gray-300 hover:text-white">Cancel</button>
           <button type="submit" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow-md shadow-indigo-600/30">Save Task</button>
         </div>
+      </form>
+    </div>
+  </div>
 
   <!-- NEW AGENT MODAL (WITH ROLES & CLAUDE TOGGLE) -->
   <div id="new-agent-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
@@ -933,6 +945,9 @@
           <button type="button" onclick="closeNewAgentModal()" class="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-dark-bg dark:hover:bg-gray-800 border border-gray-300 dark:border-dark-border text-xs text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">Cancel</button>
           <button type="submit" class="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-semibold text-white shadow-md shadow-purple-600/30">Create Agent</button>
         </div>
+      </form>
+    </div>
+  </div>
 
   
   <!-- The scheduler floating bubble + slide-in sidebar moved to the Server →
@@ -970,6 +985,9 @@
             <i class="fa-solid fa-check"></i> Schedule
           </button>
         </div>
+      </form>
+    </div>
+  </div>
 
   <!-- QUEUE-ON-FAILURE MODAL -->
   <div id="queue-prompt-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
@@ -2664,7 +2682,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     // This deliberately runs DURING a job as well as when idle — reporting
     // progress mid-task is the main thing async chat is for, and gating it on
     // idle would hide exactly the messages that matter most.
-    let globalSessionSignatures = null;
+    let globalSessionSignatures = {};
 
     // Cheap change detector. Re-rendering unconditionally every few seconds
     // burns battery, breaks text selection, and flickers images.
@@ -2681,15 +2699,6 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         
         let changedActiveSession = false;
         
-        // Initialize from localStorage if it's the first poll
-        if (globalSessionSignatures === null) {
-          try {
-            globalSessionSignatures = JSON.parse(localStorage.getItem('ada_readSignatures') || '{}');
-          } catch(e) {
-            globalSessionSignatures = {};
-          }
-        }
-        
         for (const session of sessions) {
           const sig = messagesSignature(session.messages);
           const oldSig = globalSessionSignatures[session.id];
@@ -2701,9 +2710,6 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             if (session.id === activeSessionId) {
               changedActiveSession = true;
             }
-          } else if (!oldSig && session.messages && session.messages.length > 0) {
-             // New session entirely! We should pop it if they aren't looking at it.
-             window.dispatchEvent(new CustomEvent('agentMessageReceived', { detail: { session } }));
           }
           globalSessionSignatures[session.id] = sig;
         }
@@ -4285,7 +4291,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           <button type="button" onclick="closeAnnouncementModal()" class="px-4 py-2 rounded-xl text-gray-400 hover:text-white text-xs font-semibold transition-colors">Cancel</button>
           <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all shadow-md shadow-indigo-600/20">Save</button>
         </div>
-
+      </form>
+    </div>
   </div>
 
   <!-- THEME CONTROLLER — cycle dark → light → auto, live-follow OS in auto -->
