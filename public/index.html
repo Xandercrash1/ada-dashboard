@@ -28,7 +28,6 @@
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://unpkg.com/masonry-layout@4/dist/masonry.pkgd.min.js"></script>
   <script>
     marked.setOptions({
       breaks: true,
@@ -194,10 +193,16 @@
           <button onclick="toggleEditLayout()" id="edit-layout-btn" class="px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs font-medium flex items-center gap-2 transition-all">
             <i class="fa-solid fa-pen-ruler"></i> <span>Edit Layout</span>
           </button>
-
         </div>
       </div>
-      <div id="home-widgets" class="hidden w-full relative"></div>
+      
+      <!-- Safelist for Tailwind CDN to compile dynamic grid classes -->
+      <div class="hidden grid-cols-2 sm:grid-cols-4 lg:grid-cols-6
+                  col-span-1 col-span-2 col-span-3 col-span-4 col-span-5 col-span-6
+                  sm:col-span-1 sm:col-span-2 sm:col-span-3 sm:col-span-4 sm:col-span-5 sm:col-span-6
+                  lg:col-span-1 lg:col-span-2 lg:col-span-3 lg:col-span-4 lg:col-span-5 lg:col-span-6"></div>
+                  
+      <div id="home-widgets" class="hidden w-full grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[10px]"></div>
 
       <!-- Hidden state store for live stats so Designer widgets can safely mirror them -->
       <div id="home-stats-state" style="display:none;">
@@ -3786,26 +3791,26 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           </div>
         ` : '';
 
-        let spanClass = "w-full sm:w-1/2 lg:w-1/3";
+        let spanClass = "col-span-2"; // default auto is 2 cols
         if (w.cols) {
           const colMap = {
-            1: 'w-full sm:w-1/4 lg:w-1/6',
-            2: 'w-full sm:w-1/2 lg:w-1/3',
-            3: 'w-full sm:w-1/2 lg:w-1/2',
-            4: 'w-full sm:w-full lg:w-2/3',
-            5: 'w-full sm:w-full lg:w-[83.333%]',
-            6: 'w-full sm:w-full lg:w-full'
+            1: 'col-span-1 sm:col-span-1 lg:col-span-1',
+            2: 'col-span-2 sm:col-span-2 lg:col-span-2',
+            3: 'col-span-2 sm:col-span-2 lg:col-span-3',
+            4: 'col-span-2 sm:col-span-4 lg:col-span-4',
+            5: 'col-span-2 sm:col-span-4 lg:col-span-5',
+            6: 'col-span-2 sm:col-span-4 lg:col-span-6'
           };
-          spanClass = colMap[w.cols] || 'w-full sm:w-1/2 lg:w-1/3';
+          spanClass = colMap[w.cols] || 'col-span-2';
         } else if (w.size) { // legacy fallback
-          if (w.size === '1x1') spanClass = "w-full sm:w-1/2 lg:w-1/3";
-          else if (w.size === '2x1') spanClass = "w-full sm:w-full lg:w-2/3";
-          else if (w.size === '2x2') spanClass = "w-full sm:w-full lg:w-2/3";
-          else if (w.size === 'full') spanClass = "w-full sm:w-full lg:w-full";
+          if (w.size === '1x1') spanClass = "col-span-1 sm:col-span-2 lg:col-span-2";
+          else if (w.size === '2x1') spanClass = "col-span-2 sm:col-span-4 lg:col-span-4";
+          else if (w.size === '2x2') spanClass = "col-span-2 sm:col-span-4 lg:col-span-4";
+          else if (w.size === 'full') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
         } else {
-          if (w.id === 'photo-frame') spanClass = "w-full sm:w-full lg:w-2/3";
-          else if (w.id === 'stat-todo' || w.id === 'stat-jobs') spanClass = "w-full sm:w-1/2 lg:w-1/3";
-          else if (w.id === 'home-glance-banner') spanClass = "w-full sm:w-full lg:w-full";
+          if (w.id === 'photo-frame') spanClass = "col-span-2 sm:col-span-4 lg:col-span-4";
+          else if (w.id === 'stat-todo' || w.id === 'stat-jobs') spanClass = "col-span-1 sm:col-span-2 lg:col-span-2";
+          else if (w.id === 'home-glance-banner') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
         }
 
         // To prevent widgets from collapsing in Masonry, apply their configured row height.
@@ -3818,7 +3823,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         }
 
         return `
-          <div class="relative w-full ${spanClass} p-2 transition-all duration-500 ease-in-out widget-container ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}
+          <div class="relative w-full ${spanClass} transition-all duration-500 ease-in-out widget-container ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}
                ${window.isEditingLayout ? `draggable="true" ondragstart="handleWidgetDragStart(event, '${w.id}')" ondragover="handleWidgetDragOver(event)" ondrop="handleWidgetDrop(event, '${w.id}')" ondragenter="handleWidgetDragEnter(event)" ondragleave="handleWidgetDragLeave(event)" ondragend="handleWidgetDragEnd(event)"` : ''}>
             <div class="widget-measurer block w-full relative ${heightClass}">
               ${w.html || ''}
@@ -3836,25 +3841,18 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         oldScript.parentNode.replaceChild(newScript, oldScript);
       });
       
-      // Initialize Masonry layout
-      if (window.masonryInstance) {
-        window.masonryInstance.destroy();
-      }
-      setTimeout(() => {
-        window.masonryInstance = new Masonry(grid, {
-          itemSelector: '.widget-container',
-          percentPosition: true,
-          transitionDuration: '0.2s',
-          gutter: 0 // Gaps handled by widget padding
-        });
-        
-        // Let ResizeObserver trigger masonry layout when content sizes change (e.g. photos loading)
-        if (window.widgetResizeObserver) window.widgetResizeObserver.disconnect();
-        window.widgetResizeObserver = new ResizeObserver(() => {
-          if (window.masonryInstance) window.masonryInstance.layout();
-        });
-        grid.querySelectorAll('.widget-container').forEach(w => window.widgetResizeObserver.observe(w));
-      }, 0);
+      // Let ResizeObserver trigger masonry-style layout for squishy widgets
+      if (window.widgetResizeObserver) window.widgetResizeObserver.disconnect();
+      window.widgetResizeObserver = new ResizeObserver((entries) => {
+         for (let entry of entries) {
+           const measurer = entry.target.querySelector('.widget-measurer');
+           if (!measurer) continue;
+           const height = measurer.getBoundingClientRect().height;
+           const span = Math.ceil((height + 16) / 26); // 10px row + 16px gap
+           entry.target.style.gridRowEnd = `span ${span}`;
+         }
+      });
+      grid.querySelectorAll('.widget-container').forEach(w => window.widgetResizeObserver.observe(w));
       
       syncHomeStatMirrors();
     }
