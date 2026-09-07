@@ -510,6 +510,8 @@ function sanitizeHomepageWidget(w, index) {
     title: typeof w.title === 'string' ? w.title.slice(0, 120) : '',
     icon: typeof w.icon === 'string' && w.icon ? w.icon.slice(0, 64) : 'fa-cube',
     accent: HOMEPAGE_ACCENTS.includes(w.accent) ? w.accent : 'indigo',
+    cols: typeof w.cols === 'number' ? Math.max(1, Math.min(6, w.cols)) : undefined,
+    rows: typeof w.rows === 'number' ? Math.max(1, w.rows) : undefined,
     // Card-body HTML. Deliberately NOT stripped: it comes only from Alex or
     // his agents through the authenticated API / server filesystem, which is
     // the same trust level as the agents' bash access. Length-capped only.

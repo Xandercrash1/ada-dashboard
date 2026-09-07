@@ -8,6 +8,7 @@ class ScratchpadWidget extends HTMLElement {
   }
 
   connectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     this.render();
     this.fetchText();
   }
@@ -143,8 +144,8 @@ class ScratchpadWidget extends HTMLElement {
           <i id="scratchpad-status" class="fa-solid fa-cloud text-gray-600 text-[10px] transition-colors"></i>
         </div>
         
-        <textarea class="flex-1 w-full bg-transparent border-none resize-none focus:outline-none text-gray-200 text-sm placeholder-gray-600 custom-scrollbar" placeholder="Type a quick note here... It syncs instantly across all your devices. Markdown renders when you pause."></textarea>
-        <div data-md-preview class="hidden flex-1 w-full overflow-y-auto custom-scrollbar cursor-text prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 marker:text-${accent}-400 prose-a:text-${accent}-400" title="Click to edit"></div>
+        <textarea class="w-full bg-transparent border-none resize-none focus:outline-none text-gray-200 text-sm placeholder-gray-600 custom-scrollbar" placeholder="Type a quick note here... It syncs instantly across all your devices. Markdown renders when you pause."></textarea>
+        <div data-md-preview class="hidden w-full overflow-y-auto custom-scrollbar cursor-text prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 marker:text-${accent}-400 prose-a:text-${accent}-400" title="Click to edit"></div>
       </div>
     `;
 
