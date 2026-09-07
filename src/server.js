@@ -2213,13 +2213,25 @@ If the user wants a widget that isn't in the library, tell them to ask the Archi
       if (ctrl) ctrl.kill = () => ac.abort();
       const timer = setTimeout(() => ac.abort(), GEMINI_TIMEOUT_MS);
       try {
-        const res = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: ac.signal
-        });
-        return res;
+        let attempt = 0;
+        while (attempt < 3) {
+          attempt++;
+          const res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: ac.signal
+          });
+          
+          if (res.status === 429 && attempt < 3) {
+            // Free tier Gemini 1.5 Flash has a 15 RPM limit. Tool loops often hit this.
+            // Sleep for 20 seconds before retrying to let the minute bucket clear.
+            await new Promise(resolve => setTimeout(resolve, 20000));
+            continue;
+          }
+          
+          return res;
+        }
       } catch (e) {
         // An aborted fetch surfaces as a bare AbortError whose message is
         // "This operation was aborted" — meaningless to Alex, and it leaked
