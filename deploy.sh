@@ -46,6 +46,7 @@ cd /home/ubuntu/dashboard
 npm install --production
 
 # Restart or start under PM2
+source ~/.bashrc
 pm2 delete ada-dashboard 2>/dev/null || true
 pm2 start src/server.js --name "ada-dashboard"
 pm2 save
