@@ -46,7 +46,7 @@ cd /home/ubuntu/dashboard
 npm install --production
 
 # Restart or start under PM2
-source ~/.bashrc
+eval $(grep GEMINI_API_KEY ~/.bashrc | tail -n 1)
 pm2 delete ada-dashboard 2>/dev/null || true
 pm2 start src/server.js --name "ada-dashboard"
 pm2 save
