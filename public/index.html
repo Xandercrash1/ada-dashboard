@@ -1145,6 +1145,7 @@
 
     // --- MAIN TAB SWITCHING ---
     function switchTab(tab) {
+      try { localStorage.setItem('ada_activeTab', tab); } catch (e) {}
       ['home', 'todo', 'tools', 'server'].forEach(t => {
         document.getElementById(`view-${t}`).classList.add('hidden');
         const deskBtn = document.getElementById(`tab-btn-${t}`);
@@ -4183,6 +4184,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
     refreshStagingHealth();
     setInterval(refreshStagingHealth, 20000);
+
+    try {
+      const activeTab = localStorage.getItem('ada_activeTab') || 'home';
+      switchTab(activeTab);
+    } catch (e) {
+      switchTab('home');
+    }
   </script>
 
   <!-- TRIP PLANNER MODAL (SHELL) -->
