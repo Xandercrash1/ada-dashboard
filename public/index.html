@@ -25,6 +25,7 @@
     })();
   </script>
   <script type="module" src="/components/index.js"></script>
+  <script src="/components/BubbleManager.js"></script>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -538,6 +539,9 @@
 
               <!-- Actions -->
               <div class="flex items-center gap-2">
+                <button onclick="window.bubbleManager && window.bubbleManager.forceBubble(activeSessionId)" title="Pop out to floating bubble" class="p-2 text-xs text-gray-400 hover:text-indigo-400 hover:bg-dark-accent rounded-xl transition-colors">
+                  <i class="fa-solid fa-up-right-from-square"></i>
+                </button>
                 <button onclick="clearCurrentChat()" title="Clear conversation" class="p-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-dark-accent rounded-xl transition-colors">
                   <i class="fa-solid fa-eraser"></i>
                 </button>
