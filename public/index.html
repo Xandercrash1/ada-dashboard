@@ -30,7 +30,24 @@
   <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script>
+    const renderer = new marked.Renderer();
+    const originalCodeRenderer = renderer.code.bind(renderer);
+    renderer.code = function(arg1, arg2, arg3) {
+      let codeText = '';
+      if (typeof arg1 === 'object') {
+        codeText = arg1.text; // Modern marked (v13+) passes a token object
+      } else {
+        codeText = arg1; // Older marked passes strings
+      }
+      const html = originalCodeRenderer(arg1, arg2, arg3);
+      const safeCode = btoa(unescape(encodeURIComponent(codeText)));
+      return `<div class="relative group">
+        <button onclick="navigator.clipboard.writeText(decodeURIComponent(escape(atob('${safeCode}')))).then(() => { const btn = this; const orig = btn.innerHTML; btn.innerHTML = '<i class=\\'fa-solid fa-check text-emerald-400\\'></i> Copied!'; setTimeout(() => btn.innerHTML = orig, 2000); })" class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 hover:bg-dark-accent backdrop-blur-sm text-gray-300 border border-dark-border rounded-lg px-2 py-1.5 text-[10px] font-semibold flex items-center gap-1.5 z-10 shadow"><i class="fa-regular fa-copy"></i> Copy</button>
+        ${html}
+      </div>`;
+    };
     marked.setOptions({
+      renderer: renderer,
       breaks: true,
       gfm: true
     });
