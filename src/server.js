@@ -1274,7 +1274,7 @@ app.post('/api/agent/sessions', (req, res) => {
 
   const newSession = {
     id: `session-${Date.now()}`,
-    name: name || roleNames[sessionRole] || 'AI Agent',
+    name: name || roleNames[sessionRole] || 'Agent',
     role: sessionRole,
     ...(sessionPage ? { page: sessionPage } : {}),
     model: sessionModel,
