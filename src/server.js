@@ -45,12 +45,14 @@ const SESSIONS_FILE = path.join(DATA_DIR, 'agent_sessions.json');
 const SCHEDULED_FILE = path.join(DATA_DIR, 'scheduled_prompts.json');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
 const HOMEPAGE_FILE = path.join(DATA_DIR, 'homepage.json');
+const PAGES_REGISTRY_FILE = path.join(DATA_DIR, 'pages.json');
+const PAGES_DIR = path.join(DATA_DIR, 'pages');
+if (!fs.existsSync(PAGES_DIR)) fs.mkdirSync(PAGES_DIR);
 // Designer page-document registry: which dashboard pages have a
 // designer-editable live document. Designer sessions record which page they
 // are bound to (session.page) and the role's write walls point at that page's
 // document — add an entry here (plus a page renderer) to bring the Designer
 // to another page. Only the Home page has one today.
-const PAGE_DOCS = { home: HOMEPAGE_FILE };
 
 // A missing file is normal (first run — nothing has been written yet) and
 // returns []. A file that EXISTS but fails to parse is data corruption, and
@@ -90,6 +92,23 @@ function readScheduled() {
 function writeScheduled(items) {
   fs.writeFileSync(SCHEDULED_FILE, JSON.stringify(items, null, 2));
 }
+
+function readPagesRegistry() {
+  return readJsonStoreOrThrow(PAGES_REGISTRY_FILE);
+}
+function writePagesRegistry(pages) {
+  fs.writeFileSync(PAGES_REGISTRY_FILE, JSON.stringify(pages, null, 2));
+}
+function getPageDocPath(pageId) {
+  if (pageId === 'home') return HOMEPAGE_FILE;
+  return path.join(PAGES_DIR, `${pageId}.json`);
+}
+
+// Ensure registry exists
+if (!fs.existsSync(PAGES_REGISTRY_FILE)) {
+  writePagesRegistry([]);
+}
+
 function readFeedback() {
   return readJsonStoreOrThrow(FEEDBACK_FILE);
 }
@@ -723,6 +742,51 @@ app.post('/api/terminal/exec', (req, res) => {
   });
 });
 
+
+// --- PAGES API ---
+app.get('/api/pages', (req, res) => {
+  res.json({ pages: readPagesRegistry() });
+});
+
+app.post('/api/pages', (req, res) => {
+  const { id, title, icon } = req.body;
+  if (!id || !title) return res.status(400).json({ error: 'Missing id or title' });
+  if (id === 'home' || id === 'server' || id === 'todo') return res.status(400).json({ error: 'Reserved id' });
+  
+  const pages = readPagesRegistry();
+  if (pages.some(p => p.id === id)) return res.status(400).json({ error: 'Page ID already exists' });
+  
+  pages.push({ id, title, icon: icon || 'fa-file' });
+  writePagesRegistry(pages);
+  
+  const docPath = getPageDocPath(id);
+  if (!fs.existsSync(docPath)) {
+    fs.writeFileSync(docPath, JSON.stringify({ widgets: [] }, null, 2));
+  }
+  
+  res.json({ success: true, page: { id, title, icon } });
+});
+
+app.get('/api/pages/:id/content', (req, res) => {
+  const id = req.params.id;
+  const docPath = getPageDocPath(id);
+  if (!fs.existsSync(docPath)) return res.json({ widgets: [] });
+  res.json(readJsonStoreOrThrow(docPath));
+});
+
+// Update page content directly (if UI wants to modify without agent)
+app.post('/api/pages/:id/content', (req, res) => {
+  const id = req.params.id;
+  const docPath = getPageDocPath(id);
+  try {
+    fs.writeFileSync(docPath, JSON.stringify(req.body, null, 2));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // --- 5. INTERACTIVE AGENT SESSIONS & CONVERSATION ENGINE ---
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_PROXY_URL = process.env.GEMINI_PROXY_URL || 'https://gemini-proxy.lagasse-alex.workers.dev';
@@ -1038,7 +1102,8 @@ function executeLocalTool(toolName, args, role, sessionId) {
       // The wall follows the session's page binding (session.page), so a
       // designer opened on one page can never write another page's document.
       const designerSess = readSessions().find(s => s.id === sessionId);
-      const pageDoc = PAGE_DOCS[(designerSess && designerSess.page) || 'home'] || HOMEPAGE_FILE;
+      const pageId = (designerSess && designerSess.page) || 'home';
+      const pageDoc = getPageDocPath(pageId);
       if (toolName === 'run_bash') {
         return resolve({ error: `Permission Denied: the Designer is containerized to its page document and cannot run shell commands. Edit ${pageDoc} with write_file instead.` });
       }
@@ -1269,7 +1334,7 @@ app.post('/api/agent/sessions', (req, res) => {
   // 'home' rather than erroring (same forgiving posture as unknown models).
   const requestedPage = (req.body || {}).page;
   const sessionPage = (sessionRole === 'designer')
-    ? (typeof requestedPage === 'string' && PAGE_DOCS[requestedPage] ? requestedPage : 'home')
+    ? (typeof requestedPage === 'string' && (requestedPage === 'home' || readPagesRegistry().some(p => p.id === requestedPage)) ? requestedPage : 'home')
     : undefined;
 
   const newSession = {
@@ -1917,7 +1982,7 @@ async function runClaudeHeavyTurn(session, promptText, systemInstruction, modelI
       // (Write(//abs/path)); a single '/' is treated as settings-relative and
       // matches nothing — verified empirically 2026-08-27, the designer was
       // denied its own page document until this was fixed.
-      const designerDoc = PAGE_DOCS[session.page] || HOMEPAGE_FILE;
+      const designerDoc = getPageDocPath(session.page || 'home');
       args.push('--allowedTools', `Write(/${designerDoc}),Edit(/${designerDoc})`);
     } else {
       args.push('--dangerously-skip-permissions');
@@ -2106,7 +2171,7 @@ Finally, tell Alex what you built, and include the exact string ${PROMOTE_ACTION
     bridge: `${sharedMemoryContext}
 Role: Remote Bridge. (This role does not use the local LLM; messages are polled externally).`,
     designer: `${sharedMemoryContext}
-Role: Page Designer ("Designer"). RULING: you are containerized to exactly ONE page — this session is bound to the dashboard "${session.page || 'home'}" page, which renders entirely from the JSON document at ${PAGE_DOCS[session.page] || HOMEPAGE_FILE}. That file is your ONLY writable surface (enforced at the tool layer: no shell, writes outside it are denied). You may NOT edit code, other data files, cron jobs, or server state.
+Role: Page Designer ("Designer"). RULING: you are containerized to exactly ONE page — this session is bound to the dashboard "${session.page || 'home'}" page, which renders entirely from the JSON document at ${getPageDocPath(session.page || 'home')}. That file is your ONLY writable surface (enforced at the tool layer: no shell, writes outside it are denied). You may NOT edit code, other data files, cron jobs, or server state.
 CRITICAL: NEVER overwrite homepage.json from scratch! You MUST ALWAYS use read_file on it first, parse the existing widgets, and ONLY modify the specific widgets requested by the user, leaving the rest exactly as they were.
 DESIGN CANVAS: { glanceTheme: {theme, accent}, widgets: [{id, title, icon, accent, html, link, hidden}] }. IMPORTANT: You are absolutely FORBIDDEN from writing raw javascript or <script> tags in the 'html' field. Instead, you MUST build the dashboard using the available Web Components (Custom Elements) from the Component Library. All components are transparent by default (no borders), but you can optionally pass theme="glass" (for a sleek translucent blur) or theme="solid". Available blocks:
 1. <ada-clock theme="glass|transparent|solid|neon|gradient"  format="12h|24h" font="'Orbitron', sans-serif"></ada-clock>

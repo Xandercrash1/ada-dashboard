@@ -208,7 +208,7 @@
       <!-- Agent-designed widget cards (homepage.json .widgets). Hidden when empty. -->
             <div class="flex items-center justify-between mb-4">
         <h2 class="text-gray-200 font-semibold text-lg flex items-center gap-2">
-          <i class="fa-solid fa-layer-group text-indigo-400"></i> Dashboard
+          <i id="canvas-title-icon" class="fa-solid fa-layer-group text-indigo-400"></i> <span id="canvas-title-text">Dashboard</span>
         </h2>
         <div class="flex items-center gap-2">
           <button onclick="openPageDesigner()" id="designer-btn" class="hidden px-3 py-1.5 rounded-lg bg-purple-600/20 border border-purple-500/60 text-purple-300 hover:text-white hover:bg-purple-600/40 text-xs font-medium items-center gap-2 transition-all">
@@ -1215,13 +1215,23 @@
     }
 
     // --- MAIN TAB SWITCHING ---
+
     function switchTab(tab) {
       try { localStorage.setItem('ada_activeTab', tab); } catch (e) {}
-      ['home', 'todo', 'tools', 'server'].forEach(t => {
-        document.getElementById(`view-${t}`).classList.add('hidden');
+      
+      const allTabs = ['home', 'todo', 'tools', 'server', ...customPages.map(p => p.id)];
+      onDesignerTabSwitch(tab);
+      const viewTabs = ['home', 'todo', 'tools', 'server'];
+      
+      allTabs.forEach(t => {
+        // Only hide views that actually exist as standalone sections
+        if (viewTabs.includes(t)) {
+          const view = document.getElementById(`view-${t}`);
+          if (view) view.classList.add('hidden');
+        }
+        
         const deskBtn = document.getElementById(`tab-btn-${t}`);
         const mobBtn = document.getElementById(`mob-btn-${t}`);
-
         if (deskBtn) {
           deskBtn.classList.remove('border-indigo-500', 'text-indigo-400', 'font-semibold');
           deskBtn.classList.add('border-transparent', 'text-gray-400');
@@ -1232,10 +1242,19 @@
         }
       });
 
-      document.getElementById(`view-${tab}`).classList.remove('hidden');
+      // If it's a custom page or home, show the view-home canvas and load the page content!
+      if (tab === 'home' || customPages.some(p => p.id === tab)) {
+         document.getElementById('view-home').classList.remove('hidden');
+         if (currentCanvasPage !== tab) {
+            loadPage(tab);
+         }
+      } else {
+         const targetView = document.getElementById(`view-${tab}`);
+         if (targetView) targetView.classList.remove('hidden');
+      }
+
       const activeDeskBtn = document.getElementById(`tab-btn-${tab}`);
       const activeMobBtn = document.getElementById(`mob-btn-${tab}`);
-
       if (activeDeskBtn) {
         activeDeskBtn.classList.add('border-indigo-500', 'text-indigo-400', 'font-semibold');
         activeDeskBtn.classList.remove('border-transparent', 'text-gray-400');
@@ -1244,6 +1263,7 @@
         activeMobBtn.classList.add('text-indigo-400', 'font-semibold');
         activeMobBtn.classList.remove('text-gray-400');
       }
+
 
       // Designer is page-bound: leaving a page closes its bubble and the FAB
       // only shows where a page document exists (defined with the bubble code).
@@ -2173,6 +2193,59 @@
       automator: 'Automation Scripter & Data Pipelines',
       architect: 'System Planning & Architectural Analysis'
     };
+
+
+    async function loadCustomPages() {
+      try {
+        const res = await fetch('/api/pages');
+        const data = await res.json();
+        customPages = data.pages || [];
+        renderCustomTabs();
+      } catch (err) {
+        console.error('Failed to load custom pages', err);
+      }
+    }
+
+    function renderCustomTabs() {
+      // Remove old custom tabs first if re-rendering
+      document.querySelectorAll('.custom-page-tab').forEach(el => el.remove());
+      
+      const navContainer = document.querySelector('.space-x-8'); // Desktop nav
+      if (!navContainer) return;
+      
+      const homeTab = document.getElementById('tab-btn-home');
+      
+      customPages.forEach(page => {
+         const btn = document.createElement('button');
+         btn.className = 'custom-page-tab tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all';
+         btn.id = `tab-btn-${page.id}`;
+         btn.onclick = () => switchTab(page.id);
+         btn.innerHTML = `<i class="fa-solid ${page.icon}"></i> ${page.title}`;
+         homeTab.after(btn);
+      });
+    }
+
+    async function createNewPage() {
+       const title = prompt("Enter new page title (e.g. 'Roadmap'):");
+       if (!title) return;
+       const id = title.toLowerCase().replace(/[^a-z0-9]/g, '-');
+       try {
+         const res = await fetch('/api/pages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, title, icon: 'fa-file' })
+         });
+         if (res.ok) {
+           await loadCustomPages();
+           switchTab(id);
+         } else {
+           const err = await res.json();
+           alert(err.error || 'Failed to create page');
+         }
+       } catch (err) {
+         alert('Error creating page');
+       }
+    }
 
     async function loadAgentSessions() {
       try {
@@ -3757,7 +3830,27 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     // fails, the hardcoded banner fallback in the markup simply stays put.
     let homepageDoc = null;
 
-    async function loadHomepage() {
+    // --- Dynamic Pages Registry ---
+    let customPages = [];
+    let currentCanvasPage = 'home';
+
+
+    
+    async function loadPage(pageId) {
+      currentCanvasPage = pageId;
+      try {
+        const res = await fetch(`/api/pages/${pageId}/content`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        homepageDoc = await res.json();
+        renderHomepage(); // draws it using homepageDoc
+      } catch (err) {
+        console.error(`Page ${pageId} failed to load`, err);
+        homepageDoc = { widgets: [] };
+        renderHomepage();
+      }
+    }
+
+    async function _old_loadHomepage() {
       try {
         const res = await fetch('/api/homepage');
         if (!res.ok) return;
@@ -4011,6 +4104,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     function renderHomepage() {
+      const pageInfo = customPages.find(p => p.id === currentCanvasPage);
+      const titleText = pageInfo ? pageInfo.title : 'Dashboard';
+      const titleIcon = pageInfo ? pageInfo.icon : 'fa-layer-group';
+      const titleTextEl = document.getElementById('canvas-title-text');
+      const titleIconEl = document.getElementById('canvas-title-icon');
+      if (titleTextEl) titleTextEl.innerText = titleText;
+      if (titleIconEl) titleIconEl.className = `fa-solid ${titleIcon} text-indigo-400`;
+
       if (!homepageDoc) return;
       
       const gt = homepageDoc.glanceTheme || { theme: 'glass', accent: 'indigo' };
@@ -4196,8 +4297,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
     async function openPageDesigner() {
       const page = designerCurrentTab;
-      const cfg = DESIGNER_PAGES[page];
-      if (!cfg) return;
+      const isCustomPage = customPages.some(p => p.id === page);
+      if (page !== 'home' && !isCustomPage) return;
+      const title = isCustomPage ? (customPages.find(p => p.id === page).title + ' Designer') : 'Homepage Designer';
       designerBubblePage = page;
       designerSessionId = null;
       try { designerSessionId = localStorage.getItem(designerStorageKey(page)); } catch (e) {}
@@ -4230,7 +4332,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // `page` binds the session server-side: walls + role prompt follow it.
-        body: JSON.stringify({ name: (DESIGNER_PAGES[page] || {}).title || 'Page Designer', role: 'designer', page })
+        body: JSON.stringify({ name: title, role: 'designer', page })
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       designerSession = await res.json();
@@ -4361,7 +4463,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           if (sres.ok) designerSession = await sres.json();
           renderDesignerMessages();
           setDesignerBusy(false);
-          loadHomepage();
+          loadPage(currentCanvasPage);
         } catch (err) {
           setDesignerBusy(false);
           renderDesignerNotice('Lost contact with the design job: ' + err.message);
@@ -4408,8 +4510,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       }
     }
 
-    loadHomepage();
+    loadPage(currentCanvasPage);
     loadModelRegistry().then(loadAgentSessions);
+    loadCustomPages();
     loadScheduled();
     loadFeedbackTypes().then(loadFeedback);
     setInterval(refreshTelemetry, 5000);
