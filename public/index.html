@@ -2152,10 +2152,26 @@
         return;
       }
 
+      const timeAgo = (dateStr) => {
+        if (!dateStr) return 'Never';
+        const s = Math.floor((new Date() - new Date(dateStr)) / 1000);
+        if (s < 60) return 'Just now';
+        const m = Math.floor(s / 60);
+        if (m < 60) return m + 'm ago';
+        const h = Math.floor(m / 60);
+        if (h < 24) return h + 'h ago';
+        const d = Math.floor(h / 24);
+        return d + 'd ago';
+      };
+
       container.innerHTML = agentSessions.map(s => {
         const isActive = s.id === activeSessionId;
         const icon = roleIcons[s.role] || '<i class="fa-solid fa-robot"></i>';
         const modelInfo = getModelInfo(s.model);
+        
+        const isRunning = !!jobPolls[s.id];
+        const lastMsg = s.messages && s.messages.length > 0 ? s.messages[s.messages.length - 1] : null;
+        const lastSeenText = isRunning ? 'Active now' : timeAgo(lastMsg ? lastMsg.timestamp : s.createdAt);
 
         return `
           <div onclick="selectSession('${s.id}')" class="group cursor-pointer p-3 rounded-xl border transition-all flex items-center justify-between ${isActive ? 'bg-purple-950/40 border-purple-500 shadow-sm' : 'bg-dark-bg border-dark-border hover:border-gray-700'}">
@@ -2168,11 +2184,14 @@
                 <p class="text-[10px] text-gray-500 truncate">${s.role} • ${escapeHtml(modelInfo.label)}</p>
               </div>
             </div>
-            <div class="flex items-center gap-2">
-              <button onclick="event.stopPropagation(); deleteAgentSession('${s.id}')" class="text-gray-600 hover:text-rose-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <i class="fa-solid fa-trash-can text-xs"></i>
-              </button>
-              <div class="w-2 h-2 rounded-full ${isActive ? 'bg-purple-400 animate-pulse' : 'bg-gray-600'}"></div>
+            <div class="flex flex-col items-end gap-1 flex-shrink-0 ml-2">
+              <div class="flex items-center gap-2">
+                <button onclick="event.stopPropagation(); deleteAgentSession('${s.id}')" class="text-gray-600 hover:text-rose-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <i class="fa-solid fa-trash-can text-xs"></i>
+                </button>
+                <div class="w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]' : isActive ? 'bg-purple-400' : 'bg-gray-700'}"></div>
+              </div>
+              <div class="text-[9px] ${isRunning ? 'text-emerald-400/80 font-semibold' : 'text-gray-500'} font-medium tracking-wide whitespace-nowrap">${lastSeenText}</div>
             </div>
           </div>
         `;
@@ -2765,6 +2784,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     setInterval(pollForAsyncMessages, 4000);
+    setInterval(() => { if (currentTab === 'server' && currentServerSubTab === 'agents') renderSessionsList(); }, 30000);
+
 
     // Renders/updates the live progress bubble: elapsed time, tool
     // executions as they arrive, and Cancel — or "Cancelling…" once fired.
