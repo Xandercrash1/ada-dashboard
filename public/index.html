@@ -1134,6 +1134,7 @@
         description: 'Full Claude Code CLI in auto mode. Slower, more capable.' }
     ];
     let modelRegistry = FALLBACK_MODELS;
+    window.modelRegistry = modelRegistry;
 
     async function loadModelRegistry() {
       try {
