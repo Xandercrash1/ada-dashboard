@@ -1243,7 +1243,8 @@ app.post('/api/agent/sessions', (req, res) => {
     query: 'System Inspector',
     automator: 'Automation Scripter',
     architect: 'System Architect',
-    designer: 'Page Designer'
+    designer: 'Page Designer',
+    pm: 'Project Manager'
   };
 
   const initialGreetings = {
@@ -1251,7 +1252,8 @@ app.post('/api/agent/sessions', (req, res) => {
     query: 'System Inspector online in Read-Only mode. Ready to inspect system states, query logs, or analyze files safely.',
     automator: 'Automation Scripter online. Ready to create Python scripts, test data scrapers, and configure cron workflows.',
     architect: 'System Architect online. When designing architecture, I save full execution plans into /home/ubuntu/dashboard/plans/ for other agents to read and implement.',
-    designer: 'Designer here! I\'m containerized to this page — I can add widgets, rework the banner, hide or rebuild the stat boxes, and wire cards to your tools. Nothing I do can break the server. What should we change?'
+    designer: 'Designer here! I\'m containerized to this page — I can add widgets, rework the banner, hide or rebuild the stat boxes, and wire cards to your tools. Nothing I do can break the server. What should we change?',
+    pm: 'Project Manager online. I manage the feedback.json roadmap and ticket list. How can I help you prioritize or organize your work?'
   };
 
   // The Designer is a high-frequency, low-stakes role (its writes are walled

@@ -702,6 +702,32 @@
         </form>
       </div>
 
+
+      <!-- Project Manager Chat -->
+      <div class="bg-dark-card border border-emerald-900/50 rounded-2xl shadow-md overflow-hidden mb-4">
+        <div class="px-4 py-3 bg-gradient-to-r from-emerald-950/40 to-teal-950/40 border-b border-dark-border flex justify-between items-center cursor-pointer hover:bg-white/5 transition-colors" onclick="togglePmChat()">
+          <div class="flex items-center gap-2">
+            <i class="fa-solid fa-clipboard-list text-emerald-400"></i>
+            <span class="text-sm font-bold text-white">Project Manager AI</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <div id="pm-chat-badge" class="hidden w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
+            <i class="fa-solid fa-chevron-down text-gray-400 transition-transform" id="pm-chat-chevron"></i>
+          </div>
+        </div>
+        <div id="pm-chat-container" class="hidden h-[400px] flex-col bg-dark-bg">
+          <div id="pm-chat-messages" class="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar"></div>
+          <div class="p-3 border-t border-dark-border bg-dark-card">
+            <form onsubmit="submitPmChat(event)" class="relative">
+              <input type="text" id="pm-chat-input" placeholder="Ask the PM to group bugs, draft a roadmap, or prioritize tickets..." class="w-full bg-dark-bg border border-dark-border rounded-xl pl-4 pr-12 py-3 text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors" autocomplete="off">
+              <button type="submit" class="absolute right-2 top-2 w-8 h-8 flex items-center justify-center rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors">
+                <i class="fa-solid fa-paper-plane text-xs"></i>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+
       <!-- Filters -->
       <div class="bg-dark-card p-3.5 rounded-2xl border border-dark-border flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
         <div class="flex items-center space-x-1 bg-dark-bg p-1 rounded-xl border border-dark-border overflow-x-auto text-xs font-medium custom-scrollbar">
@@ -2756,6 +2782,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const sessions = await res.json();
         
         let changedActiveSession = false;
+        let changedPmSession = false;
         
         for (const session of sessions) {
           const sig = messagesSignature(session.messages);
@@ -2767,6 +2794,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             window.dispatchEvent(new CustomEvent('agentMessageReceived', { detail: { session } }));
             if (session.id === activeSessionId) {
               changedActiveSession = true;
+            }
+            if (pmSessionId && session.id === pmSessionId) {
+              changedPmSession = true;
             }
           }
           globalSessionSignatures[session.id] = sig;
@@ -2788,6 +2818,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             if (poll) renderJobProgress(activeSessionId, poll.lastJob);
           }
         }
+        if (changedPmSession && pmChatOpen) renderPmChatMessages();
       } catch (err) {
         console.error('Async message poll failed', err);
       }
@@ -3329,6 +3360,105 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     let feedbackStatusFilter = 'all';
     let feedbackTypeFilter = 'all';
     let feedbackSortOrder = 'newest';
+
+    // --- PM Chat Logic ---
+    let pmSessionId = null;
+    let pmChatOpen = false;
+
+    async function togglePmChat() {
+      const container = document.getElementById('pm-chat-container');
+      const chevron = document.getElementById('pm-chat-chevron');
+      pmChatOpen = !pmChatOpen;
+      
+      if (pmChatOpen) {
+        container.classList.remove('hidden');
+        container.classList.add('flex');
+        chevron.classList.add('rotate-180');
+        
+        // Find or create PM session
+        let session = agentSessions.find(s => s.role === 'pm');
+        if (!session) {
+          const res = await fetch('/api/agent/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'Project Manager', role: 'pm', emoji: '📋' })
+          });
+          session = await res.json();
+          await loadAgentSessions(); // updates agentSessions array
+        }
+        pmSessionId = session.id;
+        renderPmChatMessages();
+      } else {
+        container.classList.add('hidden');
+        container.classList.remove('flex');
+        chevron.classList.remove('rotate-180');
+      }
+    }
+
+    function renderPmChatMessages() {
+      if (!pmSessionId) return;
+      const session = agentSessions.find(s => s.id === pmSessionId);
+      if (!session) return;
+      
+      const container = document.getElementById('pm-chat-messages');
+      const isRunning = !!jobPolls[pmSessionId];
+      const badge = document.getElementById('pm-chat-badge');
+      if (badge) badge.classList.toggle('hidden', !isRunning);
+
+      if (!session.messages || session.messages.length === 0) {
+        container.innerHTML = `<div class="text-center py-10 text-gray-500 text-xs">No messages yet.</div>`;
+        return;
+      }
+
+      container.innerHTML = session.messages.map(m => {
+        if (m.role === 'user') {
+          return `<div class="flex justify-end"><div class="max-w-[85%] bg-emerald-600/80 text-white rounded-xl rounded-br-sm px-3 py-2 text-xs break-words">${escapeHtml(m.text)}</div></div>`;
+        } else {
+          return `
+            <div class="flex justify-start gap-2.5 items-start">
+              <div class="w-6 h-6 rounded-lg bg-emerald-950 border-emerald-800 text-emerald-300 border flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">
+                📋
+              </div>
+              <div class="bg-dark-card border border-dark-border text-gray-200 text-xs rounded-xl rounded-tl-sm px-3 py-2 max-w-[85%] shadow-sm leading-relaxed prose prose-sm dark:prose-invert prose-p:leading-snug prose-pre:bg-black/50 prose-a:text-emerald-500 marker:text-emerald-400 dark:prose-code:text-emerald-200 prose-code:text-emerald-600">
+                ${marked.parse(m.text)}
+              </div>
+            </div>`;
+        }
+      }).join('');
+      
+      if (isRunning) {
+        container.innerHTML += `
+          <div class="flex justify-start gap-2.5 items-start mt-2">
+            <div class="w-6 h-6 rounded-lg bg-emerald-950 border border-emerald-800 flex items-center justify-center text-xs flex-shrink-0 mt-0.5">📋</div>
+            <div class="bg-dark-card border border-dark-border rounded-xl rounded-tl-sm px-3 py-2.5 shadow-sm flex items-center h-8">
+              <div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>
+            </div>
+          </div>`;
+      }
+      container.scrollTop = container.scrollHeight;
+    }
+
+    async function submitPmChat(e) {
+      e.preventDefault();
+      const input = document.getElementById('pm-chat-input');
+      const text = input.value.trim();
+      if (!text || !pmSessionId) return;
+      
+      input.value = '';
+      const session = agentSessions.find(s => s.id === pmSessionId);
+      if (session) {
+        session.messages.push({ role: 'user', text, timestamp: new Date().toISOString() });
+        renderPmChatMessages();
+      }
+      
+      await fetch(`/api/agent/sessions/${pmSessionId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: text })
+      });
+      
+      pollJobOnce(pmSessionId);
+    }
 
     async function loadFeedbackTypes() {
       try {
