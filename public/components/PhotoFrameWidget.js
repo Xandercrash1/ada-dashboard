@@ -15,6 +15,7 @@ class PhotoFrameWidget extends HTMLElement {
   
   attributeChangedCallback(name, oldVal, newVal) {
     if (oldVal !== newVal) {
+      if (!this.images) this.images = []; // Guard against premature attribute changes
       if (name === 'library') this.loadImages();
       if (name === 'interval') this.startRotation();
     }
