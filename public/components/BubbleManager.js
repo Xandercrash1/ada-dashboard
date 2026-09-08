@@ -173,6 +173,23 @@ class BubbleManager {
         `;
       }
       
+      const lastMsg = session.messages && session.messages[session.messages.length - 1];
+      const isWaiting = lastMsg && lastMsg.role === 'user';
+      
+      let waitingHtml = '';
+      if (isWaiting) {
+        waitingHtml = `
+          <div class="flex justify-start gap-2.5 items-start mt-2">
+            <div class="w-6 h-6 rounded-lg bg-dark-card border border-dark-border flex items-center justify-center text-xs flex-shrink-0">
+              <i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-gray-500"></i>
+            </div>
+            <div class="bg-dark-card border border-dark-border rounded-2xl rounded-tl-sm px-3 py-2.5 shadow-sm flex items-center h-8">
+              <div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>
+            </div>
+          </div>
+        `;
+      }
+      
       b.el.innerHTML = `
         <div class="bubble-expanded w-[24rem] max-w-[calc(100vw-2rem)] bg-dark-card border border-indigo-800/60 rounded-2xl shadow-2xl shadow-indigo-950/50 flex flex-col overflow-hidden">
           <div class="flex items-center justify-between gap-2 px-4 py-3 bg-gradient-to-r from-indigo-950/60 to-purple-950/60 border-b border-dark-border cursor-pointer" onclick="window.bubbleManager.minimizeBubble('${sessionId}')">
@@ -192,6 +209,7 @@ class BubbleManager {
           
           <div class="bubble-messages-box h-72 overflow-y-auto custom-scrollbar px-3 py-3 space-y-2 text-xs" id="bubble-msgs-${sessionId}">
             ${msgsHtml}
+            ${waitingHtml}
           </div>
           
           <form onsubmit="window.bubbleManager.submitForm(event, '${sessionId}')" class="flex items-center gap-2 p-3 border-t border-dark-border bg-dark-card">

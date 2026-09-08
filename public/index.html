@@ -146,6 +146,12 @@
     }
     .theme-cycle:hover { color: var(--text); border-color: var(--accent); }
     .theme-cycle i { font-size: 12px; }
+    .typing-dots { display: flex; align-items: center; gap: 4px; }
+    .typing-dot { width: 6px; height: 6px; background-color: #a78bfa; border-radius: 50%; animation: typingBounce 1.4s infinite ease-in-out both; }
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes typingBounce { 0%, 80%, 100% { transform: scale(0); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
+
   </style>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
 </head>
@@ -2791,15 +2797,16 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       }
 
       bubble.innerHTML = `
-        <div class="w-7 h-7 rounded-xl bg-purple-950 border border-purple-800 text-purple-300 flex items-center justify-center text-xs flex-shrink-0 mt-0.5 ${cancelling ? '' : 'animate-spin'}">
-          <i class="fa-solid ${cancelling ? 'fa-hourglass-half' : 'fa-circle-notch'}"></i>
+        <div class="w-7 h-7 rounded-xl bg-purple-950 border border-purple-800 text-purple-300 flex items-center justify-center text-xs flex-shrink-0 mt-0.5">
+          <i class="fa-solid ${cancelling ? 'fa-hourglass-half' : 'fa-robot'}"></i>
         </div>
         <div class="border-b border-white/5 hover:bg-white/5 text-purple-300 text-xs rounded-2xl px-4 py-3 max-w-xl shadow-sm leading-relaxed space-y-2 flex-1">
           <div class="flex items-center justify-between gap-3">
             <span class="flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full ${cancelling ? 'bg-amber-400' : 'bg-purple-400 animate-pulse'}"></span>
-              <span>${cancelling ? 'Cancelling…' : 'Agent is working…'}</span>
-              <span class="text-gray-500 font-mono text-[10px]">${formatElapsed(elapsedMs)}</span>
+              ${cancelling 
+                ? '<span class="w-2 h-2 rounded-full bg-amber-400"></span><span>Cancelling…</span>' 
+                : `<div class="typing-dots mr-1"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`}
+              <span class="text-gray-500 font-mono text-[10px] ml-1">${formatElapsed(elapsedMs)}</span>
             </span>
             ${cancelling ? '' : `
             <button onclick="cancelJob('${sessionId}', '${jobId}')" class="px-2.5 py-1 rounded-lg bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 text-[10px] font-semibold transition-colors flex items-center gap-1 flex-shrink-0">
