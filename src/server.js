@@ -2017,7 +2017,39 @@ async function runClaudeHeavyTurn(session, promptText, systemInstruction, modelI
 // `modelIdOverride` — when set, this turn runs with that model instead of the
 // session's stored one (per-turn override, contract §2). Does not mutate
 // session.model; the caller decides whether to persist it.
+
+// Global sliding window for dynamic Gemini API rate pacing.
+// Google AI Studio Free Tier has a strict 15 Requests Per Minute limit.
+// We record the timestamp of every outgoing request. If we are about to make
+// our 15th request within 60 seconds, we pause just long enough to stay under.
+const geminiRequestTimestamps = [];
+const GEMINI_RPM_LIMIT = 14; // Target 14 to leave a 1-request safety buffer
+const GEMINI_RPM_WINDOW_MS = 60000;
+
+async function paceGeminiRequest(ctrl) {
+  const now = Date.now();
+  // Clear timestamps older than the 60s window
+  while (geminiRequestTimestamps.length > 0 && now - geminiRequestTimestamps[0] > GEMINI_RPM_WINDOW_MS) {
+    geminiRequestTimestamps.shift();
+  }
+  
+  if (geminiRequestTimestamps.length >= GEMINI_RPM_LIMIT) {
+    const oldest = geminiRequestTimestamps[0];
+    const waitTime = GEMINI_RPM_WINDOW_MS - (now - oldest) + 500; // Add 500ms padding
+    if (waitTime > 0) {
+      console.log(`[Pacing] Gemini RPM limit approaching (${geminiRequestTimestamps.length} calls in last 60s). Sleeping ${Math.round(waitTime/1000)}s...`);
+      if (ctrl && typeof ctrl.onProgress === 'function') {
+        ctrl.onProgress(`⏳ Pacing API calls to respect rate limits. Waiting ${Math.round(waitTime/1000)}s...`);
+      }
+      await new Promise(r => setTimeout(r, waitTime));
+    }
+  }
+  
+  geminiRequestTimestamps.push(Date.now());
+}
+
 // `ctrl` (optional, added 2026-08-26 for Agent Jobs & Cancellation Contract) —
+
 // job-control object { toolExecutions, cancelled, kill }. Trailing and
 // optional, so the scheduled-prompt queue (which calls this with 3 args, no
 // ctrl) sees byte-for-byte identical behavior — contract §4.
@@ -2199,6 +2231,7 @@ If the user wants a widget that isn't in the library, tell them to ask the Archi
     };
 
     const callGemini = async (body) => {
+      await paceGeminiRequest(ctrl);
       // Bound the request BEFORE it goes out. Enforcing here rather than at each
       // call site means every path is covered — first call, tool loop, synthesis,
       // and anything added later — instead of relying on each one to remember.
