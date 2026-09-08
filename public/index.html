@@ -896,9 +896,18 @@
       </div>
 
       <form id="new-agent-form" onsubmit="submitNewAgent(event)" class="space-y-4">
-        <div>
-          <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Agent Name</label>
-          <input type="text" id="new-agent-name" required placeholder="e.g. Server Debugger, Error Auditor..." class="w-full bg-gray-50 dark:bg-black/20 border border-gray-300 dark:border-white/5 rounded-xl px-3.5 py-2 text-xs text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors" autocomplete="off">
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Agent Name</label>
+            <input type="text" id="new-agent-name" required placeholder="e.g. Server Debugger, Error Auditor..." class="w-full bg-gray-50 dark:bg-black/20 border border-gray-300 dark:border-white/5 rounded-xl px-3.5 py-2 text-xs text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors" autocomplete="off">
+          </div>
+          <div class="w-24 flex-shrink-0">
+            <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Emoji</label>
+            <div class="relative">
+              <input type="text" id="new-agent-emoji" maxlength="2" placeholder="🤖" class="w-full bg-gray-50 dark:bg-black/20 border border-gray-300 dark:border-white/5 rounded-xl px-3.5 py-2 text-base text-center focus:outline-none focus:border-purple-500 transition-colors">
+              <button type="button" onclick="document.getElementById('new-agent-emoji').value = ['👽','👻','🕵️','🧙','🦸','🦹','🧚','🧛','🧜','🧝','🧞','🧟','🧠','👀','🦾','🦿','🦷','🦴','🐒','🦍','🦧','🐶','🐺','🦊','🦝','🐱','🦁','🐯','🐴','🦄','🦓','🦌','🐮','🐷','🐗','🐏','🐑','🐐','🐪','🐫','🦙','🦒','🐘','🦏','🦛','🐭','🐹','🐰','🐿️','🦔','🦇','熊','🐨','🐼','🦥','🦦','🦨','🦘','🦡','🐾','🦃','🐔','🐓','🐣','🐤','🐥','🐦','🐧','🕊️','🦅','🦆','🦢','🦉','🦩','🦚','🦜','🐸','🐊','🐢','🦎','🐍','🐲','🐉','🦕','🦖','🐳','🐋','🐬','🐟','🐠','🐡','🦈','🐙','🐚','🐌','🦋','🐛','🐜','🐝','🐞','🦗','🕷️','🕸️','🦂','🦟','🦠'][Math.floor(Math.random() * 88)]" class="absolute -top-6 right-0 text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 cursor-pointer" title="Randomize Emoji"><i class="fa-solid fa-dice"></i></button>
+            </div>
+          </div>
         </div>
 
         <!-- Role Presets Cards -->
@@ -2166,7 +2175,7 @@
 
       container.innerHTML = agentSessions.map(s => {
         const isActive = s.id === activeSessionId;
-        const icon = roleIcons[s.role] || '<i class="fa-solid fa-robot"></i>';
+        const icon = s.emoji ? `<span class="text-base leading-none translate-y-[1px]">${s.emoji}</span>` : (roleIcons[s.role] || '<i class="fa-solid fa-robot"></i>');
         const modelInfo = getModelInfo(s.model);
         
         const isRunning = !!jobPolls[s.id];
@@ -2218,7 +2227,7 @@
       if (!session) return;
 
       document.getElementById('active-agent-name').innerText = session.name;
-      document.getElementById('active-agent-icon').innerHTML = roleIcons[session.role] || '<i class="fa-solid fa-robot"></i>';
+      document.getElementById('active-agent-icon').innerHTML = session.emoji ? `<span class="text-[18px] leading-none translate-y-[2px] block">${session.emoji}</span>` : (roleIcons[session.role] || '<i class="fa-solid fa-robot"></i>');
       document.getElementById('active-agent-role-desc').innerText = roleDescs[session.role] || 'Autonomous Assistant';
 
       const modelInfo = getModelInfo(session.model);
@@ -2263,6 +2272,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     function renderChatMessages(messages) {
+      const session = agentSessions.find(s => s.id === activeSessionId);
       const container = document.getElementById('chat-messages-container');
       if (!messages || messages.length === 0) {
         container.innerHTML = `<div class="text-center py-20 text-gray-500 text-xs">No messages yet. Ask the agent anything!</div>`;
@@ -2324,7 +2334,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           return `
             <div class="flex justify-start gap-2.5 items-start">
               <div class="w-7 h-7 rounded-xl ${m.async ? 'bg-cyan-950 border-cyan-800 text-cyan-300' : 'bg-purple-950 border-purple-800 text-purple-300'} border flex items-center justify-center text-xs flex-shrink-0 mt-0.5">
-                <i class="fa-solid ${m.async ? 'fa-tower-broadcast' : 'fa-robot'}"></i>
+                ${m.async ? '<i class="fa-solid fa-tower-broadcast"></i>' : (session && session.emoji ? `<span class="text-sm leading-none translate-y-[1px] block">${session.emoji}</span>` : '<i class="fa-solid fa-robot"></i>')}
               </div>
               <div class="bg-dark-card border ${m.async ? 'border-cyan-900' : 'border-dark-border'} text-gray-200 text-xs rounded-2xl rounded-tl-sm px-4 py-3 max-w-xl shadow-sm leading-relaxed space-y-2">
                 ${asyncBadge}
@@ -2992,16 +3002,21 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     async function submitNewAgent(e) {
       e.preventDefault();
       const name = document.getElementById('new-agent-name').value.trim();
+      const emoji = document.getElementById('new-agent-emoji').value.trim();
       const role = document.querySelector('input[name="agent-role"]:checked').value;
       const model = newAgentSelectedModel || getDefaultModelId();
       // Capture before closeNewAgentModal() wipes the pending state.
       const feedbackId = pendingAgentFeedbackId;
       const quickPrompt = pendingAgentPrompt;
 
+      const payload = { name, role, model };
+      if (emoji) payload.emoji = emoji;
+      if (feedbackId) payload.feedbackId = feedbackId;
+
       const res = await fetch('/api/agent/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(feedbackId ? { name, role, model, feedbackId } : { name, role, model })
+        body: JSON.stringify(payload)
       });
       const newSession = await res.json();
       closeNewAgentModal();

@@ -1226,7 +1226,7 @@ app.get('/api/agent/sessions', (req, res) => res.json(readSessions()));
 
 // Create new agent session
 app.post('/api/agent/sessions', (req, res) => {
-  const { name, role, model } = req.body;
+  const { name, role, model, emoji } = req.body;
   const sessions = readSessions();
   const sessionRole = role || 'debugger';
   // Validated against the registry; unknown/missing ids fall back to the
@@ -1276,6 +1276,7 @@ app.post('/api/agent/sessions', (req, res) => {
     role: sessionRole,
     ...(sessionPage ? { page: sessionPage } : {}),
     model: sessionModel,
+    ...(emoji && emoji.trim() ? { emoji: emoji.trim() } : {}),
     createdAt: new Date().toISOString(),
     messages: [
       {

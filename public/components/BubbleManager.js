@@ -151,7 +151,7 @@ class BubbleManager {
       
       b.el.innerHTML = `
         <div class="bubble-minimized cursor-pointer w-12 h-12 rounded-full bg-dark-card border border-indigo-500/50 shadow-lg shadow-indigo-900/30 flex items-center justify-center hover:bg-indigo-950 transition-colors relative" onclick="window.bubbleManager.expandBubble('${sessionId}')">
-          <i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-indigo-400 text-lg"></i>
+          ${session.emoji ? `<span class="text-2xl leading-none translate-y-[2px] block">${session.emoji}</span>` : `<i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-indigo-400 text-lg"></i>`}
           ${badgeHtml}
         </div>
       `;
@@ -181,7 +181,7 @@ class BubbleManager {
         waitingHtml = `
           <div class="flex justify-start gap-2.5 items-start mt-2">
             <div class="w-6 h-6 rounded-lg bg-dark-card border border-dark-border flex items-center justify-center text-xs flex-shrink-0">
-              <i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-gray-500"></i>
+              ${session.emoji ? `<span class="text-sm leading-none translate-y-[1px] block">${session.emoji}</span>` : `<i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-gray-500"></i>`}
             </div>
             <div class="bg-dark-card border border-dark-border rounded-2xl rounded-tl-sm px-3 py-2.5 shadow-sm flex items-center h-8">
               <div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>
@@ -194,7 +194,7 @@ class BubbleManager {
         <div class="bubble-expanded w-[24rem] max-w-[calc(100vw-2rem)] bg-dark-card border border-indigo-800/60 rounded-2xl shadow-2xl shadow-indigo-950/50 flex flex-col overflow-hidden">
           <div class="flex items-center justify-between gap-2 px-4 py-3 bg-gradient-to-r from-indigo-950/60 to-purple-950/60 border-b border-dark-border cursor-pointer" onclick="window.bubbleManager.minimizeBubble('${sessionId}')">
             <div class="flex items-center gap-2 min-w-0">
-              <i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-indigo-400"></i>
+              ${session.emoji ? `<span class="text-base leading-none translate-y-[1px] block">${session.emoji}</span>` : `<i class="fa-solid ${session.role === 'designer' ? 'fa-wand-magic-sparkles' : 'fa-robot'} text-indigo-400"></i>`}
               <span class="text-sm font-bold text-white truncate">${this.escapeHtml(session.name || 'Agent')}</span>
             </div>
             <div class="flex items-center gap-1.5 flex-shrink-0">
