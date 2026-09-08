@@ -774,6 +774,26 @@ app.get('/api/pages/:id/content', (req, res) => {
   res.json(readJsonStoreOrThrow(docPath));
 });
 
+
+app.delete('/api/pages/:id', (req, res) => {
+  const id = req.params.id;
+  if (id === 'home' || id === 'server' || id === 'todo') return res.status(400).json({ error: 'Cannot delete built-in pages' });
+  
+  let pages = readPagesRegistry();
+  if (!pages.some(p => p.id === id)) return res.status(404).json({ error: 'Page not found' });
+  
+  pages = pages.filter(p => p.id !== id);
+  writePagesRegistry(pages);
+  
+  const docPath = getPageDocPath(id);
+  if (fs.existsSync(docPath)) {
+    // Optionally delete the JSON file, or just leave it orphaned. We'll delete it to be clean.
+    fs.unlinkSync(docPath);
+  }
+  
+  res.json({ success: true });
+});
+
 // Update page content directly (if UI wants to modify without agent)
 app.post('/api/pages/:id/content', (req, res) => {
   const id = req.params.id;

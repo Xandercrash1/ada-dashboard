@@ -214,6 +214,9 @@
           <i id="canvas-title-icon" class="fa-solid fa-layer-group text-indigo-400"></i> <span id="canvas-title-text">Dashboard</span>
         </h2>
         <div class="flex items-center gap-2">
+                    <button onclick="deleteCurrentPage()" id="delete-page-btn" class="hidden px-3 py-1.5 rounded-lg bg-rose-600/20 border border-rose-500/60 text-rose-300 hover:text-white hover:bg-rose-600/40 text-xs font-medium items-center gap-2 transition-all">
+            <i class="fa-solid fa-trash-can"></i> <span>Delete Page</span>
+          </button>
           <button onclick="openPageDesigner()" id="designer-btn" class="hidden px-3 py-1.5 rounded-lg bg-purple-600/20 border border-purple-500/60 text-purple-300 hover:text-white hover:bg-purple-600/40 text-xs font-medium items-center gap-2 transition-all">
             <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Designer</span>
           </button>
@@ -2228,6 +2231,32 @@
       });
     }
 
+    
+    async function deleteCurrentPage() {
+       const pageId = currentCanvasPage;
+       if (!customPages.some(p => p.id === pageId)) return;
+       const confirmWord = prompt(`Are you absolutely sure you want to delete this page? This cannot be undone.\n\nType the word "DELETE" to confirm:`);
+       if (confirmWord !== 'DELETE') {
+         alert('Deletion cancelled.');
+         return;
+       }
+       
+       try {
+         const res = await fetch(`/api/pages/${pageId}`, { method: 'DELETE' });
+         if (res.ok) {
+           await loadCustomPages();
+           // Turn off edit mode
+           if (window.isEditingLayout) toggleEditLayout();
+           switchTab('home');
+         } else {
+           const err = await res.json();
+           alert(err.error || 'Failed to delete page');
+         }
+       } catch (err) {
+         alert('Error deleting page');
+       }
+    }
+
     async function createNewPage() {
        const title = prompt("Enter new page title (e.g. 'Roadmap'):");
        if (!title) return;
@@ -3872,9 +3901,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       // The Designer entry point rides the edit-mode state (fb-1788202033208):
       // visible only while editing, gone the moment editing ends.
       const designerBtn = document.getElementById('designer-btn');
+      const deleteBtn = document.getElementById('delete-page-btn');
       if (designerBtn) {
         designerBtn.classList.toggle('hidden', !window.isEditingLayout);
         designerBtn.classList.toggle('flex', window.isEditingLayout);
+      }
+      if (deleteBtn) {
+        const isCustom = customPages.some(p => p.id === currentCanvasPage);
+        deleteBtn.classList.toggle('hidden', !window.isEditingLayout || !isCustom);
+        deleteBtn.classList.toggle('flex', window.isEditingLayout && isCustom);
       }
       if (window.isEditingLayout) {
         btn.classList.add('bg-indigo-500/20', 'border-indigo-500', 'text-indigo-400');
