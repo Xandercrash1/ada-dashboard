@@ -2178,7 +2178,7 @@
       try {
         const res = await fetch('/api/agent/sessions');
         agentSessions = await res.json();
-        renderSessionsList();      } catch (err) {
+        renderSessionsList(); populatePmModelSelect(); } catch (err) {
         console.error('Failed to load agent sessions', err);
       }
     }
@@ -3390,7 +3390,23 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       }
     }
 
+
+    function populatePmModelSelect() {
+      const pmModelSelect = document.getElementById('pm-chat-model-select');
+      if (!pmModelSelect) return;
+      if (pmModelSelect.options.length === 0) {
+         pmModelSelect.innerHTML = modelRegistry.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+      }
+      const session = agentSessions.find(s => s.role === 'pm');
+      if (session) {
+         pmSessionId = session.id;
+         pmModelSelect.value = session.model;
+         globalSessionSignatures[pmSessionId] = messagesSignature(session.messages);
+      }
+    }
+    
     async function togglePmChat() {
+
       const container = document.getElementById('pm-chat-container');
       const chevron = document.getElementById('pm-chat-chevron');
       pmChatOpen = !pmChatOpen;
