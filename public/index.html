@@ -712,6 +712,9 @@
           </div>
           <div class="flex items-center gap-3">
             <div id="pm-chat-badge" class="hidden w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
+            <select id="pm-chat-model-select" onchange="changePmModel(event)" onclick="event.stopPropagation()" class="text-[10px] bg-dark-bg border border-dark-border rounded px-2 py-1 text-gray-300 focus:outline-none focus:border-emerald-500">
+              <!-- populated dynamically -->
+            </select>
             <i class="fa-solid fa-chevron-down text-gray-400 transition-transform" id="pm-chat-chevron"></i>
           </div>
         </div>
@@ -3364,6 +3367,28 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     // --- PM Chat Logic ---
     let pmSessionId = null;
     let pmChatOpen = false;
+
+
+    async function changePmModel(e) {
+      if (!pmSessionId) return;
+      const newModel = e.target.value;
+      try {
+        const res = await fetch(`/api/agent/sessions/${pmSessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: newModel })
+        });
+        if (res.ok) {
+          const updated = await res.json();
+          const sessionIndex = agentSessions.findIndex(s => s.id === pmSessionId);
+          if (sessionIndex > -1) {
+            agentSessions[sessionIndex].model = updated.model;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to change PM model', err);
+      }
+    }
 
     async function togglePmChat() {
       const container = document.getElementById('pm-chat-container');
