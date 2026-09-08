@@ -4307,8 +4307,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       designerSessionId = null;
       try { designerSessionId = localStorage.getItem(designerStorageKey(page)); } catch (e) {}
       
+      // Optimistically open the bubble immediately if we already know the ID
+      if (designerSessionId && window.bubbleManager) {
+        window.bubbleManager.forceBubble(designerSessionId);
+      }
+      
       try {
         await ensureDesignerSession(page);
+        // If it was newly created (or re-created after stale), open it now
         if (designerSessionId && window.bubbleManager) {
           window.bubbleManager.forceBubble(designerSessionId);
         }
@@ -4331,6 +4337,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         if (r.ok) { designerSession = await r.json(); return; }
         designerSessionId = null; // stale — e.g. deleted from the Agents tab
       }
+      const isCustomPage = customPages.some(p => p.id === page);
+      const title = isCustomPage ? (customPages.find(p => p.id === page).title + ' Designer') : 'Homepage Designer';
+      
       const res = await fetch('/api/agent/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
