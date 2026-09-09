@@ -4271,7 +4271,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       // Alex or his agents — the same trust level as the agents' bash access.
       const grid = document.getElementById('home-widgets');
       const widgets = (homepageDoc.widgets || []).filter(w => w && !w.hidden);
-      grid.classList.toggle('hidden', widgets.length === 0);
+      grid.classList.toggle('hidden', widgets.length === 0 && !window.isEditingLayout);
       grid.innerHTML = widgets.map(w => {
         const accent = w.accent || 'indigo';
         const linkAttr = w.link ? (w.link.tab
