@@ -150,7 +150,8 @@ class DocBodyWidget extends HTMLElement {
       { type: 'photo', title: 'Photo Frame', icon: 'fa-image', desc: 'Displays an image' },
       { type: 'script', title: 'Script Runner', icon: 'fa-terminal', desc: 'Click to execute a bash script' },
       { type: 'scratchpad', title: 'Scratchpad', icon: 'fa-pen-nib', desc: 'Rich markdown editor' },
-      { type: 'todo', title: 'To-Do List', icon: 'fa-list-check', desc: 'Interactive task manager linked to Tasks tab' }
+      { type: 'todo', title: 'To-Do List', icon: 'fa-list-check', desc: 'Interactive task manager linked to Tasks tab' },
+      { type: 'calendar', title: 'Agenda', icon: 'fa-calendar', desc: 'Weekly schedule and events list' }
     ];
     
     let available = templates;
@@ -240,6 +241,7 @@ class DocBodyWidget extends HTMLElement {
       case 'script': newWidget.html = '<ada-script-runner script-id="hello_world"></ada-script-runner>'; newWidget.title = 'Quick Action'; newWidget.icon = 'fa-bolt'; break;
       case 'scratchpad': newWidget.html = '<ada-scratchpad></ada-scratchpad>'; newWidget.title = 'Scratchpad'; newWidget.icon = 'fa-pen-nib'; break;
       case 'todo': newWidget.html = '<ada-todo></ada-todo>'; newWidget.title = 'To-Do List'; newWidget.icon = 'fa-list-check'; newWidget.rows = 3; break;
+      case 'calendar': newWidget.html = '<ada-calendar></ada-calendar>'; newWidget.title = 'Agenda'; newWidget.icon = 'fa-calendar'; newWidget.rows = 3; break;
     }
     
     // Push it to the page JSON and let index.html save it
