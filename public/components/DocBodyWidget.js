@@ -140,19 +140,24 @@ class DocBodyWidget extends HTMLElement {
     const menu = this.querySelector('#slash-menu');
     const container = this.querySelector('#slash-menu-items');
     
-    if (!window.homepageDoc || !window.homepageDoc.widgets) {
-      this.closeSlashMenu();
-      return;
-    }
+    // Define the widget templates available for spawning
+    const templates = [
+      { type: 'blank', title: 'Blank Canvas', icon: 'fa-square-dashed', desc: 'Empty HTML container' },
+      { type: 'clock', title: 'Digital Clock', icon: 'fa-clock', desc: 'Standard digital time display' },
+      { type: 'countdown', title: 'Countdown Timer', icon: 'fa-hourglass-half', desc: 'Counts down to a specific date' },
+      { type: 'analog', title: 'Analog Clock', icon: 'fa-clock', desc: 'Classic analog clock face' },
+      { type: 'gauge', title: 'System Gauge', icon: 'fa-gauge-high', desc: 'CPU, Memory, or Disk metrics' },
+      { type: 'photo', title: 'Photo Frame', icon: 'fa-image', desc: 'Displays an image' },
+      { type: 'script', title: 'Script Runner', icon: 'fa-terminal', desc: 'Click to execute a bash script' },
+      { type: 'scratchpad', title: 'Scratchpad', icon: 'fa-pen-nib', desc: 'Rich markdown editor' }
+    ];
     
-    // Filter available widgets that are NOT the doc body itself
-    let available = window.homepageDoc.widgets.filter(w => w.id !== this.widgetId);
-    
+    let available = templates;
     if (this.slashQuery) {
-      available = available.filter(w => 
-        (w.title || '').toLowerCase().includes(this.slashQuery) || 
-        w.id.toLowerCase().includes(this.slashQuery) ||
-        (w.html || '').toLowerCase().includes(this.slashQuery)
+      available = templates.filter(t => 
+        t.title.toLowerCase().includes(this.slashQuery) || 
+        t.type.toLowerCase().includes(this.slashQuery) ||
+        t.desc.toLowerCase().includes(this.slashQuery)
       );
     }
     
@@ -161,32 +166,22 @@ class DocBodyWidget extends HTMLElement {
       return;
     }
     
-    container.innerHTML = available.map((w, i) => {
-      let icon = 'fa-puzzle-piece';
-      if (w.html && w.html.includes('clock')) icon = 'fa-clock';
-      if (w.html && w.html.includes('photo')) icon = 'fa-image';
-      if (w.html && w.html.includes('scratchpad')) icon = 'fa-pen-nib';
-      if (w.icon) icon = w.icon;
-      
-      const title = w.title || (w.html ? w.html.match(/<([a-zA-Z0-9-]+)/)[1] : w.id);
-      
-      return `
-        <div class="slash-item p-2 flex items-center gap-3 rounded-lg cursor-pointer hover:bg-indigo-500/10 text-gray-600 dark:text-gray-300 hover:text-indigo-500 transition-colors ${i === 0 ? 'bg-indigo-500/10 text-indigo-500' : ''}" data-id="${w.id}" data-index="${i}">
-          <div class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-black/20 rounded-md text-[10px]"><i class="fa-solid ${icon}"></i></div>
+    container.innerHTML = available.map((t, i) => `
+        <div class="slash-item p-2 flex items-center gap-3 rounded-lg cursor-pointer hover:bg-indigo-500/10 text-gray-600 dark:text-gray-300 hover:text-indigo-500 transition-colors ${i === 0 ? 'bg-indigo-500/10 text-indigo-500' : ''}" data-type="${t.type}" data-index="${i}">
+          <div class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-black/20 rounded-md text-[10px]"><i class="fa-solid ${t.icon}"></i></div>
           <div class="flex-1 flex flex-col">
-            <span class="text-xs font-bold leading-tight">${title}</span>
-            <span class="text-[9px] opacity-50 font-mono leading-tight">${w.id}</span>
+            <span class="text-xs font-bold leading-tight">${t.title}</span>
+            <span class="text-[9px] opacity-50 leading-tight">${t.desc}</span>
           </div>
         </div>
-      `;
-    }).join('');
+    `).join('');
     
     this.slashSelectedIndex = 0;
     
     // Bind clicks
     container.querySelectorAll('.slash-item').forEach(item => {
       item.addEventListener('click', () => {
-        this.injectWidget(item.getAttribute('data-id'));
+        this.injectWidget(item.getAttribute('data-type'));
       });
       item.addEventListener('mouseenter', () => {
         this.slashSelectedIndex = parseInt(item.getAttribute('data-index'));
@@ -223,20 +218,48 @@ class DocBodyWidget extends HTMLElement {
     if (menu) menu.classList.add('hidden');
   }
 
-  injectWidget(widgetId) {
+  async injectWidget(widgetType) {
+    // We need to generate a new widget exactly like index.html does
+    const newWidget = {
+      id: 'widget-' + Date.now() + Math.floor(Math.random()*1000),
+      size: '2x1',
+      cols: 2,
+      rows: 1,
+      theme: 'glass',
+      accent: 'indigo'
+    };
+    
+    switch(widgetType) {
+      case 'blank': newWidget.html = '<div class="flex items-center justify-center w-full h-full text-gray-400 font-medium">New Widget</div>'; break;
+      case 'clock': newWidget.html = '<ada-clock format="hh:mm:ss A"></ada-clock>'; break;
+      case 'countdown': newWidget.html = '<ada-countdown target="2027-01-01T00:00:00" label="New Year"></ada-countdown>'; newWidget.title = 'Countdown'; newWidget.icon = 'fa-hourglass-half'; break;
+      case 'analog': newWidget.html = '<ada-analog-clock></ada-analog-clock>'; newWidget.title = 'Analog Clock'; newWidget.icon = 'fa-clock'; newWidget.rows = 2; break;
+      case 'gauge': newWidget.html = '<ada-sysmon type="cpu"></ada-sysmon>'; newWidget.title = 'System Monitor'; newWidget.icon = 'fa-gauge-high'; break;
+      case 'photo': newWidget.html = '<ada-photo-frame src="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=800&q=80"></ada-photo-frame>'; newWidget.title = 'Photo'; newWidget.icon = 'fa-image'; newWidget.rows = 2; break;
+      case 'script': newWidget.html = '<ada-script-runner script-id="hello_world"></ada-script-runner>'; newWidget.title = 'Quick Action'; newWidget.icon = 'fa-bolt'; break;
+      case 'scratchpad': newWidget.html = '<ada-scratchpad></ada-scratchpad>'; newWidget.title = 'Scratchpad'; newWidget.icon = 'fa-pen-nib'; break;
+    }
+    
+    // Push it to the page JSON and let index.html save it
+    if (window.homepageDoc && window.homepageDoc.widgets) {
+      window.homepageDoc.widgets.push(newWidget);
+      if (typeof window.saveHomepageDoc === 'function') {
+        window.saveHomepageDoc();
+      }
+    }
+
     const textarea = this.querySelector('textarea');
     const val = textarea.value;
     
     const before = val.substring(0, this.slashStartIndex);
     const after = val.substring(textarea.selectionStart);
     
-    const shortcode = `[widget: ${widgetId}]`;
+    const shortcode = `[widget: ${newWidget.id}]`;
     textarea.value = before + shortcode + ' ' + after;
     
     this.closeSlashMenu();
     this.saveText();
     
-    // Move cursor after the inserted widget
     const newPos = this.slashStartIndex + shortcode.length + 1;
     textarea.setSelectionRange(newPos, newPos);
     textarea.focus();
