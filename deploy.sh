@@ -45,10 +45,18 @@ ssh my-server 'bash -s' << 'REMOTE_EXEC'
 cd /home/ubuntu/dashboard
 npm install --production
 
-# Restart or start under PM2
-eval $(grep GEMINI_API_KEY ~/.bashrc | tail -n 1)
-pm2 delete ada-dashboard 2>/dev/null || true
-pm2 start src/server.js --name "ada-dashboard"
+# Restart or start under PM2.
+# 2026-09-09: this used to `pm2 delete` + `pm2 start`, which throws away the
+# process's saved environment — every key except the one eval'd below was
+# lost on each deploy (that is how OPENAI_API_KEY disappeared once). Now:
+# load EVERY key from ~/.bashrc, then `restart --update-env` so the running
+# app keeps what it had and picks up anything new. `start` only if absent.
+eval $(grep -E '^export (GEMINI_API_KEY|OPENAI_API_KEY)=' ~/.bashrc)
+if pm2 describe ada-dashboard >/dev/null 2>&1; then
+  pm2 restart ada-dashboard --update-env
+else
+  pm2 start src/server.js --name "ada-dashboard"
+fi
 pm2 save
 REMOTE_EXEC
 
