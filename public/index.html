@@ -4234,14 +4234,28 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     async function saveHomepageDoc() {
-      try {
-        await fetch('/api/homepage', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(homepageDoc)
-        });
-      } catch (err) {
-        console.error('Failed to save layout', err);
+      if (!homepageDoc) return;
+      if (currentCanvasPage === 'home') {
+        try {
+          await fetch('/api/homepage', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(homepageDoc)
+          });
+        } catch (e) {
+          console.error('Failed to save homepage layout', e);
+        }
+      } else {
+        try {
+          await fetch(`/api/pages/${currentCanvasPage}/content`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            // The custom pages API expects the entire object {widgets: []}, same as homepage
+            body: JSON.stringify(homepageDoc)
+          });
+        } catch (e) {
+          console.error(`Failed to save page ${currentCanvasPage}`, e);
+        }
       }
     }
 
