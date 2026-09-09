@@ -437,16 +437,20 @@ class DocBodyWidget extends HTMLElement {
       this.handleKeydown(e);
     });
     
+    textarea.addEventListener('keyup', () => this.checkSelection(null));
+    textarea.addEventListener('mouseup', () => this.checkSelection(null));
+    textarea.addEventListener('select', () => this.checkSelection(null));
+    
     textarea.addEventListener('input', () => {
       this.handleInput();
+      this.checkSelection(null);
     });
     
-    // Use the hyper-reliable global selectionchange event
+    // Fallback global tracker for Safari/WebKit quirks
     document.addEventListener('selectionchange', () => {
       if (document.activeElement === textarea) {
         this.checkSelection(null);
       } else {
-        // If they clicked away from the textarea entirely, hide it
         const toolbar = this.querySelector('#format-toolbar');
         if (toolbar) toolbar.classList.add('hidden');
       }
