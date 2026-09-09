@@ -4381,8 +4381,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
          colWidth = 100;
       }
       
-      document.addEventListener('mousemove', onWidgetResizeMove);
-      document.addEventListener('mouseup', onWidgetResizeEnd);
+      // Pointer events cover mouse, pen and touch (fb-1788986893122); the
+      // handle sets touch-action:none so the page does not scroll instead.
+      document.addEventListener('pointermove', onWidgetResizeMove);
+      document.addEventListener('pointerup', onWidgetResizeEnd);
+      document.addEventListener('pointercancel', onWidgetResizeEnd);
       document.body.style.cursor = 'nwse-resize';
       document.body.style.userSelect = 'none';
     }
@@ -4407,8 +4410,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     async function onWidgetResizeEnd(e) {
-      document.removeEventListener('mousemove', onWidgetResizeMove);
-      document.removeEventListener('mouseup', onWidgetResizeEnd);
+      document.removeEventListener('pointermove', onWidgetResizeMove);
+      document.removeEventListener('pointerup', onWidgetResizeEnd);
+      document.removeEventListener('pointercancel', onWidgetResizeEnd);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       
@@ -4547,7 +4551,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
              <button onclick="duplicateWidget('${w.id}')" class="px-4 py-1.5 bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-clone"></i> Clone</button>
              <button onclick="exportWidget('${w.id}')" class="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-download"></i> Export</button>
              <button onclick="deleteWidget('${w.id}')" class="px-4 py-1.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-trash"></i> Remove</button>
-             <div class="absolute bottom-0 right-0 w-10 h-10 cursor-nwse-resize flex items-center justify-center text-white/50 hover:text-white" onmousedown="startWidgetResize(event, '${w.id}')" title="Drag to resize">
+             <div class="absolute bottom-0 right-0 w-10 h-10 cursor-nwse-resize flex items-center justify-center text-white/50 hover:text-white" onpointerdown="startWidgetResize(event, '${w.id}')" style="touch-action:none" title="Drag to resize">
                <i class="fa-solid fa-up-right-and-down-left-from-center transform rotate-90 text-[12px]"></i>
              </div>
           </div>
