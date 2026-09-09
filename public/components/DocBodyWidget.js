@@ -32,7 +32,7 @@ class DocBodyWidget extends HTMLElement {
         if (textarea && document.activeElement !== textarea) {
           textarea.value = this.text;
           setTimeout(() => this.adjustHeight(), 50);
-          if (this.text.trim()) this.showPreview();
+          if (this.text.trim() && !window.isEditingLayout) this.showPreview();
         }
       }
     } catch (e) {
@@ -178,7 +178,12 @@ class DocBodyWidget extends HTMLElement {
 
     const textarea = this.querySelector('textarea');
     textarea.addEventListener('input', () => this.handleInput());
-    textarea.addEventListener('blur', () => this.showPreview());
+    textarea.addEventListener('blur', () => {
+      // If we are in layout edit mode, we must keep the textarea open so the user 
+      // can drag and drop widgets into it without it snapping back to preview mode!
+      if (window.isEditingLayout) return;
+      this.showPreview();
+    });
     this.querySelector('[data-md-preview]').addEventListener('click', () => this.showEditor());
   }
 }
