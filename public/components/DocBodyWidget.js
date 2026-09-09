@@ -263,6 +263,11 @@ class DocBodyWidget extends HTMLElement {
     const newPos = this.slashStartIndex + shortcode.length + 1;
     textarea.setSelectionRange(newPos, newPos);
     textarea.focus();
+    
+    // Open the widget inspector so the user can immediately configure the spawned widget
+    if (typeof window.editWidget === 'function') {
+      window.editWidget(newWidget.id);
+    }
   }
 
   showPreview() {
