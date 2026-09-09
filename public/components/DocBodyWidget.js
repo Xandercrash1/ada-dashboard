@@ -177,14 +177,46 @@ class DocBodyWidget extends HTMLElement {
     `;
 
     const textarea = this.querySelector('textarea');
+    const preview = this.querySelector('[data-md-preview]');
+    
     textarea.addEventListener('input', () => this.handleInput());
     textarea.addEventListener('blur', () => {
-      // If we are in layout edit mode, we must keep the textarea open so the user 
-      // can drag and drop widgets into it without it snapping back to preview mode!
       if (window.isEditingLayout) return;
       this.showPreview();
     });
-    this.querySelector('[data-md-preview]').addEventListener('click', () => this.showEditor());
+    
+    // Explicitly handle drops into the textarea to ensure immediate feedback
+    textarea.addEventListener('drop', (e) => {
+      const data = e.dataTransfer.getData('text/plain');
+      if (data && data.startsWith('[widget:')) {
+        setTimeout(() => {
+          this.handleInput();
+          this.showPreview();
+        }, 50);
+      }
+    });
+    
+    preview.addEventListener('click', () => this.showEditor());
+    
+    // Allow dragging directly onto the preview mode document!
+    preview.addEventListener('dragover', (e) => {
+      if (window.isEditingLayout) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+    
+    preview.addEventListener('drop', (e) => {
+      if (!window.isEditingLayout) return;
+      e.preventDefault();
+      const rawData = e.dataTransfer.getData('text/plain');
+      const match = rawData.match(/\[widget:\s*(.+)\]/);
+      if (match) {
+        textarea.value += '\n\n' + match[0] + '\n';
+        this.saveText();
+        this.showPreview();
+      }
+    });
   }
 }
 
