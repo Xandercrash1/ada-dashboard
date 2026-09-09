@@ -1038,17 +1038,19 @@ const AGENT_TOOLS_DECLARATION = [
       },
       {
         name: 'feedback',
-        description: 'List, update, or delete items in the feedback store (bug reports, feature requests, improvements, chores, and ideas filed via the dashboard feedback box). Priority order — work items in this order: bug > improvement > feature > chore > idea. Use action "list" to read items (optionally filtered; archived items — done/wont-do for over 24h — are hidden by default, pass filterStatus to see them), action "update" to set status/processedBy/notes on an item as you work it (this is how you record progress — do NOT delete an item you have processed), or action "delete" only to remove a mistaken entry. AFTER ACTING ON AN ITEM, YOU MUST CLOSE IT OUT: call action "update" with status set to "done" (or "wont-do" if you decided against it), processedBy set to who you are, and notes set to a one-line account of what you actually did or why you didn\'t. An item you fixed but left as "new" will be picked up and worked again by the next agent — closing it out is what makes it stop.',
+        description: 'List, update, or delete items in the feedback store (bug reports, feature requests, improvements, chores, and ideas filed via the dashboard feedback box). Priority order — work items in this order: bug > improvement > feature > chore > idea. Use action "create" to report a new ticket (requires type, title, body). Use action "list" to read items (optionally filtered; archived items — done/wont-do for over 24h — are hidden by default, pass filterStatus to see them), action "update" to set status/processedBy/notes on an item as you work it (this is how you record progress — do NOT delete an item you have processed), or action "delete" only to remove a mistaken entry. AFTER ACTING ON AN ITEM, YOU MUST CLOSE IT OUT: call action "update" with status set to "done" (or "wont-do" if you decided against it), processedBy set to who you are, and notes set to a one-line account of what you actually did or why you didn\'t. An item you fixed but left as "new" will be picked up and worked again by the next agent — closing it out is what makes it stop.',
         parameters: {
           type: 'OBJECT',
           properties: {
-            action: { type: 'STRING', description: 'One of: list, update, delete.' },
+            action: { type: 'STRING', description: 'One of: list, create, update, delete.' },
             filterType: { type: 'STRING', description: 'Optional, for action=list. One of: bug, improvement, feature, chore, idea.' },
             filterStatus: { type: 'STRING', description: 'Optional, for action=list. One of: new, in-progress, done, wont-do.' },
             id: { type: 'STRING', description: 'Required for update/delete — the feedback item id, e.g. fb-1787724518069.' },
             status: { type: 'STRING', description: 'For action=update. One of: new, in-progress, done, wont-do.' },
             processedBy: { type: 'STRING', description: 'For action=update. Free text identifying you (the agent) as the one working this item.' },
-            notes: { type: 'STRING', description: 'For action=update. Closing note — what you did, or why not.' }
+            notes: { type: 'STRING', description: 'For action=update. Closing note — what you did, or why not.' },
+            title: { type: 'STRING', description: 'For action=create. The title of the ticket.' },
+            body: { type: 'STRING', description: 'For action=create. Detailed description of the bug or feature.' }
           },
           required: ['action']
         }
@@ -1275,6 +1277,25 @@ function executeLocalTool(toolName, args, role, sessionId) {
           }
           items = sortFeedbackNewestFirst(items);
           resolve({ count: items.length, priorityOrder: FEEDBACK_TYPE_IDS, items });
+        } else if (action === 'create') {
+          if (!args.filterType || !args.title) return resolve({ error: 'filterType (as type) and title are required for action=create' });
+          const items = readFeedback();
+          const now = new Date().toISOString();
+          const newItem = {
+            id: 'fb-' + Date.now(),
+            type: args.filterType,
+            title: (args.title || '').trim(),
+            body: args.body || '',
+            status: 'new',
+            createdAt: now,
+            updatedAt: now,
+            processedAt: null,
+            processedBy: null,
+            notes: null
+          };
+          items.unshift(newItem);
+          writeFeedback(items);
+          resolve({ success: true, item: newItem });
         } else if (action === 'update') {
           if (!args.id) return resolve({ error: 'id is required for action=update' });
           const items = readFeedback();
