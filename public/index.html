@@ -150,6 +150,8 @@
     .ntf-panel { position: absolute; right: 0; top: calc(100% + 8px); width: 360px; max-width: calc(100vw - 2rem); max-height: 70vh; overflow-y: auto; z-index: 1000; text-align: left; }
     .ntf-toast { animation: ntf-in .25s ease-out; }
     @keyframes ntf-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+    /* No hover on touch devices: keep the edit overlay visible while editing (fb-1788986893122, partial) */
+    @media (hover: none) { .widget-overlay { opacity: 1 !important; } }
     .typing-dots { display: flex; align-items: center; gap: 4px; }
     .typing-dot { width: 6px; height: 6px; background-color: #a78bfa; border-radius: 50%; animation: typingBounce 1.4s infinite ease-in-out both; }
     .typing-dot:nth-child(1) { animation-delay: -0.32s; }
@@ -4051,6 +4053,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       await saveHomepageDoc();
     }
 
+    function unhideWidget(id) {
+      if (!homepageDoc) return;
+      const w = homepageDoc.widgets.find(w => w.id === id);
+      if (!w) return;
+      w.hidden = false;
+      renderHomepage();
+      saveHomepageDoc();
+    }
+
     // Clone / Export were rendered on the edit overlay without ever being
     // defined (fb-1788986893034).
     function duplicateWidget(id) {
@@ -4531,7 +4542,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const isBody = w.html && w.html.includes('ada-doc-body');
         // Do not render the drag shield for the body widget so it can natively accept dropped text!
         const overlay = (window.isEditingLayout && !isBody) ? `
-          <div class="absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center gap-3 z-20 backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
+          <div class="widget-overlay absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center gap-3 z-20 backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
              <button onclick="editWidget('${w.id}')" class="px-4 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-palette"></i> Style</button>
              <button onclick="duplicateWidget('${w.id}')" class="px-4 py-1.5 bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-clone"></i> Clone</button>
              <button onclick="exportWidget('${w.id}')" class="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-download"></i> Export</button>
@@ -4583,7 +4594,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
 
 
-      const addBtnHtml = window.isEditingLayout ? `
+      // Hidden widgets get a way back (fb-1788986893092): listed under the
+      // grid in edit mode, one click restores each.
+      const hiddenWidgets = (homepageDoc.widgets || []).filter(w => w && w.hidden);
+      const hiddenChipHtml = (window.isEditingLayout && hiddenWidgets.length) ? `
+        <div class="col-span-full flex flex-wrap items-center gap-2 text-[11px] text-gray-400 px-1">
+          <i class="fa-solid fa-eye-slash"></i> ${hiddenWidgets.length} hidden widget${hiddenWidgets.length === 1 ? '' : 's'}:
+          ${hiddenWidgets.map(w => `<button onclick="unhideWidget('${escapeHtml(w.id)}')" class="px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 hover:border-indigo-500 hover:text-white transition-colors">${escapeHtml(w.title || w.id)} <i class="fa-solid fa-eye ml-1 text-[10px]"></i></button>`).join('')}
+        </div>` : '';
+      const addBtnHtml = window.isEditingLayout ? hiddenChipHtml + `
         <div class="col-span-full h-[120px] rounded-2xl border-2 border-dashed border-dark-border hover:border-indigo-500/50 hover:bg-indigo-500/5 flex flex-col items-center justify-center cursor-pointer transition-colors text-gray-500 hover:text-indigo-400 w-full" onclick="openWidgetLibrary()">
           <i class="fa-solid fa-plus text-2xl mb-2"></i>
           <span class="text-xs font-bold uppercase tracking-wider">Add Widget</span>
