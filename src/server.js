@@ -3846,6 +3846,26 @@ app.get('/api/calendar/events', async (req, res) => {
 
 
 // --- 14. SCRATCHPAD API ---
+
+// --- Doc Body Store ---
+const DOCS_DIR = path.join(__dirname, '../data/docs');
+if (!fs.existsSync(DOCS_DIR)) fs.mkdirSync(DOCS_DIR, { recursive: true });
+
+app.get('/api/docs/:id', (req, res) => {
+  const docPath = path.join(DOCS_DIR, `${req.params.id}.json`);
+  if (!fs.existsSync(docPath)) {
+    return res.json({ text: '' });
+  }
+  res.json(readJsonStoreOrThrow(docPath));
+});
+
+app.post('/api/docs/:id', (req, res) => {
+  const docPath = path.join(DOCS_DIR, `${req.params.id}.json`);
+  const text = req.body.text || '';
+  fs.writeFileSync(docPath, JSON.stringify({ text, updatedAt: new Date().toISOString() }));
+  res.json({ success: true });
+});
+
 app.get('/api/scratchpad', (req, res) => {
   try {
     const spPath = path.join(DATA_DIR, 'scratchpad.txt');
