@@ -418,7 +418,7 @@ class DocBodyWidget extends HTMLElement {
            <div id="slash-menu-items" class="max-h-64 overflow-y-auto custom-scrollbar p-1"></div>
         </div>
         
-        <div id="format-toolbar" class="hidden absolute z-50 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-lg shadow-xl flex items-center p-1 gap-1 -translate-x-1/2 -translate-y-full mt-[-10px]">
+        <div id="format-toolbar" class="hidden absolute z-50 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-lg shadow-xl flex items-center p-1 gap-1 -translate-x-1/2">
           <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="bold"><i class="fa-solid fa-bold"></i></button>
           <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="italic"><i class="fa-solid fa-italic"></i></button>
           <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="strikethrough"><i class="fa-solid fa-strikethrough"></i></button>
@@ -435,12 +435,21 @@ class DocBodyWidget extends HTMLElement {
     
     textarea.addEventListener('keydown', (e) => {
       this.handleKeydown(e);
-      this.checkSelection(e);
     });
-    textarea.addEventListener('mouseup', (e) => this.checkSelection(e));
+    
     textarea.addEventListener('input', () => {
       this.handleInput();
-      this.checkSelection(null);
+    });
+    
+    // Use the hyper-reliable global selectionchange event
+    document.addEventListener('selectionchange', () => {
+      if (document.activeElement === textarea) {
+        this.checkSelection(null);
+      } else {
+        // If they clicked away from the textarea entirely, hide it
+        const toolbar = this.querySelector('#format-toolbar');
+        if (toolbar) toolbar.classList.add('hidden');
+      }
     });
     
     const toolbar = this.querySelector('#format-toolbar');
