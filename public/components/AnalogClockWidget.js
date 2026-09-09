@@ -34,7 +34,7 @@ class AnalogClockWidget extends HTMLElement {
     let accent = '#6366f1'; 
     
     if (theme === 'glass') {
-        bgClass = 'bg-white/5 dark:bg-black/20 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-lg';
+        bgClass = 'bg-dark-bg/60 backdrop-blur-xl border border-dark-border shadow-sm';
     } else if (theme === 'neon') {
         bgClass = `bg-${accentColor}-500/10 backdrop-blur-md border border-${accentColor}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accentColor}-500/30 text-${accentColor}-100`;
         accent = '#38bdf8';

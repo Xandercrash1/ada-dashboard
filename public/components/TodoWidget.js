@@ -176,7 +176,7 @@ class TodoWidget extends HTMLElement {
 
   render() {
     this.innerHTML = `
-      <div class="w-full h-full flex flex-col p-4 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 relative group overflow-hidden">
+      <div class="w-full h-full flex flex-col p-4 bg-dark-bg/60 backdrop-blur-xl rounded-2xl border border-dark-border relative group overflow-hidden">
         
         <!-- Header -->
         <div class="flex items-center justify-between mb-4 flex-shrink-0">

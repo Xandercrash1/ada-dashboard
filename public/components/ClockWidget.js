@@ -29,7 +29,7 @@ class ClockWidget extends HTMLElement {
     let styleBg = '';
     
     if (theme === 'glass') {
-        bgClass = 'bg-white/5 dark:bg-black/20 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-lg';
+        bgClass = 'bg-dark-bg/60 backdrop-blur-xl border border-dark-border shadow-sm';
     } else if (theme === 'neon') {
         bgClass = `bg-${accent}-500/10 backdrop-blur-md border border-${accent}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accent}-500/30 text-${accent}-100`;
     } else if (theme === 'gradient') {

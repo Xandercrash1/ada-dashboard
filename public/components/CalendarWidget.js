@@ -52,7 +52,7 @@ class AdaCalendar extends HTMLElement {
                    theme === 'solid' ? 'bg-dark-card border border-dark-border' :
                    theme === 'neon' ? `bg-dark-card border border-${accent}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accent}-500/20` :
                    theme === 'gradient' ? `bg-gradient-to-br from-${accent}-900/40 to-dark-card border border-${accent}-500/30` :
-                   `bg-dark-bg/60 backdrop-blur-xl border border-white/10`; // glass
+                   `bg-dark-bg/60 backdrop-blur-xl border border-dark-border shadow-sm`; // glass
 
     const TZ = 'America/New_York';
     const events = (this.agenda && this.agenda.events) || [];
