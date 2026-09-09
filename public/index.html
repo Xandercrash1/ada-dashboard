@@ -3875,10 +3875,12 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const res = await fetch(`/api/pages/${pageId}/content`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         homepageDoc = await res.json();
+        window.homepageDoc = homepageDoc;
         renderHomepage(); // draws it using homepageDoc
       } catch (err) {
         console.error(`Page ${pageId} failed to load`, err);
         homepageDoc = { widgets: [] };
+        window.homepageDoc = homepageDoc;
         renderHomepage();
       }
     }
@@ -3888,6 +3890,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const res = await fetch('/api/homepage');
         if (!res.ok) return;
         homepageDoc = await res.json();
+        window.homepageDoc = homepageDoc;
         renderHomepage();
       } catch (err) {
         console.error('Homepage document failed to load; hardcoded fallback stays.', err);
@@ -4244,7 +4247,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       await saveHomepageDoc();
     }
 
-    async function saveHomepageDoc() {
+    window.saveHomepageDoc = async function saveHomepageDoc() {
       if (!homepageDoc) return;
       if (currentCanvasPage === 'home') {
         try {
@@ -4456,6 +4459,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         });
         if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
         homepageDoc = await res.json();
+        window.homepageDoc = homepageDoc;
         renderHomepage();
         closeAnnouncementModal();
       } catch (err) {
