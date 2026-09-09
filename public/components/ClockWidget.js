@@ -1,5 +1,6 @@
 class ClockWidget extends HTMLElement {
   connectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     this.render();
     this.interval = setInterval(() => this.updateTime(), 1000);
   }
@@ -41,9 +42,9 @@ class ClockWidget extends HTMLElement {
 
     const font = this.getAttribute('font') || "'Courier New', monospace";
     this.innerHTML = `
-      <div class="${bgClass}" style="${styleBg} color: white; text-align: center; padding: 10px; border-radius: 5px; height: 100%; display: flex; flex-direction: column; justify-content: center;">
+      <div class="${bgClass} dark:text-white text-gray-900 rounded-2xl p-4 flex flex-col items-center justify-center h-full transition-all duration-300" style="${styleBg}">
           <div class="time" style="font-family:${font};font-size:2.4rem;font-weight:700;letter-spacing:3px;"></div>
-          <div class="date" style="font-size:0.85rem;color:rgba(255,255,255,0.8);margin-top:5px;font-family: 'Inter', sans-serif;"></div>
+          <div class="date dark:text-white/80 text-gray-500" style="font-size:0.85rem;margin-top:5px;font-family: 'Inter', sans-serif;"></div>
       </div>
     `;
     this.updateTime();
