@@ -6,12 +6,14 @@ class SysmonWidget extends HTMLElement {
   }
 
   connectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     this.render();
     this.fetchStats();
     this.pollInterval = setInterval(() => this.fetchStats(), 5000);
   }
 
   disconnectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     if (this.pollInterval) clearInterval(this.pollInterval);
   }
 

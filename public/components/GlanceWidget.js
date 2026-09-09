@@ -14,12 +14,14 @@ class AdaGlance extends HTMLElement {
   }
 
   connectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     this.render();
     this.fetchGlance();
     this._pollInterval = setInterval(() => this.fetchGlance(), 10000);
   }
 
   disconnectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     if (this._pollInterval) {
       clearInterval(this._pollInterval);
       this._pollInterval = null;

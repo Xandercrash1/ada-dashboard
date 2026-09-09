@@ -1,9 +1,11 @@
 class AnalogClockWidget extends HTMLElement {
   connectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     this.render();
     this.interval = setInterval(() => this.updateTime(), 1000);
   }
-  disconnectedCallback() { clearInterval(this.interval); }
+  disconnectedCallback() {
+    this.classList.add("block", "w-full", "h-full"); clearInterval(this.interval); }
   static get observedAttributes() { return ['theme']; }
   attributeChangedCallback() { this.render(); }
 

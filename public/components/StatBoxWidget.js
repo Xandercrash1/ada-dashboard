@@ -1,5 +1,6 @@
 class StatBoxWidget extends HTMLElement {
-  connectedCallback() { this.render(); }
+  connectedCallback() {
+    this.classList.add("block", "w-full", "h-full"); this.render(); }
   static get observedAttributes() { return ['stat', 'title', 'icon', 'accent']; }
   attributeChangedCallback() { this.render(); }
   

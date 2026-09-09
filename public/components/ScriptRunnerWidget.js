@@ -1,5 +1,6 @@
 class ScriptRunnerWidget extends HTMLElement {
-  connectedCallback() { this.render(); }
+  connectedCallback() {
+    this.classList.add("block", "w-full", "h-full"); this.render(); }
   static get observedAttributes() { return ['script-id', 'label', 'icon', 'accent']; }
   attributeChangedCallback() { this.render(); }
   

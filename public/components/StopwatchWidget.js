@@ -5,8 +5,10 @@ class StopwatchWidget extends HTMLElement {
     this.running = false;
     this.lastTime = 0;
   }
-  connectedCallback() { this.render(); }
-  disconnectedCallback() { clearInterval(this.interval); }
+  connectedCallback() {
+    this.classList.add("block", "w-full", "h-full"); this.render(); }
+  disconnectedCallback() {
+    this.classList.add("block", "w-full", "h-full"); clearInterval(this.interval); }
   
   toggle() {
     this.running = !this.running;

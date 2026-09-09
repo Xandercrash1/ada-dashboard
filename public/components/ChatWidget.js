@@ -59,11 +59,13 @@ function saveState(id, patch) {
 
 class ChatWidget extends HTMLElement {
   connectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     // innerHTML is rewritten by render(); snapshot nothing from children.
     this.render();
   }
 
   disconnectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     this.clearTimers();
   }
 

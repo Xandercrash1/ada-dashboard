@@ -5,12 +5,14 @@ class TimerWidget extends HTMLElement {
     this.running = false;
     this.lastTime = 0;
   }
-  connectedCallback() { 
+  connectedCallback() {
+    this.classList.add("block", "w-full", "h-full"); 
     this.remaining = (parseInt(this.getAttribute('minutes')) || 5) * 60 * 1000;
     this.initial = this.remaining;
     this.render(); 
   }
-  disconnectedCallback() { clearInterval(this.interval); }
+  disconnectedCallback() {
+    this.classList.add("block", "w-full", "h-full"); clearInterval(this.interval); }
   
   toggle() {
     this.running = !this.running;
