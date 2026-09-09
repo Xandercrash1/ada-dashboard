@@ -4346,9 +4346,10 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
            spanClass = sbColMap[w.cols || 2];
         }
 
+        const dragAttrs = (window.isEditingLayout && !isBody) ? `draggable="true" ondragstart="handleWidgetDragStart(event, '${w.id}')" ondragover="handleWidgetDragOver(event)" ondrop="handleWidgetDrop(event, '${w.id}')" ondragenter="handleWidgetDragEnter(event)" ondragleave="handleWidgetDragLeave(event)" ondragend="handleWidgetDragEnd(event)"` : '';
+        
         return `
-          <div id="${w.id}-container" class="relative w-full ${spanClass} transition-all duration-500 ease-in-out widget-container ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}
-               ${window.isEditingLayout ? `draggable="true" ondragstart="handleWidgetDragStart(event, '${w.id}')" ondragover="handleWidgetDragOver(event)" ondrop="handleWidgetDrop(event, '${w.id}')" ondragenter="handleWidgetDragEnter(event)" ondragleave="handleWidgetDragLeave(event)" ondragend="handleWidgetDragEnd(event)"` : ''}>
+          <div id="${w.id}-container" class="relative w-full ${spanClass} transition-all duration-500 ease-in-out widget-container ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''} ${dragAttrs}>
             <div class="widget-measurer block w-full relative ${heightClass}">
               ${w.html || ''}
               ${overlay}
