@@ -448,7 +448,7 @@ class DocBodyWidget extends HTMLElement {
     
     // Fallback global tracker for Safari/WebKit quirks
     document.addEventListener('selectionchange', () => {
-      if (document.activeElement === textarea) {
+      if (document.activeElement === textarea || document.activeElement === this || this.contains(document.activeElement)) {
         this.checkSelection(null);
       } else {
         const toolbar = this.querySelector('#format-toolbar');
