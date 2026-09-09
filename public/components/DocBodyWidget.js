@@ -6,6 +6,11 @@ class DocBodyWidget extends HTMLElement {
     
     this.widgetId = null;
     this.fadeTimer = null;
+    
+    this.slashActive = false;
+    this.slashQuery = "";
+    this.slashStartIndex = -1;
+    this.slashSelectedIndex = 0;
   }
 
   connectedCallback() {
@@ -72,9 +77,34 @@ class DocBodyWidget extends HTMLElement {
     }
   }
 
+  handleKeydown(e) {
+    if (!this.slashActive) return;
+    
+    const menu = this.querySelector('#slash-menu');
+    const items = menu.querySelectorAll('.slash-item');
+    if (!items.length) return;
+    
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      this.slashSelectedIndex = (this.slashSelectedIndex + 1) % items.length;
+      this.updateSlashSelection();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      this.slashSelectedIndex = (this.slashSelectedIndex - 1 + items.length) % items.length;
+      this.updateSlashSelection();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      items[this.slashSelectedIndex].click();
+    } else if (e.key === 'Escape') {
+      this.closeSlashMenu();
+    }
+  }
+
   handleInput() {
     clearTimeout(this.typingTimer);
     clearTimeout(this.fadeTimer);
+    
+    this.checkSlashCommand();
     
     const statusIcon = this.querySelector('#doc-status');
     if (statusIcon) {
@@ -85,6 +115,131 @@ class DocBodyWidget extends HTMLElement {
     this.adjustHeight();
     this.typingTimer = setTimeout(() => this.saveText(), 1000);
     
+  }
+
+  checkSlashCommand() {
+    const textarea = this.querySelector('textarea');
+    const val = textarea.value;
+    const pos = textarea.selectionStart;
+    
+    // Look backwards from cursor for a slash
+    const textBeforeCursor = val.substring(0, pos);
+    const match = textBeforeCursor.match(/(?:\s|^)\/([a-zA-Z0-9-]*)$/);
+    
+    if (match) {
+      this.slashActive = true;
+      this.slashQuery = match[1].toLowerCase();
+      this.slashStartIndex = pos - match[1].length - 1; // index of the '/'
+      this.openSlashMenu();
+    } else {
+      this.closeSlashMenu();
+    }
+  }
+
+  openSlashMenu() {
+    const menu = this.querySelector('#slash-menu');
+    const container = this.querySelector('#slash-menu-items');
+    
+    if (!window.homepageDoc || !window.homepageDoc.widgets) {
+      this.closeSlashMenu();
+      return;
+    }
+    
+    // Filter available widgets that are NOT the doc body itself
+    let available = window.homepageDoc.widgets.filter(w => w.id !== this.widgetId);
+    
+    if (this.slashQuery) {
+      available = available.filter(w => 
+        (w.title || '').toLowerCase().includes(this.slashQuery) || 
+        w.id.toLowerCase().includes(this.slashQuery) ||
+        (w.html || '').toLowerCase().includes(this.slashQuery)
+      );
+    }
+    
+    if (available.length === 0) {
+      this.closeSlashMenu();
+      return;
+    }
+    
+    container.innerHTML = available.map((w, i) => {
+      let icon = 'fa-puzzle-piece';
+      if (w.html && w.html.includes('clock')) icon = 'fa-clock';
+      if (w.html && w.html.includes('photo')) icon = 'fa-image';
+      if (w.html && w.html.includes('scratchpad')) icon = 'fa-pen-nib';
+      if (w.icon) icon = w.icon;
+      
+      const title = w.title || (w.html ? w.html.match(/<([a-zA-Z0-9-]+)/)[1] : w.id);
+      
+      return `
+        <div class="slash-item p-2 flex items-center gap-3 rounded-lg cursor-pointer hover:bg-indigo-500/10 text-gray-600 dark:text-gray-300 hover:text-indigo-500 transition-colors ${i === 0 ? 'bg-indigo-500/10 text-indigo-500' : ''}" data-id="${w.id}" data-index="${i}">
+          <div class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-black/20 rounded-md text-[10px]"><i class="fa-solid ${icon}"></i></div>
+          <div class="flex-1 flex flex-col">
+            <span class="text-xs font-bold leading-tight">${title}</span>
+            <span class="text-[9px] opacity-50 font-mono leading-tight">${w.id}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    this.slashSelectedIndex = 0;
+    
+    // Bind clicks
+    container.querySelectorAll('.slash-item').forEach(item => {
+      item.addEventListener('click', () => {
+        this.injectWidget(item.getAttribute('data-id'));
+      });
+      item.addEventListener('mouseenter', () => {
+        this.slashSelectedIndex = parseInt(item.getAttribute('data-index'));
+        this.updateSlashSelection();
+      });
+    });
+    
+    // Position the menu near the cursor (simplified positioning: bottom right of cursor generally)
+    const textarea = this.querySelector('textarea');
+    menu.classList.remove('hidden');
+    
+    // Fallback simple positioning if caret coords are hard: 
+    // Just float it below the top left, but visually it works.
+    // For a perfect Notion clone we'd use a mirror div, but this is a quick MVP.
+    menu.style.top = '40px';
+    menu.style.left = '20px';
+  }
+
+  updateSlashSelection() {
+    const items = this.querySelectorAll('.slash-item');
+    items.forEach((item, i) => {
+      if (i === this.slashSelectedIndex) {
+        item.classList.add('bg-indigo-500/10', 'text-indigo-500');
+        item.scrollIntoView({ block: 'nearest' });
+      } else {
+        item.classList.remove('bg-indigo-500/10', 'text-indigo-500');
+      }
+    });
+  }
+
+  closeSlashMenu() {
+    this.slashActive = false;
+    const menu = this.querySelector('#slash-menu');
+    if (menu) menu.classList.add('hidden');
+  }
+
+  injectWidget(widgetId) {
+    const textarea = this.querySelector('textarea');
+    const val = textarea.value;
+    
+    const before = val.substring(0, this.slashStartIndex);
+    const after = val.substring(textarea.selectionStart);
+    
+    const shortcode = `[widget: ${widgetId}]`;
+    textarea.value = before + shortcode + ' ' + after;
+    
+    this.closeSlashMenu();
+    this.saveText();
+    
+    // Move cursor after the inserted widget
+    const newPos = this.slashStartIndex + shortcode.length + 1;
+    textarea.setSelectionRange(newPos, newPos);
+    textarea.focus();
   }
 
   showPreview() {
@@ -173,12 +328,18 @@ class DocBodyWidget extends HTMLElement {
         <textarea class="w-full h-full min-h-[300px] bg-transparent border-none resize-none focus:outline-none text-gray-800 dark:text-gray-200 text-base placeholder-gray-400 dark:placeholder-gray-600 custom-scrollbar leading-relaxed" placeholder="Type '/' for commands, or start writing your document here..."></textarea>
         
         <div data-md-preview class="hidden w-full h-full min-h-[300px] cursor-text prose dark:prose-invert max-w-none prose-p:leading-relaxed prose-headings:mt-8 prose-headings:mb-4 marker:text-indigo-400 prose-a:text-indigo-400" title="Click to edit"></div>
+        
+        <div id="slash-menu" class="hidden absolute z-50 w-64 bg-white dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-xl shadow-2xl overflow-hidden flex flex-col">
+           <div class="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-dark-card border-b border-gray-200 dark:border-dark-border">Embed Widget</div>
+           <div id="slash-menu-items" class="max-h-64 overflow-y-auto custom-scrollbar p-1"></div>
+        </div>
       </div>
     `;
 
     const textarea = this.querySelector('textarea');
     const preview = this.querySelector('[data-md-preview]');
     
+    textarea.addEventListener('keydown', (e) => this.handleKeydown(e));
     textarea.addEventListener('input', () => this.handleInput());
     textarea.addEventListener('blur', () => {
       if (window.isEditingLayout) return;
