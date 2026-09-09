@@ -3997,6 +3997,12 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     };
     
     switch(type) {
+      case 'todo':
+        newWidget.html = '<ada-todo></ada-todo>';
+        newWidget.title = 'To-Do List';
+        newWidget.icon = 'fa-list-check';
+        newWidget.rows = 3;
+        break;
       case 'doc-body':
         newWidget.html = `<ada-doc-body widget-id="${newWidget.id}"></ada-doc-body>`;
         newWidget.cols = 4;
