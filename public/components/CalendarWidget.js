@@ -8,6 +8,7 @@ class AdaCalendar extends HTMLElement {
   }
 
   connectedCallback() {
+    this.classList.add("block", "w-full", "h-full");
     this.render();
     this.fetchEvents();
     this._poll = setInterval(() => this.fetchEvents(), 5 * 60 * 1000);
@@ -105,9 +106,9 @@ class AdaCalendar extends HTMLElement {
           html += `
             <div class="flex items-start gap-2.5 p-1.5 rounded-lg hover:bg-white/5 transition-colors" title="${this.esc(ev.calendar)}">
               <span class="w-1.5 h-1.5 rounded-full ${dot} mt-1.5 flex-shrink-0"></span>
-              <div class="min-w-[4.2rem] text-[11px] font-bold text-white pt-0.5">${time}</div>
+              <div class="min-w-[4.2rem] text-[11px] font-bold dark:text-white text-gray-900 pt-0.5">${time}</div>
               <div class="flex-1 min-w-0">
-                <div class="text-xs font-semibold text-gray-200 truncate">${this.esc(ev.title)}</div>
+                <div class="text-xs font-semibold dark:text-gray-200 text-gray-800 truncate">${this.esc(ev.title)}</div>
                 ${ev.location ? `<div class="text-[10px] text-gray-500 truncate mt-0.5"><i class="fa-solid fa-location-dot mr-1"></i>${this.esc(ev.location)}</div>` : ''}
               </div>
             </div>`;
