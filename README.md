@@ -60,3 +60,6 @@ The Ada Operations Hub is a production Node.js + Express web dashboard running o
 cd /Users/alex/Documents/Ada/Antigravity/dashboard
 ./deploy.sh
 ```
+
+## Developer Log
+See `DEV_NOTES.md` for the latest session handovers, current bugs, and upcoming features.
