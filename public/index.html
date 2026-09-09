@@ -232,7 +232,7 @@
                   sm:col-span-1 sm:col-span-2 sm:col-span-3 sm:col-span-4 sm:col-span-5 sm:col-span-6
                   lg:col-span-1 lg:col-span-2 lg:col-span-3 lg:col-span-4 lg:col-span-5 lg:col-span-6"></div>
                   
-      <div id="home-widgets" class="hidden w-full grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[10px]"></div>
+      <div id="home-widgets" class="hidden w-full"></div>
 
       <!-- Hidden state store for live stats so Designer widgets can safely mirror them -->
       <div id="home-stats-state" style="display:none;">
@@ -4291,15 +4291,21 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       // the authenticated PUT /api/homepage or the server filesystem, i.e. from
       // Alex or his agents — the same trust level as the agents' bash access.
       const grid = document.getElementById('home-widgets');
-      const widgets = (homepageDoc.widgets || []).filter(w => w && !w.hidden);
+      let widgets = (homepageDoc.widgets || []).filter(w => w && !w.hidden);
       grid.classList.toggle('hidden', widgets.length === 0 && !window.isEditingLayout);
-      grid.innerHTML = widgets.map(w => {
+      
+      const bodyWidget = widgets.find(w => w.html && w.html.includes('ada-doc-body'));
+      
+      // Helper function to render a widget card
+      const renderWidgetCard = (w) => {
         const accent = w.accent || 'indigo';
         const linkAttr = w.link ? (w.link.tab
           ? `onclick="switchTab('${escapeHtml(w.link.tab)}')"`
           : `onclick="window.open('${escapeHtml(w.link.href || '')}', '_blank')"`) : '';
 
-        const overlay = window.isEditingLayout ? `
+        const isBody = w.html && w.html.includes('ada-doc-body');
+        // Do not render the drag shield for the body widget so it can natively accept dropped text!
+        const overlay = (window.isEditingLayout && !isBody) ? `
           <div class="absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center gap-3 z-20 backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
              <button onclick="editWidget('${w.id}')" class="px-4 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-palette"></i> Style</button>
              <button onclick="duplicateWidget('${w.id}')" class="px-4 py-1.5 bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-clone"></i> Clone</button>
@@ -4322,15 +4328,6 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             6: 'col-span-2 sm:col-span-4 lg:col-span-6'
           };
           spanClass = colMap[w.cols] || 'col-span-2';
-        } else if (w.size) { // legacy fallback
-          if (w.size === '1x1') spanClass = "col-span-1 sm:col-span-2 lg:col-span-2";
-          else if (w.size === '2x1') spanClass = "col-span-2 sm:col-span-4 lg:col-span-4";
-          else if (w.size === '2x2') spanClass = "col-span-2 sm:col-span-4 lg:col-span-4";
-          else if (w.size === 'full') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
-        } else {
-          if (w.id === 'photo-frame') spanClass = "col-span-2 sm:col-span-4 lg:col-span-4";
-          else if (w.id === 'stat-todo' || w.id === 'stat-jobs') spanClass = "col-span-1 sm:col-span-2 lg:col-span-2";
-          else if (w.id === 'home-glance-banner') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
         }
 
         // To prevent widgets from collapsing in Masonry, apply their configured row height.
@@ -4342,8 +4339,18 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
            heightClass = heights[rows] || 'h-[120px]';
         }
 
+        // Special handling if it's the doc body inside the split layout (no fixed cols)
+        if (bodyWidget && w.id === bodyWidget.id) {
+           spanClass = "w-full";
+        } else if (bodyWidget) {
+           // If we are in sidebar mode, override cols to fit the sidebar width!
+           // Sidebar is narrow, so widgets should generally be 1 or 2 cols of the sidebar grid
+           const sbColMap = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-2', 4: 'col-span-2', 5: 'col-span-2', 6: 'col-span-2' };
+           spanClass = sbColMap[w.cols || 2];
+        }
+
         return `
-          <div class="relative w-full ${spanClass} transition-all duration-500 ease-in-out widget-container ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}
+          <div id="${w.id}-container" class="relative w-full ${spanClass} transition-all duration-500 ease-in-out widget-container ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}
                ${window.isEditingLayout ? `draggable="true" ondragstart="handleWidgetDragStart(event, '${w.id}')" ondragover="handleWidgetDragOver(event)" ondrop="handleWidgetDrop(event, '${w.id}')" ondragenter="handleWidgetDragEnter(event)" ondragleave="handleWidgetDragLeave(event)" ondragend="handleWidgetDragEnd(event)"` : ''}>
             <div class="widget-measurer block w-full relative ${heightClass}">
               ${w.html || ''}
@@ -4351,660 +4358,42 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             </div>
             ${w.link && w.link.label && !window.isEditingLayout ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
           </div>`;
-      }).join('');
-      
+      };
+
       if (window.isEditingLayout) {
-        const addWidgetCard = `
-          <div class="col-span-1 sm:col-span-2 lg:col-span-2 h-[120px] rounded-2xl border-2 border-dashed border-dark-border hover:border-indigo-500/50 hover:bg-indigo-500/5 flex flex-col items-center justify-center cursor-pointer transition-colors text-gray-500 hover:text-indigo-400" onclick="openWidgetLibrary()">
+        const addWidgetCard = {
+          id: 'add-widget-btn',
+          html: `
+          <div class="w-full h-[120px] rounded-2xl border-2 border-dashed border-dark-border hover:border-indigo-500/50 hover:bg-indigo-500/5 flex flex-col items-center justify-center cursor-pointer transition-colors text-gray-500 hover:text-indigo-400" onclick="openWidgetLibrary()">
             <i class="fa-solid fa-plus text-2xl mb-2"></i>
             <span class="text-xs font-bold uppercase tracking-wider">Add Widget</span>
+          </div>`,
+          cols: 2,
+          rows: 1
+        };
+        widgets.push(addWidgetCard);
+      }
+
+      if (bodyWidget) {
+        // Document Layout View
+        const otherWidgets = widgets.filter(w => w.id !== bodyWidget.id);
+        grid.innerHTML = `
+          <div class="flex flex-col lg:flex-row gap-6 w-full max-w-7xl mx-auto">
+            <div class="flex-1 w-full lg:w-3/4 bg-white dark:bg-dark-card rounded-3xl shadow-xl min-h-[60vh] border border-gray-200 dark:border-dark-border overflow-hidden">
+               ${renderWidgetCard(bodyWidget)}
+            </div>
+            <div class="w-full lg:w-1/4 flex flex-col">
+               <div class="grid grid-cols-2 gap-4 grid-flow-row-dense auto-rows-auto">
+                 ${otherWidgets.map(renderWidgetCard).join('')}
+               </div>
+            </div>
           </div>
         `;
-        grid.innerHTML += addWidgetCard;
-      }
-      
-      // Execute any scripts the Designer injected (since innerHTML ignores them by default)
-      grid.querySelectorAll('script').forEach(oldScript => {
-        const newScript = document.createElement('script');
-        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-        newScript.appendChild(document.createTextNode(oldScript.innerHTML));
-        oldScript.parentNode.replaceChild(newScript, oldScript);
-      });
-      
-      // Let ResizeObserver trigger masonry-style layout for squishy widgets
-      if (window.widgetResizeObserver) window.widgetResizeObserver.disconnect();
-      window.widgetResizeObserver = new ResizeObserver((entries) => {
-         for (let entry of entries) {
-           const measurer = entry.target;
-           const container = measurer.closest('.widget-container');
-           if (!container) continue;
-           const height = measurer.getBoundingClientRect().height;
-           const span = Math.ceil((height + 16) / 26); // 10px row + 16px gap
-           container.style.gridRowEnd = `span ${span}`;
-         }
-      });
-      grid.querySelectorAll('.widget-measurer').forEach(w => window.widgetResizeObserver.observe(w));
-      
-      syncHomeStatMirrors();
-    }
-
-    // Widgets can embed <span data-home-stat="todo|jobs|cpu|cpu_5m|cpu_15m|cpu_cores|bugs|ram|ram_percent|ram_total|disk_used|disk_percent|disk_free|uptime"></span> to
-    // show live values. We mirror from the built-in stat spans (which keep
-    // updating even when the stats section is hidden) instead of hooking every
-    // update site — one dumb copy loop beats four fragile integration points.
-    function syncHomeStatMirrors() {
-      document.querySelectorAll('[data-home-stat]').forEach(el => {
-        const src = document.getElementById('home-stat-' + el.getAttribute('data-home-stat'));
-        if (src && el.textContent !== src.textContent) el.textContent = src.textContent;
-      });
-    }
-    setInterval(syncHomeStatMirrors, 5000);
-
-    function openAnnouncementModal() {
-      const a = (homepageDoc && homepageDoc.announcement) || {};
-      document.getElementById('announcement-title-input').value = a.title || '';
-      document.getElementById('announcement-text-input').value = a.text || '';
-      document.getElementById('announcement-visible-input').checked = a.visible !== false;
-      document.getElementById('announcement-modal-error').classList.add('hidden');
-      document.getElementById('announcement-modal').classList.remove('hidden');
-    }
-
-    function closeAnnouncementModal() {
-      document.getElementById('announcement-modal').classList.add('hidden');
-    }
-
-    async function saveAnnouncement(e) {
-      e.preventDefault();
-      const errEl = document.getElementById('announcement-modal-error');
-      try {
-        const res = await fetch('/api/homepage', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            announcement: {
-              title: document.getElementById('announcement-title-input').value.trim(),
-              text: document.getElementById('announcement-text-input').value.trim(),
-              visible: document.getElementById('announcement-visible-input').checked
-            },
-            updatedBy: 'Alex (dashboard)'
-          })
-        });
-        if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
-        homepageDoc = await res.json();
-        renderHomepage();
-        closeAnnouncementModal();
-      } catch (err) {
-        errEl.textContent = err.message || 'Save failed.';
-        errEl.classList.remove('hidden');
-      }
-    }
-
-    // ===================== DESIGNER BUBBLE ====================================
-    // The wand button opens a page-anchored chat bubble driving a dedicated
-    // 'designer'-role agent session (containerized server-side to the homepage
-    // live document; defaults to Antigravity Flash, switchable). The session is
-    // a normal agent session, so the conversation also lives in Server → Agents.
-    // The session id is remembered per page in localStorage so reopening the
-    // bubble resumes the same conversation.
-    // Pages with a designer-editable live document. Adding a page here (plus a
-    // server-side PAGE_DOCS entry and a renderer for its document) brings the
-    // Designer FAB and a fresh per-page rolling conversation to that page.
-    const DESIGNER_PAGES = { home: { label: 'Home', title: 'Homepage Designer' } };
-    let designerCurrentTab = 'home';   // kept current by the switchTab hook
-    let designerBubblePage = null;     // page the OPEN bubble is bound to
-    let designerSessionId = null;      // session backing the open bubble
-    let designerSession = null;
-    let designerBusy = false;
-
-    function designerStorageKey(page) { return 'ada_designer_session_' + page; }
-
-    // Called from switchTab. The Designer is page-bound: changing pages closes
-    // the bubble (each page's conversation survives in its own session and
-    // resumes when the Designer button is pressed on that page again). The
-    // FAB is gone (fb-1788202033208) — the entry point is now the edit-mode
-    // Designer button inside the Home view, which hides with its tab.
-    function onDesignerTabSwitch(tab) {
-      designerCurrentTab = tab;
-      closeDesignerBubble();
-    }
-
-    async function openPageDesigner() {
-      const page = designerCurrentTab;
-      const isCustomPage = customPages.some(p => p.id === page);
-      if (page !== 'home' && !isCustomPage) return;
-      const title = isCustomPage ? (customPages.find(p => p.id === page).title + ' Designer') : 'Homepage Designer';
-      designerBubblePage = page;
-      designerSessionId = null;
-      try { designerSessionId = localStorage.getItem(designerStorageKey(page)); } catch (e) {}
-      
-      // Optimistically open the bubble immediately if we already know the ID
-      if (designerSessionId && window.bubbleManager) {
-        window.bubbleManager.forceBubble(designerSessionId);
-      }
-      
-      try {
-        await ensureDesignerSession(page);
-        // If it was newly created (or re-created after stale), open it now
-        if (designerSessionId && window.bubbleManager) {
-          window.bubbleManager.forceBubble(designerSessionId);
-        }
-      } catch (err) {
-        console.error('Could not start the Designer: ' + err.message);
-      }
-    }
-
-    // The banner wand predates the FAB and stays as a Home-page shortcut.
-    function openHomepageDesigner() { openPageDesigner(); }
-
-    function closeDesignerBubble() {
-      if(window.bubbleManager) window.bubbleManager.closeBubble(designerSessionId);
-    }
-
-    async function ensureDesignerSession(page) {
-      page = page || designerBubblePage || 'home';
-      if (designerSessionId) {
-        const r = await fetch(`/api/agent/sessions/${designerSessionId}`);
-        if (r.ok) { designerSession = await r.json(); return; }
-        designerSessionId = null; // stale — e.g. deleted from the Agents tab
-      }
-      const isCustomPage = customPages.some(p => p.id === page);
-      const title = isCustomPage ? (customPages.find(p => p.id === page).title + ' Designer') : 'Homepage Designer';
-      
-      const res = await fetch('/api/agent/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // `page` binds the session server-side: walls + role prompt follow it.
-        body: JSON.stringify({ name: title, role: 'designer', page })
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      designerSession = await res.json();
-      designerSessionId = designerSession.id;
-      try { localStorage.setItem(designerStorageKey(page), designerSessionId); } catch (e) {}
-      loadAgentSessions(); // surface it in the Agents tab list right away
-    }
-
-    function populateDesignerModelSelect() {
-      const sel = document.getElementById('designer-model-select');
-      sel.innerHTML = modelRegistry.filter(m => !m.unavailable).map(m =>
-        `<option value="${escapeHtml(m.id)}" ${designerSession && designerSession.model === m.id ? 'selected' : ''}>${escapeHtml(m.label)}</option>`
-      ).join('');
-    }
-
-    async function changeDesignerModel(modelId) {
-      if (!designerSessionId) return;
-      const res = await fetch(`/api/agent/sessions/${designerSessionId}/model`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelId })
-      });
-      if (res.ok) {
-        designerSession = await res.json();
-        renderDesignerNotice('Model switched to ' + getModelInfo(modelId).label + '. Still containerized to this page.');
       } else {
-        renderDesignerNotice('Model switch failed.');
-        populateDesignerModelSelect(); // snap the select back to reality
-      }
-    }
-
-    function renderDesignerMessages() {
-      const box = document.getElementById('designer-bubble-messages'); if(!box) return;
-      const msgs = (designerSession && designerSession.messages) || [];
-      box.innerHTML = msgs.map(m => m.role === 'user'
-        ? `<div class="flex justify-end"><div class="max-w-[85%] bg-indigo-600/80 text-white rounded-xl rounded-br-sm px-3 py-2 whitespace-pre-wrap break-words">${escapeHtml(m.text)}</div></div>`
-        : `<div class="flex"><div class="max-w-[85%] bg-dark-bg border border-dark-border text-gray-800 dark:text-gray-200 rounded-xl rounded-bl-sm px-3 py-2 break-words prose prose-sm dark:prose-invert prose-p:leading-snug prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-a:text-indigo-500 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600">${marked.parse(m.text)}</div></div>`
-      ).join('');
-      box.scrollTop = box.scrollHeight;
-    }
-
-    function renderDesignerNotice(text) {
-      const box = document.getElementById('designer-bubble-messages'); if(!box) return;
-      const div = document.createElement('div');
-      div.className = 'text-center text-[10px] text-gray-500 py-1';
-      div.textContent = text;
-      box.appendChild(div);
-      box.scrollTop = box.scrollHeight;
-    }
-
-    function prefillDesignerInput(text) {
-      const inp = document.getElementById('designer-bubble-input'); if(!inp) return;
-      inp.value = text;
-      inp.focus();
-    }
-
-    function setDesignerBusy(busy, statusText) {
-      designerBusy = busy;
-      if (typeof updateAgentTabBadge === "function") updateAgentTabBadge();
-      if(document.getElementById('designer-bubble-send')) document.getElementById('designer-bubble-send').disabled = busy;
-      document.getElementById('designer-bubble-status').classList.toggle('hidden', !busy);
-      if (statusText) document.getElementById('designer-bubble-status-text').textContent = statusText;
-    }
-
-    function submitDesignerForm(e) {
-      e.preventDefault();
-      const inp = document.getElementById('designer-bubble-input'); if(!inp) return;
-      const text = inp.value.trim();
-      if (!text) return;
-      inp.value = '';
-      sendDesignerMessage(text);
-    }
-
-    async function sendDesignerMessage(text) {
-      if (designerBusy) {
-        renderDesignerNotice('The Designer is still working — one request at a time.');
-        return;
-      }
-      try {
-        await ensureDesignerSession();
-      } catch (err) {
-        renderDesignerNotice('Could not start the Designer: ' + err.message);
-        return;
-      }
-      // Optimistic echo — the server persists the user message on POST anyway.
-      designerSession.messages = designerSession.messages || [];
-      designerSession.messages.push({ role: 'user', text, timestamp: new Date().toISOString() });
-      renderDesignerMessages();
-      setDesignerBusy(true, 'Designing…');
-      try {
-        const res = await fetch(`/api/agent/sessions/${designerSessionId}/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: text })
-        });
-        const data = await res.json();
-        // 409 = a turn is already running server-side; attach to it.
-        if (res.status === 409 && data.jobId) return pollDesignerJob(data.jobId);
-        if (!res.ok || !data.jobId) throw new Error(data.error || ('HTTP ' + res.status));
-        pollDesignerJob(data.jobId);
-      } catch (err) {
-        setDesignerBusy(false);
-        renderDesignerNotice('Send failed: ' + err.message);
-      }
-    }
-
-    function pollDesignerJob(jobId) {
-      setDesignerBusy(true, 'Designing…');
-      const poll = async () => {
-        try {
-          const res = await fetch(`/api/agent/jobs/${jobId}`);
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          const job = await res.json();
-          if (job.status === 'running') {
-            const last = job.progress && job.progress.length ? job.progress[job.progress.length - 1] : null;
-            const p = jobPolls[designerSessionId];
-            if (p && p.cancelling) {
-               document.getElementById('designer-bubble-status-text').textContent = 'Cancelling…';
-            } else if (last) {
-               document.getElementById('designer-bubble-status-text').textContent = String(last.text || last).slice(0, 90);
-            }
-            setTimeout(poll, 1500);
-            return;
-          }
-          // Terminal — pull the persisted conversation and repaint the page so
-          // the designer's edits show up live, no manual refresh needed.
-          const sres = await fetch(`/api/agent/sessions/${designerSessionId}`);
-          if (sres.ok) designerSession = await sres.json();
-          renderDesignerMessages();
-          setDesignerBusy(false);
-          loadPage(currentCanvasPage);
-        } catch (err) {
-          setDesignerBusy(false);
-          renderDesignerNotice('Lost contact with the design job: ' + err.message);
-        }
-      };
-      poll();
-    }
-
-
-    async function cancelDesignerJob() {
-      if (!designerSessionId) return;
-      const poll = jobPolls[designerSessionId];
-      if (!poll || !poll.jobId) return;
-      
-      poll.cancelling = true;
-      const btn = document.getElementById('designer-bubble-cancel-btn');
-      if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Cancelling…';
-      if (document.getElementById('designer-bubble-spinner')) document.getElementById('designer-bubble-spinner').className = 'fa-solid fa-hourglass-half';
-      
-      try {
-        await fetch(`/api/agent/jobs/${poll.jobId}/cancel`, { method: 'POST' });
-      } catch (err) {
-        console.error('Failed to cancel designer job', err);
-      }
-    }
-
-    async function attachToRunningDesignerJob() {
-      if (!designerSessionId) return;
-      try {
-        const res = await fetch(`/api/agent/sessions/${designerSessionId}/job`);
-        if (!res.ok) return; // 404 = no job, normal
-        const job = await res.json();
-        if (job.status === 'running') pollDesignerJob(job.id);
-      } catch (e) { /* bubble stays usable */ }
-    }
-
-    async function openDesignerInAgentsTab() {
-      closeDesignerBubble();
-      switchTab('server');
-      switchServerSubTab('agents');
-      if (designerSessionId) {
-        await loadAgentSessions();
-        selectSession(designerSessionId);
-      }
-    }
-
-    loadPage(currentCanvasPage);
-    loadModelRegistry().then(loadAgentSessions);
-    loadCustomPages();
-    loadScheduled();
-    loadFeedbackTypes().then(loadFeedback);
-    setInterval(refreshTelemetry, 5000);
-    // Auto-refresh the queue while the Scheduler sub-tab is on screen.
-    setInterval(() => {
-      const panel = document.getElementById('server-sub-scheduled');
-      if (panel && !panel.classList.contains('hidden')) loadScheduled();
-    }, 15000);
-
-    // --- Staging health banner (added 2026-08-26) ----------------------------
-    // Shows ONLY when staging is broken. A card that is always present becomes
-    // wallpaper; one that appears only on failure stays meaningful. The whole
-    // point is that a dead staging tree — which silently invalidates any work
-    // an agent claims to have staged — can no longer go unnoticed.
-    async function refreshStagingHealth() {
-      const card = document.getElementById('staging-health-card');
-      if (!card) return;
-      try {
-        const res = await fetch('/api/staging/status');
-        if (!res.ok) return;
-        const s = await res.json();
-
-        if (s.healthy) { card.classList.add('hidden'); card.innerHTML = ''; return; }
-
-        card.classList.remove('hidden');
-        card.innerHTML = `
-          <div class="bg-rose-950/40 border border-rose-800 rounded-2xl p-4 shadow-sm space-y-2">
-            <div class="flex items-center justify-between gap-3">
-              <span class="flex items-center gap-2 text-rose-300 font-bold text-sm">
-                <i class="fa-solid fa-triangle-exclamation"></i> Staging is DOWN
-              </span>
-              <span class="font-mono text-[10px] text-rose-400/80">
-                HTTP ${escapeHtml(s.httpCode)} · pm2 ${escapeHtml(String(s.pm2Status))} · ${escapeHtml(String(s.restarts))} restarts
-              </span>
-            </div>
-            <div class="text-[11px] text-rose-200 leading-relaxed">
-              Any work an agent reports as &ldquo;staged&rdquo; right now is <strong>untested</strong> — staging is not running it.
-              Recover with <code class="bg-black/50 px-1.5 py-0.5 rounded font-mono">bash ~/ops/stage-check.sh</code>
-            </div>
-            ${s.lastError ? `
-            <details class="bg-black/60 border border-rose-900 rounded-xl overflow-hidden">
-              <summary class="cursor-pointer px-3 py-1.5 text-rose-300 text-[11px] font-semibold select-none hover:bg-rose-950/40">
-                Last error output
-              </summary>
-              <div class="p-3 border-t border-rose-900 text-gray-300 bg-black text-[10px] font-mono whitespace-pre-wrap max-h-48 overflow-y-auto custom-scrollbar">${escapeHtml(s.lastError)}</div>
-            </details>` : ''}
+        // Classic Grid View
+        grid.innerHTML = `
+          <div class="w-full grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[10px]">
+             ${widgets.map(renderWidgetCard).join('')}
           </div>
         `;
-      } catch (err) {
-        // Never let a monitoring widget take the page down with it.
-        console.error('Staging health check failed', err);
       }
-    }
-
-    refreshStagingHealth();
-    setInterval(refreshStagingHealth, 20000);
-
-    window.addEventListener('DOMContentLoaded', () => {
-      try {
-        const activeTab = localStorage.getItem('ada_activeTab') || 'home';
-        switchTab(activeTab);
-      } catch (e) {
-        // Fallback to default state if localStorage or DOM throws
-      }
-    });
-  </script>
-
-  <!-- TRIP PLANNER MODAL (SHELL) -->
-  <div id="trip-planner-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
-    <div class="bg-dark-bg/60 backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-2xl p-6 space-y-4 shadow-2xl relative overflow-hidden">
-      <!-- Construction Tape Banner -->
-      
-      
-      <div class="flex items-center justify-between border-b border-dark-border pb-3 pt-2">
-        <h3 class="text-lg font-bold text-white flex items-center gap-2">
-          <i class="fa-solid fa-plane-departure text-indigo-400"></i> Trip Planner Hub
-        </h3>
-        <button onclick="document.getElementById('trip-planner-modal').classList.add('hidden')" class="text-gray-400 hover:text-white text-lg">&times;</button>
-      </div>
-
-      <div class="py-12 flex flex-col items-center justify-center text-center space-y-3">
-        <div class="w-16 h-16 rounded-2xl bg-dark-bg border border-dark-border flex items-center justify-center mb-2">
-          <i class="fa-solid fa-person-digging text-3xl text-gray-500"></i>
-        </div>
-        <h4 class="text-lg font-bold text-white">Under Construction</h4>
-        <p class="text-sm text-gray-400 max-w-sm">The frontend shell is ready. Assign a Dashboard Agent to build the backend JSON store and API wiring when you are ready to pivot to this project!</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- ANNOUNCEMENT EDIT MODAL — writes the announcement block of the
-       homepage live document via PUT /api/homepage (fb-1787801162107) -->
-  <div id="announcement-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
-    <div class="bg-dark-bg/60 backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
-      <div class="flex items-center justify-between border-b border-dark-border pb-3">
-        <h3 class="text-base font-bold text-white flex items-center gap-2">
-          <i class="fa-solid fa-bullhorn text-indigo-400"></i> Edit Announcement
-        </h3>
-        <button onclick="closeAnnouncementModal()" class="text-gray-400 hover:text-white text-lg">&times;</button>
-      </div>
-      <form id="announcement-form" onsubmit="saveAnnouncement(event)" class="space-y-3">
-        <div>
-          <label class="block text-xs font-semibold text-gray-400 mb-1">Title</label>
-          <input type="text" id="announcement-title-input" maxlength="120" required class="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors" autocomplete="off">
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-gray-400 mb-1">Message</label>
-          <textarea id="announcement-text-input" rows="4" maxlength="2000" required class="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors custom-scrollbar" autocomplete="off"></textarea>
-        </div>
-        <label class="flex items-center gap-2 text-xs text-gray-300 select-none">
-          <input type="checkbox" id="announcement-visible-input" class="rounded text-indigo-600 focus:ring-0 bg-dark-card border-gray-600" checked autocomplete="off">
-          Show the banner on the home page
-        </label>
-        <p id="announcement-modal-error" class="hidden text-[11px] text-rose-400"></p>
-        <div class="flex items-center justify-end gap-2 pt-2">
-          <button type="button" onclick="closeAnnouncementModal()" class="px-4 py-2 rounded-xl text-gray-400 hover:text-white text-xs font-semibold transition-colors">Cancel</button>
-          <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all shadow-md shadow-indigo-600/20">Save</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- THEME CONTROLLER — cycle dark → light → auto, live-follow OS in auto -->
-  <script>
-    (function () {
-      var mql = matchMedia('(prefers-color-scheme: dark)');
-      var ORDER = ['dark', 'light', 'auto'];
-      var META = {
-        dark:  { icon: 'fa-moon',               label: 'Dark'  },
-        light: { icon: 'fa-sun',                label: 'Light' },
-        auto:  { icon: 'fa-circle-half-stroke', label: 'Auto'  }
-      };
-      function getMode() { try { return localStorage.getItem('ada_theme') || 'auto'; } catch (e) { return 'auto'; } }
-      function render() {
-        var meta = META[getMode()] || META.auto;
-        document.querySelectorAll('.theme-cycle').forEach(function (b) {
-          b.title = 'Theme: ' + meta.label + ' — click to change';
-          var ic = b.querySelector('i'); if (ic) ic.className = 'fa-solid ' + meta.icon;
-          var lb = b.querySelector('.theme-cycle-label'); if (lb) lb.textContent = meta.label;
-        });
-      }
-      function apply() {
-        window.__adaApplyTheme(window.__adaResolveTheme(getMode()));
-        render();
-      }
-      window.cycleTheme = function () {
-        var next = ORDER[(ORDER.indexOf(getMode()) + 1) % ORDER.length];
-        try { localStorage.setItem('ada_theme', next); } catch (e) {}
-        apply();
-      };
-      mql.addEventListener('change', function () { if (getMode() === 'auto') apply(); });
-      apply();
-    })();
-  </script>
-
-
-  <!-- Widget Edit Modal -->
-  <div id="widget-edit-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-      <div class="p-4 border-b border-dark-border flex justify-between items-center bg-dark-card flex-shrink-0">
-        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-code text-indigo-400 mr-2"></i>Widget Inspector</h3>
-        <button onclick="closeWidgetEditModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      
-      <div class="p-5 flex-1 overflow-y-auto custom-scrollbar flex flex-col md:flex-row gap-6">
-        <input type="hidden" id="edit-widget-id">
-        <input type="hidden" id="edit-widget-accent">
-        
-        <!-- LEFT COLUMN: Settings -->
-        <div class="w-full md:w-1/3 space-y-4">
-          <div>
-            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Title</label>
-            <input type="text" id="edit-widget-title" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="Widget Title">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Icon (FontAwesome)</label>
-            <div class="flex gap-2">
-              <div id="edit-widget-icon-preview" class="w-10 h-10 flex items-center justify-center bg-black/20 border border-white/5 rounded-lg text-gray-300">
-                <i class="fa-solid fa-question"></i>
-              </div>
-              <input type="text" id="edit-widget-icon" oninput="document.getElementById('edit-widget-icon-preview').innerHTML = `<i class='fa-solid ${this.value}'></i>`" class="flex-1 bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="fa-clock">
-            </div>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Size</label>
-            <select id="edit-widget-size" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-              <option value="auto">Auto (Smart Sizing)</option>
-              <option value="1x1">1x1 (Small Square)</option>
-              <option value="2x1">2x1 (Wide Pill)</option>
-              <option value="2x2">2x2 (Large Square)</option>
-              <option value="full">Full Width</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Theme</label>
-            <select id="edit-widget-theme" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-              <option value="transparent">Transparent (Clean)</option>
-              <option value="glass">Glass (Frosted)</option>
-              <option value="solid">Solid (Card)</option>
-              <option value="neon">Neon (Glowing border)</option>
-              <option value="gradient">Gradient (Vibrant fill)</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Link Tab Target</label>
-            <input type="text" id="edit-widget-link-tab" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="e.g. todo, roadmap">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Link HREF</label>
-            <input type="text" id="edit-widget-link-href" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="e.g. https://google.com">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Accent Color</label>
-            <div class="grid grid-cols-3 gap-2">
-              <button onclick="selectEditAccent('indigo')" id="accent-btn-indigo" class="accent-btn py-2 rounded border border-white/5 text-indigo-400 hover:bg-indigo-500/10 text-xs font-semibold">Indigo</button>
-              <button onclick="selectEditAccent('purple')" id="accent-btn-purple" class="accent-btn py-2 rounded border border-white/5 text-purple-400 hover:bg-purple-500/10 text-xs font-semibold">Purple</button>
-              <button onclick="selectEditAccent('rose')" id="accent-btn-rose" class="accent-btn py-2 rounded border border-white/5 text-rose-400 hover:bg-rose-500/10 text-xs font-semibold">Rose</button>
-              <button onclick="selectEditAccent('amber')" id="accent-btn-amber" class="accent-btn py-2 rounded border border-white/5 text-amber-400 hover:bg-amber-500/10 text-xs font-semibold">Amber</button>
-              <button onclick="selectEditAccent('emerald')" id="accent-btn-emerald" class="accent-btn py-2 rounded border border-white/5 text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold">Emerald</button>
-              <button onclick="selectEditAccent('sky')" id="accent-btn-sky" class="accent-btn py-2 rounded border border-white/5 text-sky-400 hover:bg-sky-500/10 text-xs font-semibold">Sky</button>
-            </div>
-          </div>
-        </div>
-        
-        <!-- RIGHT COLUMN: Raw HTML Source -->
-        <div class="w-full md:w-2/3 flex flex-col">
-          <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Raw HTML / Web Component Source</label>
-          <textarea id="edit-widget-html" spellcheck="false" class="flex-1 min-h-[300px] w-full bg-black/40 border border-dark-border rounded-xl p-4 text-emerald-400 font-mono text-xs focus:outline-none focus:border-indigo-500 transition-colors custom-scrollbar" placeholder="<ada-clock></ada-clock>"></textarea>
-        </div>
-        
-      </div>
-      
-      <div class="p-4 border-t border-dark-border bg-dark-card flex justify-end gap-3 flex-shrink-0">
-        <button onclick="closeWidgetEditModal()" class="px-4 py-2 text-sm text-gray-300 hover:text-white">Cancel</button>
-        <button onclick="saveWidgetEdit()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg shadow-lg">Save Changes</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Widget Library Modal -->
-  <div id="widget-library-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-      <div class="p-4 border-b border-dark-border flex justify-between items-center bg-dark-card flex-shrink-0">
-        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-shapes text-indigo-400 mr-2"></i>Widget Library</h3>
-        <button onclick="closeWidgetLibrary()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      
-      <div class="p-5 flex-1 overflow-y-auto custom-scrollbar">
-        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <!-- Library Items -->
-          <button onclick="spawnWidget('doc-body')" class="col-span-full text-left bg-gradient-to-r from-indigo-900/30 to-purple-900/30 border border-indigo-500/30 hover:border-indigo-400 hover:from-indigo-900/50 hover:to-purple-900/50 transition-all p-4 rounded-xl flex items-center gap-4">
-            <div class="text-indigo-400 text-2xl flex-shrink-0 w-10 text-center"><i class="fa-solid fa-file-lines"></i></div>
-            <div>
-              <div class="font-bold text-white text-sm">Rich Text Document Body</div>
-              <div class="text-xs text-indigo-300/70">A borderless, full-width markdown editor that transforms this page into a Notion-style document.</div>
-            </div>
-          </button>
-
-          <button onclick="spawnWidget('blank')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
-            <div class="text-gray-300 text-lg"><i class="fa-solid fa-square-dashed"></i></div>
-            <div class="font-bold text-white text-sm">Blank Canvas</div>
-            <div class="text-xs text-gray-500">Empty HTML container.</div>
-          </button>
-
-          <button onclick="spawnWidget('clock')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
-            <div class="text-gray-300 text-lg"><i class="fa-solid fa-clock"></i></div>
-            <div class="font-bold text-white text-sm">Digital Clock</div>
-            <div class="text-xs text-gray-500">Standard digital time display.</div>
-          </button>
-          
-          <button onclick="spawnWidget('countdown')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
-            <div class="text-gray-300 text-lg"><i class="fa-solid fa-hourglass-half"></i></div>
-            <div class="font-bold text-white text-sm">Countdown Timer</div>
-            <div class="text-xs text-gray-500">Counts down to a specific date.</div>
-          </button>
-          
-          <button onclick="spawnWidget('analog')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
-            <div class="text-gray-300 text-lg"><i class="fa-regular fa-clock"></i></div>
-            <div class="font-bold text-white text-sm">Analog Clock</div>
-            <div class="text-xs text-gray-500">Classic analog clock face.</div>
-          </button>
-
-          <button onclick="spawnWidget('gauge')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
-            <div class="text-gray-300 text-lg"><i class="fa-solid fa-gauge-high"></i></div>
-            <div class="font-bold text-white text-sm">System Gauge</div>
-            <div class="text-xs text-gray-500">CPU, Memory, or Disk metrics.</div>
-          </button>
-          
-          <button onclick="spawnWidget('photo')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
-            <div class="text-gray-300 text-lg"><i class="fa-solid fa-image"></i></div>
-            <div class="font-bold text-white text-sm">Photo Frame</div>
-            <div class="text-xs text-gray-500">Displays an image.</div>
-          </button>
-          
-          <button onclick="spawnWidget('script')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
-            <div class="text-gray-300 text-lg"><i class="fa-solid fa-terminal"></i></div>
-            <div class="font-bold text-white text-sm">Script Runner</div>
-            <div class="text-xs text-gray-500">Click to execute a bash script.</div>
-          </button>
-          
-          <button onclick="spawnWidget('scratchpad')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
-            <div class="text-gray-300 text-lg"><i class="fa-solid fa-pen-nib"></i></div>
-            <div class="font-bold text-white text-sm">Scratchpad</div>
-            <div class="text-xs text-gray-500">Rich markdown editor.</div>
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-</body>
-
-</html>

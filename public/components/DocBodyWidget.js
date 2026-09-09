@@ -92,7 +92,28 @@ class DocBodyWidget extends HTMLElement {
     const textarea = this.querySelector('textarea');
     const preview = this.querySelector('[data-md-preview]');
     if (!textarea || !preview || !textarea.value.trim()) return;
-    preview.innerHTML = marked.parse(textarea.value);
+    
+    let html = marked.parse(textarea.value);
+    
+    // Reset all sidebar widgets to visible
+    document.querySelectorAll('.widget-container').forEach(c => c.style.display = '');
+    
+    // Inject Live Widgets
+    if (window.homepageDoc && window.homepageDoc.widgets) {
+      html = html.replace(/\[widget:\s*([a-zA-Z0-9-]+)\]/g, (match, id) => {
+        const w = window.homepageDoc.widgets.find(widget => widget.id === id);
+        if (w) {
+          // Hide it from the sidebar
+          const container = document.getElementById(w.id + '-container');
+          if (container) container.style.display = 'none';
+          
+          return `<div class="embedded-widget my-6 rounded-2xl overflow-hidden border border-white/5 relative" style="min-height: 200px;">${w.html}</div>`;
+        }
+        return match;
+      });
+    }
+    
+    preview.innerHTML = html;
     this.wireCheckboxes(preview, textarea);
     textarea.classList.add('hidden');
     preview.classList.remove('hidden');
@@ -122,6 +143,10 @@ class DocBodyWidget extends HTMLElement {
     const textarea = this.querySelector('textarea');
     const preview = this.querySelector('[data-md-preview]');
     if (!textarea || !preview) return;
+    
+    // Show all sidebar widgets while editing so they can be dragged
+    document.querySelectorAll('.widget-container').forEach(c => c.style.display = '');
+    
     preview.classList.add('hidden');
     textarea.classList.remove('hidden');
     textarea.focus();
