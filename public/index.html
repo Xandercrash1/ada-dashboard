@@ -3920,6 +3920,10 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         btn.classList.remove('bg-indigo-500/20', 'border-indigo-500', 'text-indigo-400');
         btn.classList.add('bg-dark-card', 'border-dark-border', 'text-gray-400');
         btn.innerHTML = `<i class="fa-solid fa-pen-ruler"></i> <span>Edit Layout</span>`;
+        // Force doc bodies to re-render markdown if we just locked the layout
+        document.querySelectorAll('ada-doc-body').forEach(el => {
+          if (typeof el.showPreview === 'function') el.showPreview();
+        });
       }
       renderHomepage();
     }
