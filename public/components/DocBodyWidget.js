@@ -280,18 +280,9 @@ class DocBodyWidget extends HTMLElement {
         // Text is selected!
         toolbar.classList.remove('hidden');
         
-        // Position it at mouse if available, else center top
-        if (e && e.clientX) {
-          const rect = this.getBoundingClientRect();
-          let topPos = e.clientY - rect.top;
-          if (topPos < 50) topPos = 50; // Prevent clipping at the very top of the widget
-          
-          toolbar.style.left = (e.clientX - rect.left) + 'px';
-          toolbar.style.top = topPos + 'px';
-        } else {
-          toolbar.style.left = '50%';
-          toolbar.style.top = '60px';
-        }
+        // Anchor it reliably to the top center of the editor
+        toolbar.style.left = '50%';
+        toolbar.style.top = '60px';
       } else {
         toolbar.classList.add('hidden');
       }
