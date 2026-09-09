@@ -270,6 +270,68 @@ class DocBodyWidget extends HTMLElement {
     }
   }
 
+  checkSelection(e) {
+    const textarea = this.querySelector('textarea');
+    const toolbar = this.querySelector('#format-toolbar');
+    
+    // Slight delay to let selection update natively
+    setTimeout(() => {
+      if (textarea.selectionStart !== textarea.selectionEnd) {
+        // Text is selected!
+        toolbar.classList.remove('hidden');
+        
+        // Position it at mouse if available, else center top
+        if (e && e.clientX) {
+          const rect = this.getBoundingClientRect();
+          toolbar.style.left = (e.clientX - rect.left) + 'px';
+          toolbar.style.top = (e.clientY - rect.top) + 'px';
+        } else {
+          toolbar.style.left = '50%';
+          toolbar.style.top = '60px';
+        }
+      } else {
+        toolbar.classList.add('hidden');
+      }
+    }, 10);
+  }
+
+  applyFormat(type) {
+    const textarea = this.querySelector('textarea');
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    if (start === end) return;
+    
+    const val = textarea.value;
+    const selectedText = val.substring(start, end);
+    let newText = selectedText;
+    let cursorOffset = 0;
+    
+    switch(type) {
+      case 'bold': newText = `**${selectedText}**`; break;
+      case 'italic': newText = `*${selectedText}*`; break;
+      case 'strikethrough': newText = `~~${selectedText}~~`; break;
+      case 'code': newText = `\`${selectedText}\``; break;
+      case 'header': newText = `### ${selectedText}`; break;
+      case 'link': 
+        newText = `[${selectedText}](url)`; 
+        cursorOffset = newText.length - 4; // position cursor inside the parenthesis to type URL
+        break;
+    }
+    
+    textarea.value = val.substring(0, start) + newText + val.substring(end);
+    this.saveText();
+    
+    // Close toolbar and restore selection
+    this.querySelector('#format-toolbar').classList.add('hidden');
+    textarea.focus();
+    
+    if (type === 'link') {
+      textarea.setSelectionRange(start + cursorOffset, start + cursorOffset + 3);
+    } else {
+      textarea.setSelectionRange(start + newText.length, start + newText.length);
+    }
+  }
+
   showPreview() {
     if (typeof marked === 'undefined') return;
     const textarea = this.querySelector('textarea');
@@ -361,14 +423,41 @@ class DocBodyWidget extends HTMLElement {
            <div class="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-dark-card border-b border-gray-200 dark:border-dark-border">Embed Widget</div>
            <div id="slash-menu-items" class="max-h-64 overflow-y-auto custom-scrollbar p-1"></div>
         </div>
+        
+        <div id="format-toolbar" class="hidden absolute z-50 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-lg shadow-xl flex items-center p-1 gap-1 -translate-x-1/2 -translate-y-full mt-[-10px]">
+          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="bold"><i class="fa-solid fa-bold"></i></button>
+          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="italic"><i class="fa-solid fa-italic"></i></button>
+          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="strikethrough"><i class="fa-solid fa-strikethrough"></i></button>
+          <div class="w-px h-5 bg-gray-200 dark:bg-dark-border mx-1"></div>
+          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="header"><i class="fa-solid fa-heading"></i></button>
+          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="code"><i class="fa-solid fa-code"></i></button>
+          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="link"><i class="fa-solid fa-link"></i></button>
+        </div>
       </div>
     `;
 
     const textarea = this.querySelector('textarea');
     const preview = this.querySelector('[data-md-preview]');
     
-    textarea.addEventListener('keydown', (e) => this.handleKeydown(e));
-    textarea.addEventListener('input', () => this.handleInput());
+    textarea.addEventListener('keydown', (e) => {
+      this.handleKeydown(e);
+      this.checkSelection(e);
+    });
+    textarea.addEventListener('mouseup', (e) => this.checkSelection(e));
+    textarea.addEventListener('input', () => {
+      this.handleInput();
+      this.checkSelection(null);
+    });
+    
+    const toolbar = this.querySelector('#format-toolbar');
+    toolbar.querySelectorAll('.format-btn').forEach(btn => {
+      // Use mousedown with preventDefault so clicking the toolbar doesn't blur the textarea!
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        this.applyFormat(btn.getAttribute('data-format'));
+      });
+    });
+    
     textarea.addEventListener('blur', () => {
       if (window.isEditingLayout) return;
       this.showPreview();
