@@ -4006,12 +4006,98 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       renderHomepage();
     }
 
+    // Builder toast — shares the notification toast host; optional action button.
+    function showBuilderToast(text, action) {
+      const host = document.getElementById('ntf-toasts');
+      if (!host) return;
+      const el = document.createElement('div');
+      el.className = 'ntf-toast pointer-events-auto bg-dark-bg/95 backdrop-blur-xl border border-indigo-500/50 rounded-2xl shadow-2xl px-4 py-3 flex gap-3 items-center';
+      el.innerHTML = `<i class="fa-solid fa-pen-ruler text-indigo-300"></i><div class="text-xs text-white flex-1">${escapeHtml(text)}</div>`;
+      if (action) {
+        const b = document.createElement('button');
+        b.className = 'text-xs font-bold text-indigo-300 hover:text-white px-2';
+        b.textContent = action.label;
+        b.onclick = () => { el.remove(); action.onClick(); };
+        el.appendChild(b);
+      }
+      const x = document.createElement('button');
+      x.className = 'text-gray-500 hover:text-white text-sm leading-none';
+      x.innerHTML = '&times;';
+      x.onclick = () => el.remove();
+      el.appendChild(x);
+      host.appendChild(el);
+      setTimeout(() => el.remove(), 8000);
+    }
+
+    // Remove is undoable (fb-1788986893065): the widget is kept with its
+    // index for the life of the toast, and restored on the same page only.
+    let lastRemovedWidget = null;
     function deleteWidget(id) {
       if (!homepageDoc) return;
-      homepageDoc.widgets = homepageDoc.widgets.filter(w => w.id !== id);
+      const idx = homepageDoc.widgets.findIndex(w => w.id === id);
+      if (idx === -1) return;
+      lastRemovedWidget = { widget: homepageDoc.widgets[idx], index: idx, page: currentCanvasPage };
+      homepageDoc.widgets.splice(idx, 1);
       renderHomepage();
       saveHomepageDoc();
+      showBuilderToast('Widget removed', { label: 'Undo', onClick: undoRemoveWidget });
     }
+    async function undoRemoveWidget() {
+      if (!lastRemovedWidget || !homepageDoc || lastRemovedWidget.page !== currentCanvasPage) return;
+      const { widget, index } = lastRemovedWidget;
+      lastRemovedWidget = null;
+      homepageDoc.widgets.splice(Math.min(index, homepageDoc.widgets.length), 0, widget);
+      renderHomepage();
+      await saveHomepageDoc();
+    }
+
+    // Clone / Export were rendered on the edit overlay without ever being
+    // defined (fb-1788986893034).
+    function duplicateWidget(id) {
+      if (!homepageDoc) return;
+      const idx = homepageDoc.widgets.findIndex(w => w.id === id);
+      if (idx === -1) return;
+      const copy = JSON.parse(JSON.stringify(homepageDoc.widgets[idx]));
+      if (copy.html && copy.html.includes('ada-doc-body')) {
+        showBuilderToast('A page can only have one document body.');
+        return;
+      }
+      copy.id = 'widget-' + Date.now() + Math.floor(Math.random() * 1000);
+      if (copy.title) copy.title = copy.title + ' (copy)';
+      homepageDoc.widgets.splice(idx + 1, 0, copy);
+      renderHomepage();
+      saveHomepageDoc();
+      showBuilderToast('Widget cloned');
+    }
+    async function exportWidget(id) {
+      const w = homepageDoc && homepageDoc.widgets.find(w => w.id === id);
+      if (!w) return;
+      const json = JSON.stringify(w, null, 2);
+      try {
+        await navigator.clipboard.writeText(json);
+        showBuilderToast('Widget JSON copied to clipboard');
+      } catch (e) {
+        // Clipboard needs a secure context + permission; fall back to a download.
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+        a.download = `${w.id}.json`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      }
+    }
+
+    // Escape / backdrop close for the Inspector and the Widget Library
+    // (fb-1788986893150). Delegated: the modals sit after this script in the DOM.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const edit = document.getElementById('widget-edit-modal');
+      const lib = document.getElementById('widget-library-modal');
+      if (edit && !edit.classList.contains('hidden')) closeWidgetEditModal();
+      else if (lib && !lib.classList.contains('hidden')) closeWidgetLibrary();
+    });
+    document.addEventListener('click', (e) => {
+      if (e.target && (e.target.id === 'widget-edit-modal' || e.target.id === 'widget-library-modal')) e.target.classList.add('hidden');
+    });
 
     function selectEditAccent(color) {
       document.getElementById('edit-widget-accent').value = color;
@@ -4027,12 +4113,28 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (!w) return;
       
       document.getElementById('edit-widget-id').value = id;
-      document.getElementById('edit-widget-size').value = w.size || 'auto';
+      // Derive the dropdown from the real cols/rows so a drag-resized widget
+      // shows its true size instead of a stale (or missing) w.size.
+      const rows = w.rows || 1;
+      const sizeKey = w.cols === 6 ? 'full'
+        : (w.cols === 1 && rows === 1) ? '1x1'
+        : (w.cols === 2 && rows === 2) ? '2x2'
+        : (w.cols === 2 && rows === 1) ? '2x1' : 'auto';
+      document.getElementById('edit-widget-size').value = w.cols ? sizeKey : (w.size || 'auto');
       document.getElementById('edit-widget-title').value = w.title || '';
       document.getElementById('edit-widget-icon').value = w.icon || '';
       document.getElementById('edit-widget-icon-preview').innerHTML = `<i class='fa-solid ${w.icon || 'fa-question'}'></i>`;
       
-      document.getElementById('edit-widget-link-tab').value = (w.link && w.link.tab) ? w.link.tab : '';
+      // Real tabs only (fb-1788986893178): built-ins plus every custom page.
+      // A legacy value that matches nothing is kept as an option so Save
+      // cannot silently drop it.
+      const tabSel = document.getElementById('edit-widget-link-tab');
+      const savedTab = (w.link && w.link.tab) ? w.link.tab : '';
+      const tabs = [['', 'None'], ['home', 'Home'], ['todo', 'Tasks'], ['tools', 'Tools & Projects'], ['server', 'Server'],
+        ...customPages.map(p => [p.id, p.title])];
+      if (savedTab && !tabs.some(t => t[0] === savedTab)) tabs.push([savedTab, savedTab + ' (unknown tab)']);
+      tabSel.innerHTML = tabs.map(([v, l]) => `<option value="${escapeHtml(v)}">${escapeHtml(l)}</option>`).join('');
+      tabSel.value = savedTab;
       document.getElementById('edit-widget-link-href').value = (w.link && w.link.href) ? w.link.href : '';
       
       // We no longer try to mutate w.html on read, we just present it as raw HTML
@@ -4332,7 +4434,16 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         
         w.accent = accent;
         w.theme = theme;
-        if (size !== 'auto') w.size = size; else delete w.size;
+        // The renderer reads cols/rows, never size — map the dropdown onto
+        // them (fb-1788986893005). "auto" leaves drag-resized values alone.
+        const SIZE_MAP = { '1x1': [1, 1], '2x1': [2, 1], '2x2': [2, 2], 'full': [6, w.rows || 1] };
+        if (SIZE_MAP[size]) {
+          w.size = size;
+          w.cols = SIZE_MAP[size][0];
+          w.rows = SIZE_MAP[size][1];
+        } else {
+          delete w.size;
+        }
         
         // Instead of injecting theme/accent directly into the HTML string,
         // we write the user's raw HTML, and let `renderHomepage` apply theme classes.
@@ -5269,7 +5380,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           </div>
           <div>
             <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Link Tab Target</label>
-            <input type="text" id="edit-widget-link-tab" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="e.g. todo, roadmap">
+            <select id="edit-widget-link-tab" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+              <option value="">None</option>
+            </select>
           </div>
           <div>
             <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Link HREF</label>
