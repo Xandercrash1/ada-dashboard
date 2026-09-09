@@ -4016,6 +4016,12 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         newWidget.rows = 4;
         newWidget.cols = 4;
         break;
+      case 'weather':
+        newWidget.html = '<ada-weather></ada-weather>';
+        newWidget.title = 'Weather';
+        newWidget.icon = 'fa-cloud-sun';
+        newWidget.rows = 2;
+        break;
       case 'doc-body':
         newWidget.html = `<ada-doc-body widget-id="${newWidget.id}"></ada-doc-body>`;
         newWidget.cols = 4;
@@ -5011,6 +5017,12 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             <div class="text-indigo-400 text-lg"><i class="fa-solid fa-table-columns"></i></div>
             <div class="font-bold text-white text-sm">Kanban Board</div>
             <div class="text-xs text-gray-500">Drag-and-drop columns for task tracking.</div>
+          </button>
+          
+          <button onclick="spawnWidget('weather')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-indigo-400 text-lg"><i class="fa-solid fa-cloud-sun"></i></div>
+            <div class="font-bold text-white text-sm">Weather Card</div>
+            <div class="text-xs text-gray-500">Live forecast and current temperature.</div>
           </button>
           
           <button onclick="spawnWidget('todo')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">

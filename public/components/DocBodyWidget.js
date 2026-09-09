@@ -152,7 +152,8 @@ class DocBodyWidget extends HTMLElement {
       { type: 'scratchpad', title: 'Scratchpad', icon: 'fa-pen-nib', desc: 'Rich markdown editor' },
       { type: 'todo', title: 'To-Do List', icon: 'fa-list-check', desc: 'Interactive task manager linked to Tasks tab' },
       { type: 'calendar', title: 'Agenda', icon: 'fa-calendar', desc: 'Weekly schedule and events list' },
-      { type: 'kanban', title: 'Kanban Board', icon: 'fa-table-columns', desc: 'Drag-and-drop columns for task tracking' }
+      { type: 'kanban', title: 'Kanban Board', icon: 'fa-table-columns', desc: 'Drag-and-drop columns for task tracking' },
+      { type: 'weather', title: 'Weather', icon: 'fa-cloud-sun', desc: 'Live forecast and current temperature' }
     ];
     
     let available = templates;
@@ -244,6 +245,7 @@ class DocBodyWidget extends HTMLElement {
       case 'todo': newWidget.html = '<ada-todo></ada-todo>'; newWidget.title = 'To-Do List'; newWidget.icon = 'fa-list-check'; newWidget.rows = 3; break;
       case 'calendar': newWidget.html = '<ada-calendar></ada-calendar>'; newWidget.title = 'Agenda'; newWidget.icon = 'fa-calendar'; newWidget.rows = 3; break;
       case 'kanban': newWidget.html = '<ada-kanban></ada-kanban>'; newWidget.title = 'Kanban Board'; newWidget.icon = 'fa-table-columns'; newWidget.rows = 4; newWidget.cols = 4; break;
+      case 'weather': newWidget.html = '<ada-weather></ada-weather>'; newWidget.title = 'Weather'; newWidget.icon = 'fa-cloud-sun'; newWidget.rows = 2; break;
     }
     
     // Push it to the page JSON and let index.html save it
