@@ -189,7 +189,7 @@ class DocBodyWidget extends HTMLElement {
     textarea.addEventListener('dragover', (e) => {
       if (window.isEditingLayout) {
         e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
+        e.dataTransfer.dropEffect = 'move';
       }
     });
     
@@ -237,7 +237,7 @@ class DocBodyWidget extends HTMLElement {
     preview.addEventListener('dragover', (e) => {
       if (window.isEditingLayout) {
         e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
+        e.dataTransfer.dropEffect = 'move';
       }
     });
     
