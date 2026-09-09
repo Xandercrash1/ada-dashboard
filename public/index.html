@@ -232,7 +232,7 @@
                   sm:col-span-1 sm:col-span-2 sm:col-span-3 sm:col-span-4 sm:col-span-5 sm:col-span-6
                   lg:col-span-1 lg:col-span-2 lg:col-span-3 lg:col-span-4 lg:col-span-5 lg:col-span-6"></div>
                   
-      <div id="home-widgets" class="hidden w-full grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[10px]"></div>
+      <div id="home-widgets" class="hidden w-full"></div>
 
       <!-- Hidden state store for live stats so Designer widgets can safely mirror them -->
       <div id="home-stats-state" style="display:none;">
@@ -4293,13 +4293,17 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const grid = document.getElementById('home-widgets');
       const widgets = (homepageDoc.widgets || []).filter(w => w && !w.hidden);
       grid.classList.toggle('hidden', widgets.length === 0 && !window.isEditingLayout);
-      grid.innerHTML = widgets.map(w => {
+            const bodyWidget = widgets.find(w => w.html && w.html.includes('ada-doc-body'));
+      
+      const renderWidgetCard = (w) => {
         const accent = w.accent || 'indigo';
         const linkAttr = w.link ? (w.link.tab
           ? `onclick="switchTab('${escapeHtml(w.link.tab)}')"`
           : `onclick="window.open('${escapeHtml(w.link.href || '')}', '_blank')"`) : '';
 
-        const overlay = window.isEditingLayout ? `
+        const isBody = w.html && w.html.includes('ada-doc-body');
+        // Do not render the drag shield for the body widget so it can natively accept dropped text!
+        const overlay = (window.isEditingLayout && !isBody) ? `
           <div class="absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center gap-3 z-20 backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity">
              <button onclick="editWidget('${w.id}')" class="px-4 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-palette"></i> Style</button>
              <button onclick="duplicateWidget('${w.id}')" class="px-4 py-1.5 bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-clone"></i> Clone</button>
@@ -4322,19 +4326,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             6: 'col-span-2 sm:col-span-4 lg:col-span-6'
           };
           spanClass = colMap[w.cols] || 'col-span-2';
-        } else if (w.size) { // legacy fallback
-          if (w.size === '1x1') spanClass = "col-span-1 sm:col-span-2 lg:col-span-2";
-          else if (w.size === '2x1') spanClass = "col-span-2 sm:col-span-4 lg:col-span-4";
-          else if (w.size === '2x2') spanClass = "col-span-2 sm:col-span-4 lg:col-span-4";
-          else if (w.size === 'full') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
-        } else {
-          if (w.id === 'photo-frame') spanClass = "col-span-2 sm:col-span-4 lg:col-span-4";
-          else if (w.id === 'stat-todo' || w.id === 'stat-jobs') spanClass = "col-span-1 sm:col-span-2 lg:col-span-2";
-          else if (w.id === 'home-glance-banner') spanClass = "col-span-2 sm:col-span-4 lg:col-span-6";
         }
 
-        // To prevent widgets from collapsing in Masonry, apply their configured row height.
-        // We skip this for fluid widgets (photo-frame, scratchpad) which size themselves.
         let heightClass = "";
         if (!w.html.includes('ada-photo-frame') && !w.html.includes('ada-scratchpad') && !w.html.includes('ada-doc-body')) {
            const rows = w.rows || 1;
@@ -4342,8 +4335,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
            heightClass = heights[rows] || 'h-[120px]';
         }
 
+        if (bodyWidget && w.id === bodyWidget.id) {
+           spanClass = "w-full";
+        } else if (bodyWidget) {
+           const sbColMap = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-2', 4: 'col-span-2', 5: 'col-span-2', 6: 'col-span-2' };
+           spanClass = sbColMap[w.cols || 2];
+        }
+
         return `
-          <div class="relative w-full ${spanClass} transition-all duration-500 ease-in-out widget-container ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}
+          <div id="${w.id}-container" class="relative w-full ${spanClass} transition-all duration-500 ease-in-out widget-container ${w.link && !window.isEditingLayout ? 'cursor-pointer group' : ''}" ${!window.isEditingLayout ? linkAttr : ''}
                ${window.isEditingLayout ? `draggable="true" ondragstart="handleWidgetDragStart(event, '${w.id}')" ondragover="handleWidgetDragOver(event)" ondrop="handleWidgetDrop(event, '${w.id}')" ondragenter="handleWidgetDragEnter(event)" ondragleave="handleWidgetDragLeave(event)" ondragend="handleWidgetDragEnd(event)"` : ''}>
             <div class="widget-measurer block w-full relative ${heightClass}">
               ${w.html || ''}
@@ -4351,16 +4351,42 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             </div>
             ${w.link && w.link.label && !window.isEditingLayout ? `<div class="absolute bottom-3 right-4 z-10 text-[11px] font-semibold text-${accent}-400 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 backdrop-blur px-2 py-1 rounded">${escapeHtml(w.link.label)} <i class="fa-solid fa-arrow-right text-[9px]"></i></div>` : ''}
           </div>`;
-      }).join('');
-      
+      };
+
       if (window.isEditingLayout) {
-        const addWidgetCard = `
-          <div class="col-span-1 sm:col-span-2 lg:col-span-2 h-[120px] rounded-2xl border-2 border-dashed border-dark-border hover:border-indigo-500/50 hover:bg-indigo-500/5 flex flex-col items-center justify-center cursor-pointer transition-colors text-gray-500 hover:text-indigo-400" onclick="openWidgetLibrary()">
+        const addWidgetCard = {
+          id: 'add-widget-btn',
+          html: `
+          <div class="w-full h-[120px] rounded-2xl border-2 border-dashed border-dark-border hover:border-indigo-500/50 hover:bg-indigo-500/5 flex flex-col items-center justify-center cursor-pointer transition-colors text-gray-500 hover:text-indigo-400" onclick="openWidgetLibrary()">
             <i class="fa-solid fa-plus text-2xl mb-2"></i>
             <span class="text-xs font-bold uppercase tracking-wider">Add Widget</span>
+          </div>`,
+          cols: 2,
+          rows: 1
+        };
+        widgets.push(addWidgetCard);
+      }
+
+      if (bodyWidget) {
+        const otherWidgets = widgets.filter(w => w.id !== bodyWidget.id);
+        grid.innerHTML = `
+          <div class="flex flex-col lg:flex-row gap-6 w-full max-w-7xl mx-auto">
+            <div class="flex-1 w-full lg:w-3/4 bg-gray-50 dark:bg-dark-card rounded-3xl min-h-[60vh] overflow-hidden">
+               ${renderWidgetCard(bodyWidget)}
+            </div>
+            <div class="w-full lg:w-1/4 flex flex-col">
+               <div class="grid grid-cols-2 gap-4 grid-flow-row-dense auto-rows-auto">
+                 ${otherWidgets.map(renderWidgetCard).join('')}
+               </div>
+            </div>
           </div>
         `;
-        grid.innerHTML += addWidgetCard;
+      } else {
+        grid.innerHTML = `
+          <div class="w-full grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[10px]">
+             ${widgets.map(renderWidgetCard).join('')}
+          </div>
+        `;
       }
       
       // Execute any scripts the Designer injected (since innerHTML ignores them by default)
