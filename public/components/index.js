@@ -12,3 +12,5 @@ import './CalendarWidget.js';
 import './SysmonWidget.js';
 import './ScratchpadWidget.js';
 import './ChatWidget.js';
+
+import './DocBodyWidget.js';

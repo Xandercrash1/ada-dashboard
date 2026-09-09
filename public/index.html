@@ -4336,7 +4336,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         // To prevent widgets from collapsing in Masonry, apply their configured row height.
         // We skip this for fluid widgets (photo-frame, scratchpad) which size themselves.
         let heightClass = "";
-        if (!w.html.includes('ada-photo-frame') && !w.html.includes('ada-scratchpad') || w.html.includes('ada-doc-body')) {
+        if (!w.html.includes('ada-photo-frame') && !w.html.includes('ada-scratchpad') && !w.html.includes('ada-doc-body')) {
            const rows = w.rows || 1;
            const heights = { 1: 'h-[120px]', 2: 'h-[256px]', 3: 'h-[392px]', 4: 'h-[528px]', 5: 'h-[664px]', 6: 'h-[800px]' };
            heightClass = heights[rows] || 'h-[120px]';
