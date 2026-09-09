@@ -3,7 +3,7 @@ class DocBodyWidget extends HTMLElement {
     super();
     this.text = "";
     this.typingTimer = null;
-    this.mdTimer = null;
+    
     this.widgetId = null;
   }
 
@@ -65,7 +65,7 @@ class DocBodyWidget extends HTMLElement {
 
   handleInput() {
     clearTimeout(this.typingTimer);
-    clearTimeout(this.mdTimer);
+    
     const statusIcon = this.querySelector('#doc-status');
     if (statusIcon) {
       statusIcon.className = 'fa-solid fa-pen text-indigo-400 text-xs';
@@ -74,7 +74,7 @@ class DocBodyWidget extends HTMLElement {
 
     this.adjustHeight();
     this.typingTimer = setTimeout(() => this.saveText(), 1000);
-    this.mdTimer = setTimeout(() => this.showPreview(), 2000);
+    
   }
 
   showPreview() {
@@ -141,7 +141,9 @@ class DocBodyWidget extends HTMLElement {
       </div>
     `;
 
-    this.querySelector('textarea').addEventListener('input', () => this.handleInput());
+    const textarea = this.querySelector('textarea');
+    textarea.addEventListener('input', () => this.handleInput());
+    textarea.addEventListener('blur', () => this.showPreview());
     this.querySelector('[data-md-preview]').addEventListener('click', () => this.showEditor());
   }
 }
