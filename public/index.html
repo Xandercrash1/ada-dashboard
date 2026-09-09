@@ -3946,7 +3946,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       document.getElementById('accent-btn-' + color).classList.add('bg-white/10', 'border-gray-400');
     }
 
-    function editWidget(id) {
+    window.editWidget = function editWidget(id) {
       if (!homepageDoc) return;
       const w = homepageDoc.widgets.find(w => w.id === id);
       if (!w) return;
