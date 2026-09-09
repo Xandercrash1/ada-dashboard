@@ -4332,6 +4332,16 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           </div>`;
       }).join('');
       
+      if (window.isEditingLayout) {
+        const addWidgetCard = `
+          <div class="col-span-1 sm:col-span-2 lg:col-span-2 h-[120px] rounded-2xl border-2 border-dashed border-dark-border hover:border-indigo-500/50 hover:bg-indigo-500/5 flex flex-col items-center justify-center cursor-pointer transition-colors text-gray-500 hover:text-indigo-400" onclick="openWidgetLibrary()">
+            <i class="fa-solid fa-plus text-2xl mb-2"></i>
+            <span class="text-xs font-bold uppercase tracking-wider">Add Widget</span>
+          </div>
+        `;
+        grid.innerHTML += addWidgetCard;
+      }
+      
       // Execute any scripts the Designer injected (since innerHTML ignores them by default)
       grid.querySelectorAll('script').forEach(oldScript => {
         const newScript = document.createElement('script');
