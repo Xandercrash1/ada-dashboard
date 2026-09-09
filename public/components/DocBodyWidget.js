@@ -185,14 +185,49 @@ class DocBodyWidget extends HTMLElement {
       this.showPreview();
     });
     
-    // Explicitly handle drops into the textarea to ensure immediate feedback
+    // Explicitly handle drops into the textarea
+    textarea.addEventListener('dragover', (e) => {
+      if (window.isEditingLayout) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+    
     textarea.addEventListener('drop', (e) => {
-      const data = e.dataTransfer.getData('text/plain');
-      if (data && data.startsWith('[widget:')) {
-        setTimeout(() => {
-          this.handleInput();
-          this.showPreview();
-        }, 50);
+      if (!window.isEditingLayout) return;
+      e.preventDefault();
+      
+      const rawData = e.dataTransfer.getData('text/plain');
+      const match = rawData.match(/\[widget:\s*(.+)\]/);
+      if (match) {
+        const shortcode = match[0];
+        
+        // Try to insert exactly where dropped!
+        let inserted = false;
+        if (document.caretRangeFromPoint) {
+          const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+          if (range && range.startContainer) {
+            // Because it's a textarea, caretRangeFromPoint often returns the text node of the textarea.
+            // But getting exact string index is tricky. We can use selectionStart/End if focus is updated, 
+            // but preventDefault stops focus.
+            // Let's just focus, set the selection, and insert.
+            textarea.focus();
+            
+            // Textarea specific drop injection:
+            // The browser's native textdrop is blocked because we are dragging a DOM element.
+            // A reliable hack for textareas is to just append if we can't find the exact index.
+            const text = textarea.value;
+            textarea.value = text + '\n\n' + shortcode + '\n';
+            inserted = true;
+          }
+        }
+        
+        if (!inserted) {
+           textarea.value += '\n\n' + shortcode + '\n';
+        }
+
+        this.saveText();
+        this.showPreview();
       }
     });
     
