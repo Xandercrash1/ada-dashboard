@@ -49,7 +49,7 @@ class CountdownWidget extends HTMLElement {
     this.innerHTML = `
       <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">
         ${title ? `<div class="flex items-center gap-2 text-${accent}-400 mb-2"><i class="fa-solid fa-hourglass-half"></i><span class="text-xs font-semibold uppercase tracking-wider">${title}</span></div>` : ''}
-        <div class="timer-text text-2xl font-bold text-white font-mono tracking-widest text-center mt-2">--:--:--:--</div>
+        <div class="timer-text text-2xl font-bold dark:text-white text-gray-900 font-mono tracking-widest text-center mt-2">--:--:--:--</div>
       </div>
     `;
     this.updateTime();
