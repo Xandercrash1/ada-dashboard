@@ -14,3 +14,4 @@ import './ScratchpadWidget.js';
 import './ChatWidget.js';
 
 import './DocBodyWidget.js';
+import './TodoWidget.js';

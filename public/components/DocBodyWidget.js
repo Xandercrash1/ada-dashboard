@@ -149,7 +149,8 @@ class DocBodyWidget extends HTMLElement {
       { type: 'gauge', title: 'System Gauge', icon: 'fa-gauge-high', desc: 'CPU, Memory, or Disk metrics' },
       { type: 'photo', title: 'Photo Frame', icon: 'fa-image', desc: 'Displays an image' },
       { type: 'script', title: 'Script Runner', icon: 'fa-terminal', desc: 'Click to execute a bash script' },
-      { type: 'scratchpad', title: 'Scratchpad', icon: 'fa-pen-nib', desc: 'Rich markdown editor' }
+      { type: 'scratchpad', title: 'Scratchpad', icon: 'fa-pen-nib', desc: 'Rich markdown editor' },
+      { type: 'todo', title: 'To-Do List', icon: 'fa-list-check', desc: 'Interactive task manager linked to Tasks tab' }
     ];
     
     let available = templates;
@@ -238,6 +239,7 @@ class DocBodyWidget extends HTMLElement {
       case 'photo': newWidget.html = '<ada-photo-frame src="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=800&q=80"></ada-photo-frame>'; newWidget.title = 'Photo'; newWidget.icon = 'fa-image'; newWidget.rows = 2; break;
       case 'script': newWidget.html = '<ada-script-runner script-id="hello_world"></ada-script-runner>'; newWidget.title = 'Quick Action'; newWidget.icon = 'fa-bolt'; break;
       case 'scratchpad': newWidget.html = '<ada-scratchpad></ada-scratchpad>'; newWidget.title = 'Scratchpad'; newWidget.icon = 'fa-pen-nib'; break;
+      case 'todo': newWidget.html = '<ada-todo></ada-todo>'; newWidget.title = 'To-Do List'; newWidget.icon = 'fa-list-check'; newWidget.rows = 3; break;
     }
     
     // Push it to the page JSON and let index.html save it
