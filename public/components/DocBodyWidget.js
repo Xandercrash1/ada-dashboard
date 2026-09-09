@@ -151,7 +151,8 @@ class DocBodyWidget extends HTMLElement {
       { type: 'script', title: 'Script Runner', icon: 'fa-terminal', desc: 'Click to execute a bash script' },
       { type: 'scratchpad', title: 'Scratchpad', icon: 'fa-pen-nib', desc: 'Rich markdown editor' },
       { type: 'todo', title: 'To-Do List', icon: 'fa-list-check', desc: 'Interactive task manager linked to Tasks tab' },
-      { type: 'calendar', title: 'Agenda', icon: 'fa-calendar', desc: 'Weekly schedule and events list' }
+      { type: 'calendar', title: 'Agenda', icon: 'fa-calendar', desc: 'Weekly schedule and events list' },
+      { type: 'kanban', title: 'Kanban Board', icon: 'fa-table-columns', desc: 'Drag-and-drop columns for task tracking' }
     ];
     
     let available = templates;
@@ -242,6 +243,7 @@ class DocBodyWidget extends HTMLElement {
       case 'scratchpad': newWidget.html = '<ada-scratchpad></ada-scratchpad>'; newWidget.title = 'Scratchpad'; newWidget.icon = 'fa-pen-nib'; break;
       case 'todo': newWidget.html = '<ada-todo></ada-todo>'; newWidget.title = 'To-Do List'; newWidget.icon = 'fa-list-check'; newWidget.rows = 3; break;
       case 'calendar': newWidget.html = '<ada-calendar></ada-calendar>'; newWidget.title = 'Agenda'; newWidget.icon = 'fa-calendar'; newWidget.rows = 3; break;
+      case 'kanban': newWidget.html = '<ada-kanban></ada-kanban>'; newWidget.title = 'Kanban Board'; newWidget.icon = 'fa-table-columns'; newWidget.rows = 4; newWidget.cols = 4; break;
     }
     
     // Push it to the page JSON and let index.html save it

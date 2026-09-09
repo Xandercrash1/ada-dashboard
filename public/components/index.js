@@ -15,3 +15,4 @@ import './ChatWidget.js';
 
 import './DocBodyWidget.js';
 import './TodoWidget.js';
+import './KanbanWidget.js';

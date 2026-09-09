@@ -4009,6 +4009,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         newWidget.icon = 'fa-calendar';
         newWidget.rows = 3;
         break;
+      case 'kanban':
+        newWidget.html = '<ada-kanban></ada-kanban>';
+        newWidget.title = 'Kanban Board';
+        newWidget.icon = 'fa-table-columns';
+        newWidget.rows = 4;
+        newWidget.cols = 4;
+        break;
       case 'doc-body':
         newWidget.html = `<ada-doc-body widget-id="${newWidget.id}"></ada-doc-body>`;
         newWidget.cols = 4;
@@ -4998,6 +5005,12 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             <div class="text-indigo-400 text-lg"><i class="fa-solid fa-calendar"></i></div>
             <div class="font-bold text-white text-sm">Agenda</div>
             <div class="text-xs text-gray-500">Weekly schedule and events list.</div>
+          </button>
+          
+          <button onclick="spawnWidget('kanban')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-indigo-400 text-lg"><i class="fa-solid fa-table-columns"></i></div>
+            <div class="font-bold text-white text-sm">Kanban Board</div>
+            <div class="text-xs text-gray-500">Drag-and-drop columns for task tracking.</div>
           </button>
           
           <button onclick="spawnWidget('todo')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
