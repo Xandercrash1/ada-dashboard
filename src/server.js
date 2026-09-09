@@ -1390,6 +1390,26 @@ app.post('/api/agent/sessions', (req, res) => {
       if (item.status === 'new' || item.status === 'in-progress') {
         const modelLabel = (getModelById(sessionModel) || {}).label || sessionModel;
         applyFeedbackUpdate(item, { status: 'in-progress', processedBy: `${newSession.name} (${modelLabel})` });
+
+app.patch('/api/agent/sessions/:id', (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const sessions = readSessions();
+  const session = sessions.find(s => s.id === id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  
+  if (updates.model !== undefined) {
+    if (!getModelById(updates.model)) {
+      return res.status(400).json({ error: 'Unknown model' });
+    }
+    session.model = updates.model;
+  }
+  if (updates.name !== undefined) session.name = updates.name;
+  
+  writeSessions(sessions);
+  res.json(session);
+});
+
       } else {
         item.updatedAt = new Date().toISOString();
       }
