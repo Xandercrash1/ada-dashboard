@@ -4343,6 +4343,79 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       draggedWidgetId = null;
     }
 
+    // --- WIDGET REORDERING (POINTER / TOUCH HANDLE) ---
+    // HTML5 drag-and-drop never fires on touch (fb-1788986893122), so the
+    // edit overlay carries a move handle driven by pointer events, same
+    // approach as the resize handle. Works for mouse and pen too.
+    let movingWidgetId = null;
+    let moveTargetId = null;
+
+    function startWidgetMove(e, id) {
+      if (!window.isEditingLayout || !homepageDoc) return;
+      e.preventDefault();
+      e.stopPropagation();
+      movingWidgetId = id;
+      moveTargetId = null;
+      const src = document.getElementById(id + '-container');
+      if (src) src.style.opacity = '0.4';
+      document.addEventListener('pointermove', onWidgetMoveMove);
+      document.addEventListener('pointerup', onWidgetMoveEnd);
+      document.addEventListener('pointercancel', onWidgetMoveEnd);
+      document.body.style.userSelect = 'none';
+    }
+
+    function widgetMoveTargetAt(x, y) {
+      const el = document.elementFromPoint(x, y);
+      const container = el && el.closest('.widget-container');
+      if (!container || !container.id.endsWith('-container')) return null;
+      const id = container.id.slice(0, -'-container'.length);
+      if (id === movingWidgetId) return null;
+      const w = homepageDoc.widgets.find(w => w.id === id);
+      // The doc-body widget is pinned full-width and excluded from mouse DnD
+      // as well — not a valid drop target.
+      if (!w || (w.html && w.html.includes('ada-doc-body'))) return null;
+      return id;
+    }
+
+    function onWidgetMoveMove(e) {
+      if (!movingWidgetId) return;
+      e.preventDefault();
+      const targetId = widgetMoveTargetAt(e.clientX, e.clientY);
+      if (targetId === moveTargetId) return;
+      if (moveTargetId) {
+        const prev = document.getElementById(moveTargetId + '-container');
+        if (prev) prev.classList.remove('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
+      }
+      moveTargetId = targetId;
+      if (moveTargetId) {
+        const next = document.getElementById(moveTargetId + '-container');
+        if (next) next.classList.add('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
+      }
+    }
+
+    async function onWidgetMoveEnd() {
+      document.removeEventListener('pointermove', onWidgetMoveMove);
+      document.removeEventListener('pointerup', onWidgetMoveEnd);
+      document.removeEventListener('pointercancel', onWidgetMoveEnd);
+      document.body.style.userSelect = '';
+      const src = document.getElementById(movingWidgetId + '-container');
+      if (src) src.style.opacity = '1';
+      if (moveTargetId) {
+        const tgt = document.getElementById(moveTargetId + '-container');
+        if (tgt) tgt.classList.remove('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
+      }
+      const sourceIndex = homepageDoc.widgets.findIndex(w => w.id === movingWidgetId);
+      const targetIndex = homepageDoc.widgets.findIndex(w => w.id === moveTargetId);
+      movingWidgetId = null;
+      moveTargetId = null;
+      if (sourceIndex > -1 && targetIndex > -1 && sourceIndex !== targetIndex) {
+        const [movedWidget] = homepageDoc.widgets.splice(sourceIndex, 1);
+        homepageDoc.widgets.splice(targetIndex, 0, movedWidget);
+        renderHomepage();
+        await saveHomepageDoc();
+      }
+    }
+
     // --- PRECISE DRAG TO RESIZE ---
     let resizingWidget = null;
     let resizeStartX = 0;
@@ -4553,6 +4626,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
              <button onclick="deleteWidget('${w.id}')" class="px-4 py-1.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded shadow-lg flex items-center gap-2"><i class="fa-solid fa-trash"></i> Remove</button>
              <div class="absolute bottom-0 right-0 w-10 h-10 cursor-nwse-resize flex items-center justify-center text-white/50 hover:text-white" onpointerdown="startWidgetResize(event, '${w.id}')" style="touch-action:none" title="Drag to resize">
                <i class="fa-solid fa-up-right-and-down-left-from-center transform rotate-90 text-[12px]"></i>
+             </div>
+             <div class="absolute bottom-0 left-0 w-10 h-10 cursor-move flex items-center justify-center text-white/50 hover:text-white" onpointerdown="startWidgetMove(event, '${w.id}')" style="touch-action:none" title="Drag to move">
+               <i class="fa-solid fa-up-down-left-right text-[12px]"></i>
              </div>
           </div>
         ` : '';
