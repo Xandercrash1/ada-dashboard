@@ -1,4 +1,32 @@
 # Session Handover & Progress Log
+
+## 2026-09-09 (afternoon) — PM session (Ada), ticket sweep + deploy path facts
+
+### Shipped (all verified on staging :3001 before promote)
+- **fb-1788977565816** Page refresh → blank page. Cause: `DOMContentLoaded` restored a custom-page tab before `/api/pages` had answered, so `switchTab()` hid every view and found no `view-<pageId>`. Restore now awaits `window.__customPagesReady`, falls back to `home` for a deleted page, and also restores the Server sub-tab (`ada_serverSubTab`).
+- **fb-1788977734294** PM chat missing typing dots. Cause: `submitPmChat()` called `pollJobOnce(pmSessionId)` with no jobId, so the poll registry never knew about the turn. It now reads the 202/409 `jobId`, hands it to `startJobPolling()`, and shows dots from submit (`pmChatPending`) until `finalizeJob()` redraws.
+- **fb-1788977823680** Ticket sort: added Recently Updated, By Type, By Status, Title A–Z.
+- **fb-1787765370485** Notification stream. `data/notifications.json` ring buffer (200), `pushNotification()` helper, routes under `/api/notifications` (GET, POST, read-all, :id/read, DELETE purge-read, DELETE :id). Hooked at `finishJob()` (errors; roadblock replies via `ROADBLOCK_RE`) and `runScheduledItem()` (success / failure / gave-up / missing session). UI: bell + dropdown (desktop and mobile), toasts for events that arrive while the page is open (info/success fade, warn/error stay). Agents can POST from loopback (auth-exempt).
+- **fb-1788928004000** Page theme presets. `pageTheme` on the page doc (Midnight / Glass / Minimalist / Neon / Sunset / Rosé), select in the canvas header in edit mode, applies theme+accent to every widget via the same attribute sync the inspector uses, sets `glanceTheme`, and new widgets inherit it. **Server-side:** `sanitizeHomepageWidget` was silently dropping `theme` and `size`, and `PUT /api/homepage` dropped `pageTheme`/`glanceTheme` — both fixed.
+
+### Ticket bookkeeping done on the live store
+- fb-1788928003000 (widget catalog) → done (was already shipped, never closed).
+- fb-1787765505344 → wont-do (duplicate of fb-1787765370485).
+- **fb-1788929000123 is the single tracker for the DocBody/Brave problem**; fb-1788927445123 and fb-1788928002000 merged into it. Next step is diagnostic in Alex's own Brave with devtools — three blind fixes have already failed against code that passes Puppeteer. Do not attempt a fourth.
+
+### Deploy path — read before deploying from anywhere
+- **`deploy.sh` (Mac) is unsafe as written:** step 4 does `pm2 delete` + `pm2 start`, which drops every env var except `GEMINI_API_KEY` — that is how `OPENAI_API_KEY` got lost and had to be re-injected. Use `pm2 restart --update-env`, never delete/start, until it is fixed.
+- **`~/ops/promote.sh` on the server does `git reset --hard origin/main`** (the README still describes an rsync). So GitHub `main` must be current before promoting — on 2026-09-09 it was **88 commits behind** the local tree because nothing had been pushed since 09-03. The local (Mac) checkout cannot push: its GitHub identity is a different account with READ only. The server authenticates as `Xandercrash1` and can push; this session pushed via a git bundle carried to the server.
+- Staging (`~/dashboard-staging`, :3001) has its own `data/` and is the right place to runtime-test; `stage-sync.sh --force` refreshes it from live.
+
+### Open / for the next agent
+- `ROADBLOCK_RE` is a heuristic — tune it from real transcripts (server.js, next to `notifyJobOutcome`).
+- Job **completions** are deliberately not notified (BubbleManager already surfaces unread agent messages); only errors, roadblocks and scheduled-run outcomes are.
+- `public/BubbleManager.js` (root) is an untracked stray; the live one is `public/components/BubbleManager.js`.
+- `~/ops/README.md` describes promote as rsync; the script pulls from git. One of them should change.
+
+---
+
 **Date:** September 8/9, 2026
 
 ## What was accomplished tonight:

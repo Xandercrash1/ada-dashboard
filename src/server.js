@@ -116,6 +116,76 @@ function writeFeedback(items) {
   fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(items, null, 2));
 }
 
+// --- Notifications store (fb-1787765370485) ---------------------------------
+// A small ring buffer of events the UI should surface even when nobody was
+// watching the chat: job errors, scheduled-prompt outcomes, agent roadblocks,
+// and anything an agent or tool POSTs to /api/notifications. Newest first,
+// capped so the file can never grow without bound. Failures to record a
+// notification are logged and swallowed — a notification must never take
+// down the thing it is reporting on.
+const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'notifications.json');
+const NOTIFICATIONS_MAX = 200;
+const NOTIFICATION_LEVELS = ['info', 'success', 'warn', 'error'];
+function readNotifications() {
+  return readJsonStoreOrThrow(NOTIFICATIONS_FILE);
+}
+function writeNotifications(items) {
+  fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(items, null, 2));
+}
+function pushNotification({ level = 'info', title, body = '', source = 'system', link = null, dedupeKey = null }) {
+  try {
+    if (!title) return null;
+    const items = readNotifications();
+    // dedupeKey: an unread notification with the same key is refreshed in
+    // place instead of duplicated (a scheduled prompt failing five times in a
+    // row should be one line, not five).
+    if (dedupeKey) {
+      const dup = items.find(n => n.dedupeKey === dedupeKey && !n.read);
+      if (dup) {
+        dup.body = String(body || '').slice(0, 600);
+        dup.count = (dup.count || 1) + 1;
+        dup.updatedAt = new Date().toISOString();
+        writeNotifications(items);
+        return dup;
+      }
+    }
+    const n = {
+      id: `ntf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      level: NOTIFICATION_LEVELS.includes(level) ? level : 'info',
+      title: String(title).slice(0, 160),
+      body: String(body || '').slice(0, 600),
+      source,
+      link,
+      read: false,
+      createdAt: new Date().toISOString(),
+      dedupeKey
+    };
+    items.unshift(n);
+    if (items.length > NOTIFICATIONS_MAX) items.length = NOTIFICATIONS_MAX;
+    writeNotifications(items);
+    return n;
+  } catch (err) {
+    console.error('[notify] failed to record notification:', err.message);
+    return null;
+  }
+}
+// An agent reply that is really a question for Alex. Heuristic on purpose —
+// a false positive is one dismissable banner; a false negative is the status
+// quo. Tune from real transcripts, not from imagination.
+const ROADBLOCK_RE = /\b(roadblock|blocked on|i(?:'m| am) blocked|cannot proceed|can't proceed|unable to proceed|need(?:s)? (?:your )?(?:input|approval|permission|decision|confirmation|clarification)|waiting (?:on|for) (?:you|your)|please (?:confirm|advise|clarify))\b/i;
+function notifyJobOutcome(job, session, agentMsg, errorInfo) {
+  const name = (session && session.name) || job.sessionId;
+  const link = { tab: 'server', sub: 'agents', sessionId: job.sessionId };
+  if (errorInfo) {
+    pushNotification({ level: 'error', source: 'agent', title: `${name}: turn failed`, body: errorInfo.message || errorInfo.errorType || 'Unknown error', link, dedupeKey: `job-error:${job.sessionId}` });
+    return;
+  }
+  const text = (agentMsg && agentMsg.text) || '';
+  if (ROADBLOCK_RE.test(text)) {
+    pushNotification({ level: 'warn', source: 'agent', title: `${name} needs your input`, body: text.slice(0, 300), link, dedupeKey: `roadblock:${job.sessionId}` });
+  }
+}
+
 // Classify a Gemini API failure so the UI can decide whether to offer queuing.
 // 'auth' covers the expired/invalid OAuth access token ("no token") case.
 function classifyGeminiError(httpStatus, errObj) {
@@ -503,6 +573,9 @@ app.delete('/api/tasks/:id', (req, res) => {
 // Design doc: plans/homepage-live-document.md.
 
 const HOMEPAGE_ACCENTS = ['indigo', 'purple', 'emerald', 'rose', 'amber', 'sky'];
+// Widget surface styles the Web Components understand (mirrors the Widget
+// Inspector's Theme dropdown in public/index.html).
+const HOMEPAGE_THEMES = ['transparent', 'glass', 'solid', 'neon', 'gradient'];
 const HOMEPAGE_MAX_WIDGETS = 24;
 
 const DEFAULT_HOMEPAGE = {
@@ -529,6 +602,11 @@ function sanitizeHomepageWidget(w, index) {
     title: typeof w.title === 'string' ? w.title.slice(0, 120) : '',
     icon: typeof w.icon === 'string' && w.icon ? w.icon.slice(0, 64) : 'fa-cube',
     accent: HOMEPAGE_ACCENTS.includes(w.accent) ? w.accent : 'indigo',
+    // theme/size were silently dropped here before 2026-09-09, which is why
+    // the inspector had to read them back off the html attributes. Kept now
+    // so page-level presets (fb-1788928004000) survive a round trip.
+    theme: HOMEPAGE_THEMES.includes(w.theme) ? w.theme : undefined,
+    size: typeof w.size === 'string' && w.size ? w.size.slice(0, 8) : undefined,
     cols: typeof w.cols === 'number' ? Math.max(1, Math.min(6, w.cols)) : undefined,
     rows: typeof w.rows === 'number' ? Math.max(1, w.rows) : undefined,
     // Card-body HTML. Deliberately NOT stripped: it comes only from Alex or
@@ -570,6 +648,20 @@ function sanitizeHomepage(raw) {
       .map(sanitizeHomepageWidget)
       .filter(Boolean);
   }
+  // Page-level theme preset (fb-1788928004000). Absent/null = per-widget custom.
+  if (raw.pageTheme && typeof raw.pageTheme === 'object') {
+    const pt = {};
+    if (typeof raw.pageTheme.preset === 'string' && raw.pageTheme.preset) pt.preset = raw.pageTheme.preset.slice(0, 32);
+    if (HOMEPAGE_THEMES.includes(raw.pageTheme.theme)) pt.theme = raw.pageTheme.theme;
+    if (HOMEPAGE_ACCENTS.includes(raw.pageTheme.accent)) pt.accent = raw.pageTheme.accent;
+    if (Object.keys(pt).length) doc.pageTheme = pt;
+  }
+  if (raw.glanceTheme && typeof raw.glanceTheme === 'object') {
+    doc.glanceTheme = {
+      theme: HOMEPAGE_THEMES.includes(raw.glanceTheme.theme) ? raw.glanceTheme.theme : 'glass',
+      accent: HOMEPAGE_ACCENTS.includes(raw.glanceTheme.accent) ? raw.glanceTheme.accent : 'indigo'
+    };
+  }
   return doc;
 }
 
@@ -594,7 +686,7 @@ app.get('/api/homepage', (req, res) => {
 // the file directly instead.
 app.put('/api/homepage', (req, res) => {
   const current = readHomepage();
-  const { announcement, widgets, sections, updatedBy } = req.body || {};
+  const { announcement, widgets, sections, updatedBy, pageTheme, glanceTheme } = req.body || {};
   if (announcement !== undefined && (typeof announcement !== 'object' || announcement === null)) {
     return res.status(400).json({ error: 'announcement must be an object' });
   }
@@ -609,6 +701,9 @@ app.put('/api/homepage', (req, res) => {
     ...(announcement !== undefined ? { announcement: { ...current.announcement, ...announcement } } : {}),
     ...(sections !== undefined ? { sections: { ...current.sections, ...sections } } : {}),
     ...(widgets !== undefined ? { widgets } : {}),
+    // Explicit null clears the preset (sanitizeHomepage drops a null).
+    ...(pageTheme !== undefined ? { pageTheme } : {}),
+    ...(glanceTheme !== undefined ? { glanceTheme } : {}),
     updatedAt: new Date().toISOString(),
     updatedBy: typeof updatedBy === 'string' && updatedBy ? updatedBy : 'dashboard'
   });
@@ -2705,6 +2800,7 @@ function finishJob(job, session, agentMsg, errorInfo, ctrl) {
   job.errorInfo = errorInfo;
   job.toolExecutions = ctrl.toolExecutions;
   appendMessageFreshly(job.sessionId, agentMsg, mutateExtra);
+  notifyJobOutcome(job, session, agentMsg, errorInfo);
 }
 
 // Send Chat Message to Agent — starts a job and returns immediately (contract
@@ -2877,6 +2973,7 @@ async function runScheduledItem(item, opts = {}) {
   if (!session) {
     item.status = 'failed';
     item.result = 'Target agent session no longer exists.';
+    pushNotification({ level: 'error', source: 'scheduler', title: `Scheduled prompt failed: ${item.sessionName || item.sessionId}`, body: item.result, dedupeKey: `sched-error:${item.id}` });
     return { success: false, item };
   }
 
@@ -2900,7 +2997,28 @@ async function runScheduledItem(item, opts = {}) {
     } else {
       item.status = 'pending';
     }
+    pushNotification({
+      level: 'error', source: 'scheduler',
+      title: item.status === 'failed' ? `Scheduled prompt gave up: ${session.name}` : `Scheduled prompt failed: ${session.name}`,
+      body: item.result,
+      link: { tab: 'server', sub: 'agents', sessionId: session.id },
+      dedupeKey: `sched-error:${item.id}`
+    });
     return { success: false, item, errorInfo };
+  }
+
+  // Background runs finish while nobody is looking — that is the whole point
+  // of the notification stream. A reply that reads like a question for Alex
+  // is escalated to a warning so it is not lost among routine completions.
+  {
+    const replyText = (agentMsg && agentMsg.text) || '';
+    const isRoadblock = ROADBLOCK_RE.test(replyText);
+    pushNotification({
+      level: isRoadblock ? 'warn' : 'success', source: 'scheduler',
+      title: isRoadblock ? `${session.name} needs your input (scheduled run)` : `Scheduled prompt ran: ${session.name}`,
+      body: replyText.slice(0, 300),
+      link: { tab: 'server', sub: 'agents', sessionId: session.id }
+    });
   }
 
   if (item.frequencyMinutes) {
@@ -3866,6 +3984,90 @@ app.get('/api/calendar/events', async (req, res) => {
 });
 
 
+
+// --- NOTIFICATIONS API (fb-1787765370485) ---
+// GET  /api/notifications?unread=1&since=ISO&limit=N  -> { items, unreadCount, total }
+// POST /api/notifications { level, title, body, source, link }  (agents/tools may post from loopback)
+// POST /api/notifications/read-all
+// POST /api/notifications/:id/read
+// DELETE /api/notifications?read=1   (purge read)   DELETE /api/notifications/:id
+app.get('/api/notifications', (req, res) => {
+  try {
+    const all = readNotifications();
+    let items = all;
+    if (req.query.unread === '1') items = items.filter(n => !n.read);
+    if (req.query.since) {
+      const t = new Date(req.query.since).getTime();
+      if (!isNaN(t)) items = items.filter(n => new Date(n.createdAt).getTime() > t);
+    }
+    const limit = Math.max(1, Math.min(NOTIFICATIONS_MAX, parseInt(req.query.limit, 10) || 50));
+    res.json({ items: items.slice(0, limit), unreadCount: all.filter(n => !n.read).length, total: all.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notifications', (req, res) => {
+  const { level, title, body, source, link } = req.body || {};
+  if (!title || typeof title !== 'string') return res.status(400).json({ error: 'title is required' });
+  const n = pushNotification({
+    level,
+    title,
+    body: typeof body === 'string' ? body : '',
+    source: typeof source === 'string' && source ? source.slice(0, 40) : 'api',
+    link: (link && typeof link === 'object') ? link : null
+  });
+  if (!n) return res.status(500).json({ error: 'Failed to store notification' });
+  res.status(201).json(n);
+});
+
+app.post('/api/notifications/read-all', (req, res) => {
+  try {
+    const items = readNotifications();
+    const now = new Date().toISOString();
+    items.forEach(n => { if (!n.read) { n.read = true; n.readAt = now; } });
+    writeNotifications(items);
+    res.json({ success: true, total: items.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notifications/:id/read', (req, res) => {
+  try {
+    const items = readNotifications();
+    const n = items.find(x => x.id === req.params.id);
+    if (!n) return res.status(404).json({ error: 'Notification not found' });
+    if (!n.read) { n.read = true; n.readAt = new Date().toISOString(); writeNotifications(items); }
+    res.json(n);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/notifications/:id', (req, res) => {
+  try {
+    const items = readNotifications();
+    const filtered = items.filter(x => x.id !== req.params.id);
+    if (filtered.length === items.length) return res.status(404).json({ error: 'Notification not found' });
+    writeNotifications(filtered);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/notifications', (req, res) => {
+  try {
+    const items = readNotifications();
+    // Only ever purge what has been read; the unread ones are the point.
+    const filtered = items.filter(n => !n.read);
+    writeNotifications(filtered);
+    res.json({ success: true, removed: items.length - filtered.length, remaining: filtered.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // --- KANBAN API ---
 const KANBAN_FILE = path.join(DATA_DIR, 'kanban.json');
