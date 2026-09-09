@@ -350,7 +350,7 @@ class DocBodyWidget extends HTMLElement {
           const container = document.getElementById(w.id + '-container');
           if (container) container.style.display = 'none';
           
-          return `<div class="embedded-widget my-6 rounded-2xl overflow-hidden border border-white/5 relative" style="min-height: 200px;">${w.html}</div>`;
+          return `<div class="embedded-widget my-6 relative min-h-[150px]">${w.html}</div>`;
         }
         return match;
       });
