@@ -74,6 +74,7 @@ class DocBodyWidget extends HTMLElement {
 
   handleInput() {
     clearTimeout(this.typingTimer);
+    clearTimeout(this.fadeTimer);
     
     const statusIcon = this.querySelector('#doc-status');
     if (statusIcon) {
