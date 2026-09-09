@@ -3969,6 +3969,76 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       document.getElementById('widget-edit-modal').classList.remove('hidden');
     }
 
+    
+  function openWidgetLibrary() {
+    document.getElementById('widget-library-modal').classList.remove('hidden');
+  }
+  function closeWidgetLibrary() {
+    document.getElementById('widget-library-modal').classList.add('hidden');
+  }
+  
+  async function spawnWidget(type) {
+    if (!homepageDoc) return;
+    
+    const newWidget = {
+      id: 'widget-' + Date.now() + Math.floor(Math.random()*1000),
+      size: '2x1',
+      cols: 2,
+      rows: 1,
+      theme: 'glass',
+      accent: 'indigo'
+    };
+    
+    switch(type) {
+      case 'blank':
+        newWidget.html = '<div class="flex items-center justify-center w-full h-full text-gray-400 font-medium">New Widget</div>';
+        break;
+      case 'clock':
+        newWidget.html = '<ada-clock format="hh:mm:ss A"></ada-clock>';
+        break;
+      case 'countdown':
+        newWidget.html = '<ada-countdown target="2027-01-01T00:00:00" label="New Year"></ada-countdown>';
+        newWidget.title = 'Countdown';
+        newWidget.icon = 'fa-hourglass-half';
+        break;
+      case 'analog':
+        newWidget.html = '<ada-analog-clock></ada-analog-clock>';
+        break;
+      case 'gauge':
+        newWidget.html = '<ada-sysmon type="cpu"></ada-sysmon>';
+        newWidget.title = 'CPU Usage';
+        newWidget.icon = 'fa-microchip';
+        break;
+      case 'photo':
+        newWidget.html = '<ada-photo-frame src="https://images.unsplash.com/photo-1542314831-c6a4d1429dd4?q=80&w=2000&auto=format&fit=crop" label="My Photo"></ada-photo-frame>';
+        newWidget.cols = 4;
+        newWidget.rows = 2;
+        break;
+      case 'script':
+        newWidget.html = '<ada-script-runner script="echo \"Hello World!\""></ada-script-runner>';
+        newWidget.title = 'Action Button';
+        newWidget.icon = 'fa-bolt';
+        break;
+      case 'scratchpad':
+        newWidget.html = '<ada-scratchpad></ada-scratchpad>';
+        newWidget.cols = 4;
+        newWidget.rows = 2;
+        newWidget.title = 'Scratchpad';
+        newWidget.icon = 'fa-pen-nib';
+        break;
+    }
+    
+    if (!homepageDoc.widgets) homepageDoc.widgets = [];
+    homepageDoc.widgets.push(newWidget);
+    
+    closeWidgetLibrary();
+    renderHomepage();
+    await saveHomepageDoc();
+    
+    // Automatically open the style editor for the new widget!
+    editWidget(newWidget.id);
+  }
+
     function closeWidgetEditModal() {
       document.getElementById('widget-edit-modal').classList.add('hidden');
     }
@@ -4829,6 +4899,69 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       <div class="p-4 border-t border-dark-border bg-dark-card flex justify-end gap-3 flex-shrink-0">
         <button onclick="closeWidgetEditModal()" class="px-4 py-2 text-sm text-gray-300 hover:text-white">Cancel</button>
         <button onclick="saveWidgetEdit()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg shadow-lg">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Widget Library Modal -->
+  <div id="widget-library-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+      <div class="p-4 border-b border-dark-border flex justify-between items-center bg-dark-card flex-shrink-0">
+        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-shapes text-indigo-400 mr-2"></i>Widget Library</h3>
+        <button onclick="closeWidgetLibrary()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      
+      <div class="p-5 flex-1 overflow-y-auto custom-scrollbar">
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <!-- Library Items -->
+          <button onclick="spawnWidget('blank')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-gray-300 text-lg"><i class="fa-solid fa-square-dashed"></i></div>
+            <div class="font-bold text-white text-sm">Blank Canvas</div>
+            <div class="text-xs text-gray-500">Empty HTML container.</div>
+          </button>
+
+          <button onclick="spawnWidget('clock')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-gray-300 text-lg"><i class="fa-solid fa-clock"></i></div>
+            <div class="font-bold text-white text-sm">Digital Clock</div>
+            <div class="text-xs text-gray-500">Standard digital time display.</div>
+          </button>
+          
+          <button onclick="spawnWidget('countdown')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-gray-300 text-lg"><i class="fa-solid fa-hourglass-half"></i></div>
+            <div class="font-bold text-white text-sm">Countdown Timer</div>
+            <div class="text-xs text-gray-500">Counts down to a specific date.</div>
+          </button>
+          
+          <button onclick="spawnWidget('analog')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-gray-300 text-lg"><i class="fa-regular fa-clock"></i></div>
+            <div class="font-bold text-white text-sm">Analog Clock</div>
+            <div class="text-xs text-gray-500">Classic analog clock face.</div>
+          </button>
+
+          <button onclick="spawnWidget('gauge')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-gray-300 text-lg"><i class="fa-solid fa-gauge-high"></i></div>
+            <div class="font-bold text-white text-sm">System Gauge</div>
+            <div class="text-xs text-gray-500">CPU, Memory, or Disk metrics.</div>
+          </button>
+          
+          <button onclick="spawnWidget('photo')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-gray-300 text-lg"><i class="fa-solid fa-image"></i></div>
+            <div class="font-bold text-white text-sm">Photo Frame</div>
+            <div class="text-xs text-gray-500">Displays an image.</div>
+          </button>
+          
+          <button onclick="spawnWidget('script')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-gray-300 text-lg"><i class="fa-solid fa-terminal"></i></div>
+            <div class="font-bold text-white text-sm">Script Runner</div>
+            <div class="text-xs text-gray-500">Click to execute a bash script.</div>
+          </button>
+          
+          <button onclick="spawnWidget('scratchpad')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-gray-300 text-lg"><i class="fa-solid fa-pen-nib"></i></div>
+            <div class="font-bold text-white text-sm">Scratchpad</div>
+            <div class="text-xs text-gray-500">Rich markdown editor.</div>
+          </button>
+        </div>
       </div>
     </div>
   </div>
