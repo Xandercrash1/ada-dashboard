@@ -3991,7 +3991,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     
     switch(type) {
       case 'doc-body':
-        newWidget.html = '<ada-doc-body></ada-doc-body>';
+        newWidget.html = `<ada-doc-body widget-id="${newWidget.id}"></ada-doc-body>`;
         newWidget.cols = 4;
         newWidget.rows = 4;
         newWidget.title = '';
