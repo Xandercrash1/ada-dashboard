@@ -3866,6 +3866,45 @@ app.get('/api/calendar/events', async (req, res) => {
 });
 
 
+
+// --- KANBAN API ---
+const KANBAN_FILE = path.join(DATA_DIR, 'kanban.json');
+function readKanban() {
+  try {
+    if (!fs.existsSync(KANBAN_FILE)) {
+      return {};
+    }
+    return JSON.parse(fs.readFileSync(KANBAN_FILE, 'utf8'));
+  } catch (err) {
+    return {};
+  }
+}
+function writeKanban(data) {
+  fs.writeFileSync(KANBAN_FILE, JSON.stringify(data, null, 2));
+}
+
+app.get('/api/kanban/:id', (req, res) => {
+  const data = readKanban();
+  let board = data[req.params.id];
+  if (!board) {
+    board = {
+      columns: [
+        { id: 'col-todo', title: 'To Do', tasks: [] },
+        { id: 'col-doing', title: 'In Progress', tasks: [] },
+        { id: 'col-done', title: 'Done', tasks: [] }
+      ]
+    };
+  }
+  res.json(board);
+});
+
+app.post('/api/kanban/:id', (req, res) => {
+  const data = readKanban();
+  data[req.params.id] = req.body;
+  writeKanban(data);
+  res.json({ success: true });
+});
+
 // --- 14. SCRATCHPAD API ---
 
 // --- Doc Body Store ---
