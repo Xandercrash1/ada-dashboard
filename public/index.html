@@ -4003,6 +4003,12 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         newWidget.icon = 'fa-list-check';
         newWidget.rows = 3;
         break;
+      case 'calendar':
+        newWidget.html = '<ada-calendar></ada-calendar>';
+        newWidget.title = 'Agenda';
+        newWidget.icon = 'fa-calendar';
+        newWidget.rows = 3;
+        break;
       case 'doc-body':
         newWidget.html = `<ada-doc-body widget-id="${newWidget.id}"></ada-doc-body>`;
         newWidget.cols = 4;
@@ -4988,6 +4994,12 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             </div>
           </button>
 
+          <button onclick="spawnWidget('calendar')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
+            <div class="text-indigo-400 text-lg"><i class="fa-solid fa-calendar"></i></div>
+            <div class="font-bold text-white text-sm">Agenda</div>
+            <div class="text-xs text-gray-500">Weekly schedule and events list.</div>
+          </button>
+          
           <button onclick="spawnWidget('todo')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex flex-col gap-2">
             <div class="text-indigo-400 text-lg"><i class="fa-solid fa-list-check"></i></div>
             <div class="font-bold text-white text-sm">To-Do List</div>
