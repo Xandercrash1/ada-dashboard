@@ -4255,7 +4255,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       } else {
         try {
           await fetch(`/api/pages/${currentCanvasPage}/content`, {
-            method: 'PUT',
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             // The custom pages API expects the entire object {widgets: []}, same as homepage
             body: JSON.stringify(homepageDoc)
