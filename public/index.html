@@ -4335,7 +4335,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         let heightClass = "";
         if (!w.html.includes('ada-photo-frame') && !w.html.includes('ada-scratchpad') && !w.html.includes('ada-doc-body')) {
            const rows = w.rows || 1;
-           const heights = { 1: 'h-[120px]', 2: 'h-[256px]', 3: 'h-[392px]', 4: 'h-[528px]', 5: 'h-[664px]', 6: 'h-[800px]' };
+           const heights = { 1: 'min-h-[120px]', 2: 'min-h-[256px]', 3: 'min-h-[392px]', 4: 'min-h-[528px]', 5: 'min-h-[664px]', 6: 'min-h-[800px]' };
            heightClass = heights[rows] || 'h-[120px]';
         }
 
@@ -4358,31 +4358,24 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           </div>`;
       };
 
-      if (window.isEditingLayout) {
-        const addWidgetCard = {
-          id: 'add-widget-btn',
-          html: `
-          <div class="w-full h-[120px] rounded-2xl border-2 border-dashed border-dark-border hover:border-indigo-500/50 hover:bg-indigo-500/5 flex flex-col items-center justify-center cursor-pointer transition-colors text-gray-500 hover:text-indigo-400" onclick="openWidgetLibrary()">
-            <i class="fa-solid fa-plus text-2xl mb-2"></i>
-            <span class="text-xs font-bold uppercase tracking-wider">Add Widget</span>
-          </div>`,
-          cols: 2,
-          rows: 1
-        };
-        widgets.push(addWidgetCard);
-      }
+
+
+      const addBtnHtml = window.isEditingLayout ? `
+        <div class="col-span-full h-[120px] rounded-2xl border-2 border-dashed border-dark-border hover:border-indigo-500/50 hover:bg-indigo-500/5 flex flex-col items-center justify-center cursor-pointer transition-colors text-gray-500 hover:text-indigo-400 w-full" onclick="openWidgetLibrary()">
+          <i class="fa-solid fa-plus text-2xl mb-2"></i>
+          <span class="text-xs font-bold uppercase tracking-wider">Add Widget</span>
+        </div>` : '';
 
       if (bodyWidget) {
         const otherWidgets = widgets.filter(w => w.id !== bodyWidget.id);
         grid.innerHTML = `
           <div class="flex flex-col lg:flex-row gap-6 w-full max-w-7xl mx-auto">
-            <div class="flex-1 w-full lg:w-3/4 bg-gray-50 dark:bg-dark-card rounded-3xl min-h-[60vh] overflow-hidden">
+            <div class="flex-1 w-full lg:w-3/4 bg-gray-50 dark:bg-dark-card rounded-3xl min-h-[60vh] overflow-hidden border border-gray-200 dark:border-dark-border shadow-lg">
                ${renderWidgetCard(bodyWidget)}
             </div>
-            <div class="w-full lg:w-1/4 flex flex-col">
-               <div class="grid grid-cols-2 gap-4 grid-flow-row-dense auto-rows-auto">
+            <div class="w-full lg:w-1/4 flex flex-col gap-6">
                  ${otherWidgets.map(renderWidgetCard).join('')}
-               </div>
+                 ${addBtnHtml}
             </div>
           </div>
         `;
@@ -4390,6 +4383,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         grid.innerHTML = `
           <div class="w-full grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[10px]">
              ${widgets.map(renderWidgetCard).join('')}
+             ${addBtnHtml}
           </div>
         `;
       }
