@@ -3,7 +3,7 @@ class ScratchpadWidget extends HTMLElement {
     super();
     this.text = "";
     this.typingTimer = null;
-    this.mdTimer = null;
+    
     this.previewing = false;
   }
 
@@ -57,7 +57,7 @@ class ScratchpadWidget extends HTMLElement {
 
   handleInput() {
     clearTimeout(this.typingTimer);
-    clearTimeout(this.mdTimer);
+    
     const statusIcon = this.querySelector('#scratchpad-status');
     if (statusIcon) statusIcon.className = 'fa-solid fa-pen text-amber-500';
 
@@ -65,7 +65,7 @@ class ScratchpadWidget extends HTMLElement {
     this.typingTimer = setTimeout(() => this.saveText(), 1000);
     // Markdown renders only after typing goes quiet, so the swap never
     // fights the keystroke flow (fb-1787944441070; tightened 5s→2s per Alex).
-    this.mdTimer = setTimeout(() => this.showPreview(), 2000);
+    
   }
 
   showPreview() {
@@ -149,7 +149,9 @@ class ScratchpadWidget extends HTMLElement {
       </div>
     `;
 
-    this.querySelector('textarea').addEventListener('input', () => this.handleInput());
+    const textarea = this.querySelector('textarea');
+    textarea.addEventListener('input', () => this.handleInput());
+    textarea.addEventListener('blur', () => this.showPreview());
     this.querySelector('[data-md-preview]').addEventListener('click', () => this.showEditor());
   }
 }

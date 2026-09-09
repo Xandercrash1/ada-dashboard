@@ -5,6 +5,7 @@ class DocBodyWidget extends HTMLElement {
     this.typingTimer = null;
     
     this.widgetId = null;
+    this.fadeTimer = null;
   }
 
   connectedCallback() {
@@ -46,7 +47,10 @@ class DocBodyWidget extends HTMLElement {
     this.text = textarea.value;
     
     const statusIcon = this.querySelector('#doc-status');
-    if (statusIcon) statusIcon.style.opacity = '1';
+    if (statusIcon) {
+      statusIcon.style.opacity = '1';
+      statusIcon.className = 'fa-solid fa-spinner fa-spin text-gray-500 text-[10px] transition-all duration-300';
+    }
 
     try {
       await fetch(`/api/docs/${this.widgetId}`, {
@@ -55,11 +59,16 @@ class DocBodyWidget extends HTMLElement {
         body: JSON.stringify({ text: this.text })
       });
       if (statusIcon) {
-        statusIcon.className = 'fa-solid fa-check text-emerald-500 text-xs';
-        setTimeout(() => { if (statusIcon) statusIcon.style.opacity = '0'; }, 2000);
+        statusIcon.className = 'fa-solid fa-cloud-arrow-up text-emerald-500 text-[10px] transition-all duration-300';
+        setTimeout(() => { if (statusIcon) statusIcon.className = 'fa-solid fa-cloud text-gray-500 text-[10px] transition-all duration-300'; }, 2000);
+        
+        clearTimeout(this.fadeTimer);
+        this.fadeTimer = setTimeout(() => { if (statusIcon) statusIcon.style.opacity = '0'; }, 45000);
       }
     } catch (e) {
-      if (statusIcon) statusIcon.className = 'fa-solid fa-triangle-exclamation text-rose-500 text-xs';
+      if (statusIcon) {
+        statusIcon.className = 'fa-solid fa-circle-exclamation text-rose-500 text-[10px] transition-all duration-300';
+      }
     }
   }
 
@@ -68,7 +77,7 @@ class DocBodyWidget extends HTMLElement {
     
     const statusIcon = this.querySelector('#doc-status');
     if (statusIcon) {
-      statusIcon.className = 'fa-solid fa-pen text-indigo-400 text-xs';
+      statusIcon.className = 'fa-solid fa-pen text-indigo-400 text-[10px] transition-all duration-300';
       statusIcon.style.opacity = '1';
     }
 
@@ -132,7 +141,7 @@ class DocBodyWidget extends HTMLElement {
     this.innerHTML = `
       <div class="relative w-full h-full p-4 group">
         <div class="absolute top-2 right-4 flex items-center justify-end h-4 w-4">
-           <i id="doc-status" class="fa-solid fa-check text-emerald-500 text-xs transition-opacity duration-300" style="opacity: 0;"></i>
+           <i id="doc-status" class="fa-solid fa-cloud text-gray-600 text-[10px] transition-all duration-300" style="opacity: 0;"></i>
         </div>
         
         <textarea class="w-full h-full min-h-[300px] bg-transparent border-none resize-none focus:outline-none text-gray-800 dark:text-gray-200 text-base placeholder-gray-400 dark:placeholder-gray-600 custom-scrollbar leading-relaxed" placeholder="Type '/' for commands, or start writing your document here..."></textarea>
