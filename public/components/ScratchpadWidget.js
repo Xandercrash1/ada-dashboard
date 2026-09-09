@@ -135,7 +135,7 @@ class ScratchpadWidget extends HTMLElement {
                    `bg-dark-bg/60 backdrop-blur-xl border border-white/10`; 
 
     this.innerHTML = `
-      <div class="${bgClass} rounded-2xl p-4 flex flex-col transition-all duration-300 group">
+      <div class="${bgClass} rounded-2xl p-4 flex flex-col h-full overflow-hidden transition-all duration-300 group">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-2 text-${accent}-400">
             <i class="fa-solid fa-note-sticky text-sm"></i>
@@ -144,7 +144,7 @@ class ScratchpadWidget extends HTMLElement {
           <i id="scratchpad-status" class="fa-solid fa-cloud text-gray-600 text-[10px] transition-colors"></i>
         </div>
         
-        <textarea class="w-full bg-transparent border-none resize-none focus:outline-none text-gray-200 text-sm placeholder-gray-600 custom-scrollbar" placeholder="Type a quick note here... It syncs instantly across all your devices. Markdown renders when you pause."></textarea>
+        <textarea class="flex-1 w-full h-full min-h-[100px] bg-transparent border-none resize-none focus:outline-none text-gray-200 text-sm placeholder-gray-600 custom-scrollbar" placeholder="Type a quick note here... It syncs instantly across all your devices. Markdown renders when you pause."></textarea>
         <div data-md-preview class="hidden w-full overflow-y-auto custom-scrollbar cursor-text prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 marker:text-${accent}-400 prose-a:text-${accent}-400" title="Click to edit"></div>
       </div>
     `;
