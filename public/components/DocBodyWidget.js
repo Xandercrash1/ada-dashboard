@@ -40,6 +40,7 @@ class DocBodyWidget extends HTMLElement {
       if (res.ok || res.status === 404) {
         const data = res.ok ? await res.json() : { text: '' };
         this.text = data.text || "";
+        this.updatedAt = data.updatedAt || null; // version we loaded (fb-1789015021701)
         const textarea = this.querySelector('textarea');
         if (textarea) {
           const focused = document.activeElement === textarea;
@@ -85,11 +86,25 @@ class DocBodyWidget extends HTMLElement {
     }
 
     try {
-      await fetch(`/api/docs/${this.widgetId}`, {
+      const res = await fetch(`/api/docs/${this.widgetId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: this.text })
+        body: JSON.stringify({ text: this.text, expectedUpdatedAt: this.updatedAt })
       });
+      if (res.status === 409) {
+        // Someone else saved this document since we loaded it. Refuse to
+        // overwrite; tell the user; keep their text in the textarea.
+        if (statusIcon) statusIcon.className = 'fa-solid fa-triangle-exclamation text-amber-500 text-[10px] transition-all duration-300';
+        if (typeof window.showAppToast === 'function') {
+          window.showAppToast('This document changed elsewhere. Reload to see the latest — your unsaved text stays in the editor until you do.', 'warn', { label: 'Reload', onClick: () => location.reload() });
+        }
+        console.warn('[doc-body] save refused: document is stale');
+        return;
+      }
+      if (res.ok) {
+        const out = await res.json().catch(() => ({}));
+        if (out.updatedAt) this.updatedAt = out.updatedAt;
+      }
       if (statusIcon) {
         statusIcon.className = 'fa-solid fa-cloud-arrow-up text-emerald-500 text-[10px] transition-all duration-300';
         setTimeout(() => { if (statusIcon) statusIcon.className = 'fa-solid fa-cloud text-gray-500 text-[10px] transition-all duration-300'; }, 2000);

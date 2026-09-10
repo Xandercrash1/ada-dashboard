@@ -245,6 +245,9 @@
           <button onclick="openPageDesigner()" id="designer-btn" class="hidden px-3 py-1.5 rounded-lg bg-purple-50 border border-purple-300 text-purple-700 hover:bg-purple-100 dark:bg-purple-600/20 dark:border-purple-500/60 dark:text-purple-300 dark:hover:text-white dark:hover:bg-purple-600/40 text-xs font-medium items-center gap-2 transition-all">
             <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Designer</span>
           </button>
+          <!-- LAYOUT UNDO / REDO (fb-1789015021616) — edit mode only; Cmd/Ctrl-Z and Shift-Cmd-Z also work -->
+          <button onclick="undoLayout()" id="undo-layout-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Undo layout change (Cmd-Z)"><i class="fa-solid fa-rotate-left"></i></button>
+          <button onclick="redoLayout()" id="redo-layout-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Redo layout change (Shift-Cmd-Z)"><i class="fa-solid fa-rotate-right"></i></button>
           <!-- PAGE THEME PRESET (fb-1788928004000) — edit mode only; applies one cohesive theme/accent to every widget on this page -->
           <select id="page-theme-select" onchange="applyPageTheme(this.value)" title="Page theme preset" class="hidden px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-300 hover:text-white hover:border-gray-500 text-xs font-medium focus:outline-none focus:border-indigo-500 transition-all">
             <option value="custom">Theme: Custom</option>
@@ -2287,11 +2290,8 @@
     async function deleteCurrentPage() {
        const pageId = currentCanvasPage;
        if (!customPages.some(p => p.id === pageId)) return;
-       const confirmWord = prompt(`Are you absolutely sure you want to delete this page? This cannot be undone.\n\nType the word "DELETE" to confirm:`);
-       if (confirmWord !== 'DELETE') {
-         alert('Deletion cancelled.');
-         return;
-       }
+       const confirmWord = await adaPrompt({ title: 'Delete this page?', message: 'This cannot be undone. Type DELETE to confirm.', placeholder: 'DELETE', confirmLabel: 'Delete page', danger: true });
+       if (confirmWord !== 'DELETE') return;
        
        try {
          const res = await fetch(`/api/pages/${pageId}`, { method: 'DELETE' });
@@ -2310,7 +2310,7 @@
     }
 
     async function createNewPage() {
-       const title = prompt("Enter new page title (e.g. 'Roadmap'):");
+       const title = (await adaPrompt({ title: 'New page', message: 'Page title', placeholder: 'e.g. Roadmap', confirmLabel: 'Create' }) || '').trim();
        if (!title) return;
        const id = title.toLowerCase().replace(/[^a-z0-9]/g, '-');
        try {
@@ -3961,6 +3961,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         if (!res.ok) throw new Error('HTTP ' + res.status);
         homepageDoc = await res.json();
         window.homepageDoc = homepageDoc;
+        resetLayoutHistory();
         renderHomepage(); // draws it using homepageDoc
       } catch (err) {
         console.error(`Page ${pageId} failed to load`, err);
@@ -4005,6 +4006,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         themeSel.classList.toggle('hidden', !window.isEditingLayout);
         syncPageThemeSelect();
       }
+      updateLayoutHistoryButtons();
       if (window.isEditingLayout) {
         // Light-mode readable + dark variants (fb-1789012380662).
         btn.classList.add('bg-indigo-50', 'border-indigo-400', 'text-indigo-700', 'dark:bg-indigo-500/20', 'dark:border-indigo-500', 'dark:text-indigo-400');
@@ -4022,13 +4024,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       renderHomepage();
     }
 
-    // Builder toast — shares the notification toast host; optional action button.
-    function showBuilderToast(text, action) {
+    // App toast — shares the notification toast host; optional action button.
+    // level: info | success | warn | error. Also backs window.alert (below).
+    function showAppToast(text, level, action, icon) {
       const host = document.getElementById('ntf-toasts');
       if (!host) return;
+      const lv = (typeof NTF_LEVEL !== 'undefined' && NTF_LEVEL[level]) || { icon: 'fa-circle-info', border: 'border-indigo-500/50', text: 'text-indigo-300' };
       const el = document.createElement('div');
-      el.className = 'ntf-toast pointer-events-auto bg-dark-bg/95 backdrop-blur-xl border border-indigo-500/50 rounded-2xl shadow-2xl px-4 py-3 flex gap-3 items-center';
-      el.innerHTML = `<i class="fa-solid fa-pen-ruler text-indigo-300"></i><div class="text-xs text-white flex-1">${escapeHtml(text)}</div>`;
+      el.className = `ntf-toast pointer-events-auto bg-dark-bg/95 backdrop-blur-xl border ${lv.border} rounded-2xl shadow-2xl px-4 py-3 flex gap-3 items-center`;
+      el.innerHTML = `<i class="fa-solid ${icon || lv.icon} ${lv.text}"></i><div class="text-xs text-white flex-1 break-words">${escapeHtml(text)}</div>`;
       if (action) {
         const b = document.createElement('button');
         b.className = 'text-xs font-bold text-indigo-300 hover:text-white px-2';
@@ -4042,7 +4046,53 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       x.onclick = () => el.remove();
       el.appendChild(x);
       host.appendChild(el);
-      setTimeout(() => el.remove(), 8000);
+      if (level !== 'warn' && level !== 'error') setTimeout(() => el.remove(), 8000);
+      return el;
+    }
+    window.showAppToast = showAppToast;
+    // Native alert() is a blocking dialog that looks dated, is awkward on
+    // mobile and freezes browser automation (fb-1789015021644). Every alert
+    // in this file is a one-way notice, so a warn-level toast is equivalent.
+    window.alert = (msg) => { showAppToast(String(msg), 'warn'); };
+
+    // In-app prompt replacing window.prompt(): resolves the entered text, or
+    // null on Cancel / Escape / backdrop. opts: title, message, placeholder,
+    // confirmLabel, danger, defaultValue.
+    function adaPrompt(opts) {
+      return new Promise((resolve) => {
+        const m = document.getElementById('ada-prompt-modal');
+        if (!m) return resolve(window.__nativePrompt ? window.__nativePrompt(opts.message || '') : null);
+        m.querySelector('#ada-prompt-title').textContent = opts.title || 'Input';
+        m.querySelector('#ada-prompt-message').textContent = opts.message || '';
+        const input = m.querySelector('#ada-prompt-input');
+        input.placeholder = opts.placeholder || '';
+        input.value = opts.defaultValue || '';
+        const ok = m.querySelector('#ada-prompt-ok');
+        ok.textContent = opts.confirmLabel || 'OK';
+        ok.className = 'px-4 py-2 rounded-lg text-xs font-bold text-white ' + (opts.danger ? 'bg-rose-600 hover:bg-rose-500' : 'bg-indigo-600 hover:bg-indigo-500');
+        m.classList.remove('hidden');
+        setTimeout(() => input.focus(), 30);
+        const done = (val) => { cleanup(); m.classList.add('hidden'); resolve(val); };
+        const onKey = (e) => { if (e.key === 'Escape') done(null); else if (e.key === 'Enter') done(input.value); };
+        const onOk = () => done(input.value);
+        const onCancel = () => done(null);
+        const onBackdrop = (e) => { if (e.target === m) done(null); };
+        function cleanup() {
+          input.removeEventListener('keydown', onKey);
+          ok.removeEventListener('click', onOk);
+          m.querySelector('#ada-prompt-cancel').removeEventListener('click', onCancel);
+          m.removeEventListener('click', onBackdrop);
+        }
+        input.addEventListener('keydown', onKey);
+        ok.addEventListener('click', onOk);
+        m.querySelector('#ada-prompt-cancel').addEventListener('click', onCancel);
+        m.addEventListener('click', onBackdrop);
+      });
+    }
+    window.adaPrompt = adaPrompt;
+
+    function showBuilderToast(text, action) {
+      return showAppToast(text, 'info', action, 'fa-pen-ruler');
     }
 
     // Remove is undoable (fb-1788986893065): the widget is kept with its
@@ -4338,7 +4388,10 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (!window.isEditingLayout) return;
       draggedWidgetId = id;
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', id);
+      // One payload format everywhere (fb-1789015021758): the shortcode the
+      // DocBody speaks, plus a typed copy for drop targets that want the id.
+      e.dataTransfer.setData('text/plain', `[widget: ${id}]`);
+      e.dataTransfer.setData('application/x-ada-widget', id);
       e.target.style.opacity = '0.4';
     }
 
@@ -4608,29 +4661,85 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       await saveHomepageDoc();
     }
 
-    window.saveHomepageDoc = async function saveHomepageDoc() {
+    // ---- Layout history (fb-1789015021616) ----
+    // Snapshots are taken of the LAST SAVED state, so no mutation site needs
+    // to know about undo: saveHomepageDoc pushes the previous state before
+    // it writes. Per page; reset on load.
+    let layoutHistory = { past: [], future: [], lastSaved: null };
+    const cloneDoc = (d) => JSON.parse(JSON.stringify(d));
+    function resetLayoutHistory() {
+      layoutHistory = { past: [], future: [], lastSaved: homepageDoc ? cloneDoc(homepageDoc) : null };
+      updateLayoutHistoryButtons();
+    }
+    function updateLayoutHistoryButtons() {
+      const u = document.getElementById('undo-layout-btn'), r = document.getElementById('redo-layout-btn');
+      if (u) { u.classList.toggle('hidden', !window.isEditingLayout); u.disabled = layoutHistory.past.length === 0; u.classList.toggle('opacity-40', u.disabled); }
+      if (r) { r.classList.toggle('hidden', !window.isEditingLayout); r.disabled = layoutHistory.future.length === 0; r.classList.toggle('opacity-40', r.disabled); }
+    }
+    async function restoreLayoutSnapshot(snap) {
+      // Keep the live version stamp so the optimistic save is not refused.
+      snap.updatedAt = homepageDoc && homepageDoc.updatedAt;
+      homepageDoc = snap;
+      window.homepageDoc = homepageDoc;
+      renderHomepage();
+      await saveHomepageDoc({ skipHistory: true });
+    }
+    async function undoLayout() {
+      if (!layoutHistory.past.length || !homepageDoc) return;
+      layoutHistory.future.push(cloneDoc(homepageDoc));
+      await restoreLayoutSnapshot(layoutHistory.past.pop());
+      updateLayoutHistoryButtons();
+    }
+    async function redoLayout() {
+      if (!layoutHistory.future.length || !homepageDoc) return;
+      layoutHistory.past.push(cloneDoc(homepageDoc));
+      await restoreLayoutSnapshot(layoutHistory.future.pop());
+      updateLayoutHistoryButtons();
+    }
+    document.addEventListener('keydown', (e) => {
+      if (!window.isEditingLayout) return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redoLayout(); else undoLayout();
+      }
+    });
+
+    // Optimistic save (fb-1789015021701): send the version we loaded; a 409
+    // means the page changed elsewhere — never overwrite, offer a reload.
+    function onStaleSave(info) {
+      const who = info && info.updatedBy ? ` (by ${info.updatedBy})` : '';
+      showAppToast(`This page changed elsewhere${who}. Reload it to see the latest — your last change was not saved.`, 'warn', { label: 'Reload page', onClick: () => loadPage(currentCanvasPage) });
+    }
+    window.saveHomepageDoc = async function saveHomepageDoc(opts) {
       if (!homepageDoc) return;
-      if (currentCanvasPage === 'home') {
-        try {
-          await fetch('/api/homepage', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(homepageDoc)
-          });
-        } catch (e) {
-          console.error('Failed to save homepage layout', e);
+      const skipHistory = opts && opts.skipHistory;
+      if (!skipHistory && layoutHistory.lastSaved) {
+        layoutHistory.past.push(layoutHistory.lastSaved);
+        if (layoutHistory.past.length > 50) layoutHistory.past.shift();
+        layoutHistory.future = [];
+      }
+      const payload = JSON.stringify({ ...homepageDoc, expectedUpdatedAt: homepageDoc.updatedAt || undefined });
+      const url = currentCanvasPage === 'home' ? '/api/homepage' : `/api/pages/${currentCanvasPage}/content`;
+      const method = currentCanvasPage === 'home' ? 'PUT' : 'POST';
+      try {
+        const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: payload });
+        if (res.status === 409) {
+          const info = await res.json().catch(() => ({}));
+          onStaleSave(info);
+          return false;
         }
-      } else {
-        try {
-          await fetch(`/api/pages/${currentCanvasPage}/content`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            // The custom pages API expects the entire object {widgets: []}, same as homepage
-            body: JSON.stringify(homepageDoc)
-          });
-        } catch (e) {
-          console.error(`Failed to save page ${currentCanvasPage}`, e);
-        }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const out = await res.json().catch(() => ({}));
+        if (out && out.updatedAt) homepageDoc.updatedAt = out.updatedAt;
+        layoutHistory.lastSaved = cloneDoc(homepageDoc);
+        updateLayoutHistoryButtons();
+        return true;
+      } catch (e) {
+        console.error(`Failed to save page ${currentCanvasPage}`, e);
+        showAppToast('Saving the page failed — check the connection and try again.', 'error');
+        return false;
       }
     }
 
@@ -5486,6 +5595,19 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
 
   <!-- Widget Edit Modal -->
+  <!-- IN-APP PROMPT — replaces window.prompt() (fb-1789015021644) -->
+  <div id="ada-prompt-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4">
+    <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-3">
+      <h3 id="ada-prompt-title" class="text-white font-bold text-sm"></h3>
+      <p id="ada-prompt-message" class="text-xs text-gray-400"></p>
+      <input id="ada-prompt-input" type="text" autocomplete="off" class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+      <div class="flex justify-end gap-2 pt-1">
+        <button id="ada-prompt-cancel" class="px-4 py-2 rounded-lg text-xs font-medium text-gray-400 hover:text-white">Cancel</button>
+        <button id="ada-prompt-ok" class="px-4 py-2 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500">OK</button>
+      </div>
+    </div>
+  </div>
+
   <div id="widget-edit-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
       <div class="p-4 border-b border-dark-border flex justify-between items-center bg-dark-card flex-shrink-0">

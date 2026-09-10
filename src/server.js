@@ -702,7 +702,13 @@ app.get('/api/homepage', (req, res) => {
 // the file directly instead.
 app.put('/api/homepage', (req, res) => {
   const current = readHomepage();
-  const { announcement, widgets, sections, updatedBy, pageTheme, glanceTheme } = req.body || {};
+  const { announcement, widgets, sections, updatedBy, pageTheme, glanceTheme, expectedUpdatedAt } = req.body || {};
+  // Optimistic concurrency (fb-1789015021701): a client that says which
+  // version it loaded is refused if the page moved on since. Callers that
+  // send nothing (agents, older clients) keep last-write-wins.
+  if (expectedUpdatedAt && current.updatedAt && expectedUpdatedAt !== current.updatedAt) {
+    return res.status(409).json({ error: 'stale', message: 'This page changed elsewhere since you loaded it.', updatedAt: current.updatedAt, updatedBy: current.updatedBy });
+  }
   if (announcement !== undefined && (typeof announcement !== 'object' || announcement === null)) {
     return res.status(400).json({ error: 'announcement must be an object' });
   }
@@ -910,8 +916,18 @@ app.post('/api/pages/:id/content', (req, res) => {
   const id = req.params.id;
   const docPath = getPageDocPath(id);
   try {
-    fs.writeFileSync(docPath, JSON.stringify(req.body, null, 2));
-    res.json({ success: true });
+    const { expectedUpdatedAt, ...doc } = req.body || {};
+    // Same optimistic check as PUT /api/homepage (fb-1789015021701).
+    if (expectedUpdatedAt && fs.existsSync(docPath)) {
+      let current = null;
+      try { current = readJsonStoreOrThrow(docPath); } catch (e) { current = null; }
+      if (current && current.updatedAt && current.updatedAt !== expectedUpdatedAt) {
+        return res.status(409).json({ error: 'stale', message: 'This page changed elsewhere since you loaded it.', updatedAt: current.updatedAt, updatedBy: current.updatedBy });
+      }
+    }
+    doc.updatedAt = new Date().toISOString();
+    fs.writeFileSync(docPath, JSON.stringify(doc, null, 2));
+    res.json({ success: true, updatedAt: doc.updatedAt });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4172,8 +4188,19 @@ app.get('/api/docs/:id', (req, res) => {
 app.post('/api/docs/:id', (req, res) => {
   const docPath = path.join(DOCS_DIR, `${req.params.id}.json`);
   const text = req.body.text || '';
-  fs.writeFileSync(docPath, JSON.stringify({ text, updatedAt: new Date().toISOString() }));
-  res.json({ success: true });
+  const expectedUpdatedAt = req.body.expectedUpdatedAt;
+  // Optimistic check (fb-1789015021701): two tabs on one document, or an
+  // agent rewriting it while Alex types, no longer silently clobber each other.
+  if (expectedUpdatedAt && fs.existsSync(docPath)) {
+    let current = null;
+    try { current = JSON.parse(fs.readFileSync(docPath, 'utf8')); } catch (e) { current = null; }
+    if (current && current.updatedAt && current.updatedAt !== expectedUpdatedAt) {
+      return res.status(409).json({ error: 'stale', message: 'This document changed elsewhere since you loaded it.', updatedAt: current.updatedAt });
+    }
+  }
+  const updatedAt = new Date().toISOString();
+  fs.writeFileSync(docPath, JSON.stringify({ text, updatedAt }));
+  res.json({ success: true, updatedAt });
 });
 
 app.get('/api/scratchpad', (req, res) => {
