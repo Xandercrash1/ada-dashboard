@@ -278,6 +278,23 @@ class DocBodyWidget extends HTMLElement {
     }
   }
 
+  // What a drop onto the document carries depends on where the drag began:
+  // the slash menu and re-drags of an existing embed carry the `[widget: id]`
+  // shortcode, but the page builder's widget cards (handleWidgetDragStart in
+  // index.html) carry the BARE widget id. Until 2026-09-09 only the shortcode
+  // form matched, so dragging a sidebar widget into the document did nothing,
+  // silently — the "drag-and-drop fails" report (fb-1788929000123). Accept
+  // both; a bare id must name a widget on this page.
+  shortcodeFromDragData(rawData) {
+    if (!rawData) return null;
+    const m = rawData.match(/\[widget:\s*([a-zA-Z0-9-]+)\]/);
+    if (m) return `[widget: ${m[1]}]`;
+    const id = rawData.trim();
+    const widgets = (window.homepageDoc && window.homepageDoc.widgets) || [];
+    if (/^[a-zA-Z0-9-]+$/.test(id) && widgets.some(w => w.id === id)) return `[widget: ${id}]`;
+    return null;
+  }
+
   checkSelection(e) {
     const textarea = this.querySelector('textarea');
     const toolbar = this.querySelector('#format-toolbar');
@@ -491,9 +508,8 @@ class DocBodyWidget extends HTMLElement {
       e.preventDefault();
       
       const rawData = e.dataTransfer.getData('text/plain');
-      const match = rawData.match(/\[widget:\s*(.+)\]/);
-      if (match) {
-        const shortcode = match[0];
+      const shortcode = this.shortcodeFromDragData(rawData);
+      if (shortcode) {
         
         // Try to insert exactly where dropped!
         let inserted = false;
@@ -538,9 +554,9 @@ class DocBodyWidget extends HTMLElement {
       if (!window.isEditingLayout) return;
       e.preventDefault();
       const rawData = e.dataTransfer.getData('text/plain');
-      const match = rawData.match(/\[widget:\s*(.+)\]/);
-      if (match) {
-        textarea.value += '\n\n' + match[0] + '\n';
+      const shortcode = this.shortcodeFromDragData(rawData);
+      if (shortcode) {
+        textarea.value += '\n\n' + shortcode + '\n';
         this.saveText();
         this.showPreview();
       }
