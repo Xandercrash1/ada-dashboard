@@ -3207,6 +3207,38 @@ function decorateArchived(items, nowMs) {
   return items.map(i => ({ ...i, archived: computeArchived(i, nowMs) }));
 }
 
+// Retention (Alex, 2026-09-10): an archived ticket is deleted 30 days after it
+// was closed. Runs at boot and every 6 h. Each purged item is appended to
+// data/feedback-purged.jsonl first — not a graveyard the UI shows, just the
+// one-line-per-ticket record that makes "what did we close in August?"
+// answerable. Open tickets and closed tickets without a processedAt are
+// never touched (no timestamp -> no guessing, same rule as computeArchived).
+const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+const FEEDBACK_PURGED_FILE = path.join(DATA_DIR, 'feedback-purged.jsonl');
+function purgeArchivedFeedback() {
+  try {
+    const nowMs = todoEngine.now().getTime();
+    const items = readFeedback();
+    const keep = [], purge = [];
+    for (const i of items) {
+      const closed = i.status === 'done' || i.status === 'wont-do';
+      const t = i.processedAt ? new Date(i.processedAt).getTime() : NaN;
+      if (closed && !Number.isNaN(t) && nowMs - t > PURGE_AFTER_MS) purge.push(i); else keep.push(i);
+    }
+    if (!purge.length) return 0;
+    const purgedAt = new Date(nowMs).toISOString();
+    fs.appendFileSync(FEEDBACK_PURGED_FILE, purge.map(i => JSON.stringify({ ...i, purgedAt })).join('\n') + '\n');
+    writeFeedback(keep);
+    console.log(`[feedback] purged ${purge.length} archived ticket(s) older than 30 days (recorded in feedback-purged.jsonl)`);
+    return purge.length;
+  } catch (err) {
+    console.error('[feedback] purge failed:', err.message);
+    return 0;
+  }
+}
+setTimeout(purgeArchivedFeedback, 5000);
+setInterval(purgeArchivedFeedback, 6 * 60 * 60 * 1000);
+
 // Shared by the HTTP route and the agent tool (executeLocalTool) below, so
 // both paths apply the exact same validation and processedAt semantics.
 function applyFeedbackUpdate(item, patch) {
