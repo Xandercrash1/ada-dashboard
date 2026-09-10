@@ -2093,7 +2093,7 @@
               <p class="text-xs text-gray-400 leading-relaxed">${s.description}</p>
             </div>
 
-            <button onclick="runScript('${s.id}', '${s.name}')" class="w-full bg-dark-bg hover:bg-indigo-600 border border-dark-border hover:border-indigo-500 text-white text-xs font-semibold py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm">
+            <button onclick="runScript('${s.id}', '${s.name}')" class="w-full bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white text-xs font-semibold py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm">
               <i class="fa-solid fa-play text-[10px]"></i> Run Script Now
             </button>
           </div>
@@ -5463,7 +5463,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       function getMode() { try { return localStorage.getItem('ada_theme') || 'auto'; } catch (e) { return 'auto'; } }
       function render() {
         var meta = META[getMode()] || META.auto;
-        document.querySelectorAll('.theme-cycle').forEach(function (b) {
+        // .ntf-bell borrows the button styling but is not a theme toggle (fb-1789013839607).
+        document.querySelectorAll('.theme-cycle:not(.ntf-bell)').forEach(function (b) {
           b.title = 'Theme: ' + meta.label + ' — click to change';
           var ic = b.querySelector('i'); if (ic) ic.className = 'fa-solid ' + meta.icon;
           var lb = b.querySelector('.theme-cycle-label'); if (lb) lb.textContent = meta.label;
