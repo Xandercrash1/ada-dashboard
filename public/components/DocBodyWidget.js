@@ -26,19 +26,40 @@ class DocBodyWidget extends HTMLElement {
     this.fetchText();
   }
 
+  // Save-before-load guard (2026-09-09). fetchText used to skip filling the
+  // textarea when it already had focus, and saveText had no idea whether the
+  // document had loaded yet. Click into the body before the fetch resolved
+  // (a few hundred ms on a slow link), type or drop anything, and the save
+  // wrote the empty textarea over the real document. Reproduced in Alex's
+  // Brave: "test" was overwritten by a single dropped shortcode.
   async fetchText() {
     if (!this.widgetId) return;
+    this.loaded = false;
     try {
       const res = await fetch(`/api/docs/${this.widgetId}`);
-      if (res.ok) {
-        const data = await res.json();
+      if (res.ok || res.status === 404) {
+        const data = res.ok ? await res.json() : { text: '' };
         this.text = data.text || "";
         const textarea = this.querySelector('textarea');
-        if (textarea && document.activeElement !== textarea) {
-          textarea.value = this.text;
+        if (textarea) {
+          const focused = document.activeElement === textarea;
+          if (!focused || !textarea.value) {
+            // Not being typed in, or focused but still empty: fill it. If the
+            // user already has the caret in it, keep the caret at the end.
+            textarea.value = this.text;
+            if (focused) textarea.setSelectionRange(this.text.length, this.text.length);
+          } else if (this.text && !textarea.value.includes(this.text)) {
+            // Typed before the load finished: keep both rather than lose either.
+            textarea.value = this.text + '\n\n' + textarea.value;
+            console.warn('[doc-body] document loaded after typing began; merged both');
+          }
           setTimeout(() => this.adjustHeight(), 50);
-          if (this.text.trim() && !window.isEditingLayout) this.showPreview();
+          if (this.text.trim() && !window.isEditingLayout && !focused) this.showPreview();
         }
+        this.loaded = true;
+        if (this.pendingSave) { this.pendingSave = false; this.saveText(); }
+      } else {
+        console.error(`[doc-body] load failed (HTTP ${res.status}); saves are held until a reload succeeds`);
       }
     } catch (e) {
       console.error("Failed to load doc body:", e);
@@ -49,6 +70,12 @@ class DocBodyWidget extends HTMLElement {
     if (!this.widgetId) return;
     const textarea = this.querySelector('textarea');
     if (!textarea) return;
+    if (!this.loaded) {
+      // Never overwrite a document we have not read yet — queue the save and
+      // let fetchText flush it once the real text is in the textarea.
+      this.pendingSave = true;
+      return;
+    }
     this.text = textarea.value;
     
     const statusIcon = this.querySelector('#doc-status');
