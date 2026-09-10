@@ -173,6 +173,22 @@ function pushNotification({ level = 'info', title, body = '', source = 'system',
 // a false positive is one dismissable banner; a false negative is the status
 // quo. Tune from real transcripts, not from imagination.
 const ROADBLOCK_RE = /\b(roadblock|blocked on|i(?:'m| am) blocked|cannot proceed|can't proceed|unable to proceed|need(?:s)? (?:your )?(?:input|approval|permission|decision|confirmation|clarification)|waiting (?:on|for) (?:you|your)|please (?:confirm|advise|clarify))\b/i;
+// Negated mentions ("didn't need your input", "no longer blocked") are not
+// roadblocks, and a phrase buried in a completion report is weaker than one
+// at the end of the reply or inside a question (fb-1789013839634).
+const ROADBLOCK_NEGATION_RE = /\b(?:did ?n[o']t|does ?n[o']t|do ?n[o']t|no longer|not|never|without|wasn't|isn't|wouldn't)\s+(?:\w+\s+){0,2}(?:need|needs|wait|waiting|blocked|block)\b[^.!?\n]*/gi;
+function looksLikeRoadblock(text) {
+  if (!text) return false;
+  const cleaned = String(text).replace(ROADBLOCK_NEGATION_RE, ' ');
+  if (!ROADBLOCK_RE.test(cleaned)) return false;
+  // Strong signal: a question, or the phrase in the closing third of the reply.
+  const sentences = cleaned.split(/(?<=[.!?])\s+|\n+/);
+  if (sentences.some(sn => /\?\s*$/.test(sn) && ROADBLOCK_RE.test(sn))) return true;
+  // Closing third, but never less than the last 240 chars — a short reply
+  // is all "closing".
+  const cut = Math.max(0, Math.min(Math.floor(cleaned.length * 2 / 3), cleaned.length - 240));
+  return ROADBLOCK_RE.test(cleaned.slice(cut));
+}
 function notifyJobOutcome(job, session, agentMsg, errorInfo) {
   const name = (session && session.name) || job.sessionId;
   const link = { tab: 'server', sub: 'agents', sessionId: job.sessionId };
@@ -181,7 +197,7 @@ function notifyJobOutcome(job, session, agentMsg, errorInfo) {
     return;
   }
   const text = (agentMsg && agentMsg.text) || '';
-  if (ROADBLOCK_RE.test(text)) {
+  if (looksLikeRoadblock(text)) {
     pushNotification({ level: 'warn', source: 'agent', title: `${name} needs your input`, body: text.slice(0, 300), link, dedupeKey: `roadblock:${job.sessionId}` });
   }
 }
@@ -3012,7 +3028,7 @@ async function runScheduledItem(item, opts = {}) {
   // is escalated to a warning so it is not lost among routine completions.
   {
     const replyText = (agentMsg && agentMsg.text) || '';
-    const isRoadblock = ROADBLOCK_RE.test(replyText);
+    const isRoadblock = looksLikeRoadblock(replyText);
     pushNotification({
       level: isRoadblock ? 'warn' : 'success', source: 'scheduler',
       title: isRoadblock ? `${session.name} needs your input (scheduled run)` : `Scheduled prompt ran: ${session.name}`,

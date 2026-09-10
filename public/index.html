@@ -1521,7 +1521,7 @@
               </div>
             </div>
             ${dateLabel ? `<div class="text-xs text-gray-400">${escapeHtml(dateLabel)}</div>` : ''}
-            ${t.notes ? `<p class="text-xs text-gray-400 leading-relaxed">${escapeHtml(t.notes)}</p>` : ''}
+            ${t.notes ? `<div class="todo-note text-xs text-gray-400 leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-code:text-indigo-500 dark:prose-code:text-indigo-300 line-clamp-3 cursor-pointer" onclick="this.classList.toggle('line-clamp-3')" title="Click to expand / collapse">${marked.parse(t.notes)}</div>` : ''}
             <div class="flex items-center gap-3 text-[11px] text-gray-500 pt-0.5 flex-wrap">
               <span class="inline-flex items-center gap-1 text-indigo-400 font-medium"><i class="fa-solid fa-tag text-[9px]"></i> ${escapeHtml(t.project || '')}</span>
               ${t.type === 'recurring' && t.frequency ? `<span class="inline-flex items-center gap-1"><i class="fa-solid fa-rotate text-[9px]"></i> ${escapeHtml(t.frequency)}</span>` : ''}
