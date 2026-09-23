@@ -4210,10 +4210,151 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
     function revertWidgetPreview() {
       if (!editPreview || !editPreview.el) { editPreview = null; return; }
-      const { el, origTheme, origAccent } = editPreview;
+      const { el, origTheme, origAccent, origAttrs } = editPreview;
       if (origTheme === null) el.removeAttribute('theme'); else el.setAttribute('theme', origTheme);
       if (origAccent === null) el.removeAttribute('accent'); else el.setAttribute('accent', origAccent);
+      for (const [attr, v] of Object.entries(origAttrs || {})) {
+        if (v === null) el.removeAttribute(attr); else el.setAttribute(attr, v);
+      }
       editPreview = null;
+    }
+
+    // ---- Schema-driven configuration (fb-1789015021586) ----
+    // A component declares `static configSchema = [{ attr, label, type, ... }]`
+    // (type: text | number | select | toggle | datetime; select takes static
+    // `options` or a `source: { url, value, label }` to fetch them). Fields
+    // write THROUGH to the raw HTML box, which stays the single thing Save
+    // reads, and preview on the live element like theme/accent do.
+    const CONFIG_INPUT_CLS = 'w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none';
+
+    // Parse into an inert <template>: in a <div> the custom element is
+    // upgraded, so setAttribute fires attributeChangedCallback -> render(),
+    // and the rendered children got serialized into w.html.
+    function htmlRoot(html) {
+      const t = document.createElement('template');
+      t.innerHTML = html || '';
+      return { wrap: t, el: t.content.firstElementChild };
+    }
+
+    function widgetConfigSchema(el) {
+      const ctor = el && customElements.get(el.localName);
+      return (ctor && Array.isArray(ctor.configSchema)) ? ctor.configSchema : null;
+    }
+
+    // datetime-local wants "YYYY-MM-DDTHH:MM" in local time.
+    function toDatetimeLocal(v) {
+      if (!v) return '';
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return v.slice(0, 16);
+      const d = new Date(v);
+      if (isNaN(d)) return '';
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function configFieldValue(f, raw) {
+      if (f.type === 'datetime') return toDatetimeLocal(raw);
+      if (f.type === 'toggle') return raw !== null && raw !== 'false';
+      return raw === null ? '' : raw;
+    }
+
+    function configFieldHtml(f, raw) {
+      const id = 'cfg-' + f.attr;
+      const val = configFieldValue(f, raw);
+      const ph = f.default ? ` placeholder="${escapeHtml(String(f.default))}"` : '';
+      const on = `oninput="onConfigFieldInput('${f.attr}')" onchange="onConfigFieldInput('${f.attr}')"`;
+      let input;
+      if (f.type === 'select') {
+        const opts = (f.options || []).map(o => Array.isArray(o) ? o : [o, o]);
+        if (val && !opts.some(o => o[0] === val)) opts.push([val, val + ' (current)']);
+        input = `<select id="${id}" data-cfg-attr="${f.attr}" ${on} class="${CONFIG_INPUT_CLS}">`
+          + `<option value="">${f.default ? 'Default (' + escapeHtml(String(f.default)) + ')' : '—'}</option>`
+          + opts.map(([v, l]) => `<option value="${escapeHtml(v)}">${escapeHtml(l)}</option>`).join('')
+          + `</select>`;
+      } else if (f.type === 'toggle') {
+        input = `<label class="flex items-center gap-2 text-sm text-gray-300"><input id="${id}" data-cfg-attr="${f.attr}" type="checkbox" ${on} class="accent-indigo-500"> ${escapeHtml(f.label)}</label>`;
+        return `<div>${input}</div>`;
+      } else {
+        const type = f.type === 'number' ? 'number' : f.type === 'datetime' ? 'datetime-local' : 'text';
+        const min = f.min !== undefined ? ` min="${f.min}"` : '';
+        input = `<input id="${id}" data-cfg-attr="${f.attr}" type="${type}"${min}${ph} ${on} class="${CONFIG_INPUT_CLS}">`;
+      }
+      return `<div><label for="${id}" class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">${escapeHtml(f.label)}</label>${input}</div>`;
+    }
+
+    function setConfigInputValue(input, f, raw) {
+      const v = configFieldValue(f, raw);
+      if (f.type === 'toggle') input.checked = v; else input.value = v;
+    }
+
+    async function renderWidgetConfigFields(html) {
+      const section = document.getElementById('edit-widget-config');
+      const box = document.getElementById('edit-widget-config-fields');
+      const adv = document.getElementById('edit-widget-advanced');
+      const { el } = htmlRoot(html);
+      const schema = widgetConfigSchema(el);
+      if (!schema) {
+        section.classList.add('hidden');
+        box.innerHTML = '';
+        adv.open = true;            // nothing declared: raw HTML is the only editor
+        return;
+      }
+      section.classList.remove('hidden');
+      // Side by side on desktop there is room for both; on a phone the raw
+      // box is a long scroll below real fields, so it starts collapsed.
+      adv.open = window.matchMedia('(min-width: 768px)').matches;
+      box.innerHTML = schema.map(f => configFieldHtml(f, el.getAttribute(f.attr))).join('');
+      schema.forEach(f => {
+        const input = document.getElementById('cfg-' + f.attr);
+        if (input && f.type !== 'select') setConfigInputValue(input, f, el.getAttribute(f.attr));
+        if (input && f.type === 'select') input.value = el.getAttribute(f.attr) || '';
+      });
+      // Options fetched from the API (scripts, media libraries). A value the
+      // API no longer lists stays selectable so Save cannot silently drop it.
+      for (const f of schema.filter(f => f.type === 'select' && f.source)) {
+        try {
+          const res = await fetch(f.source.url);
+          const data = await res.json();
+          if (!Array.isArray(data)) continue;
+          const input = document.getElementById('cfg-' + f.attr);
+          if (!input) continue;               // Inspector moved on to another widget
+          const cur = input.value;
+          const opts = data.map(d => typeof d === 'string' ? [d, d]
+            : [String(d[f.source.value || 'id']), String(d[f.source.label || 'name'] || d[f.source.value || 'id'])]);
+          if (cur && !opts.some(o => o[0] === cur)) opts.push([cur, cur + ' (not found)']);
+          const first = input.options[0].outerHTML;
+          input.innerHTML = first + opts.map(([v, l]) => `<option value="${escapeHtml(v)}">${escapeHtml(l)}</option>`).join('');
+          input.value = cur;
+        } catch (e) { /* keep the static/current options */ }
+      }
+    }
+
+    function onConfigFieldInput(attr) {
+      const input = document.querySelector(`[data-cfg-attr="${attr}"]`);
+      if (!input) return;
+      const value = input.type === 'checkbox' ? (input.checked ? 'true' : '') : input.value.trim();
+      // Write through to the raw HTML box
+      const ta = document.getElementById('edit-widget-html');
+      const { wrap, el } = htmlRoot(ta.value);
+      if (!el) return;
+      if (value === '') el.removeAttribute(attr); else el.setAttribute(attr, value);
+      ta.value = wrap.innerHTML;
+      // Live preview on the rendered widget; revert restores the original
+      if (editPreview && editPreview.el) {
+        editPreview.origAttrs = editPreview.origAttrs || {};
+        if (!(attr in editPreview.origAttrs)) editPreview.origAttrs[attr] = editPreview.el.getAttribute(attr);
+        if (value === '') editPreview.el.removeAttribute(attr); else editPreview.el.setAttribute(attr, value);
+      }
+    }
+
+    // Hand edits in the Advanced box flow back into the fields.
+    function syncConfigFieldsFromHtml() {
+      const { el } = htmlRoot(document.getElementById('edit-widget-html').value);
+      const schema = widgetConfigSchema(el);
+      if (!schema) return;
+      schema.forEach(f => {
+        const input = document.getElementById('cfg-' + f.attr);
+        if (input && document.activeElement !== input) setConfigInputValue(input, f, el.getAttribute(f.attr));
+      });
     }
 
     window.editWidget = function editWidget(id) {
@@ -4248,6 +4389,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       
       // We no longer try to mutate w.html on read, we just present it as raw HTML
       document.getElementById('edit-widget-html').value = w.html || '';
+      renderWidgetConfigFields(w.html || '');
       
       // Try to parse theme and accent out of the root element (if present) for backwards compatibility
       const div = document.createElement('div');
@@ -4643,9 +4785,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         // we write the user's raw HTML, and let `renderHomepage` apply theme classes.
         // Wait, some Web Components require theme/accent as attributes.
         // If the user's HTML has a root element, we can safely sync the attributes to it!
-        const div = document.createElement('div');
-        div.innerHTML = htmlSrc;
-        const el = div.firstElementChild;
+        const { wrap: div, el } = htmlRoot(htmlSrc);   // inert parse — see htmlRoot
         if (el) {
           el.setAttribute('theme', theme);
           el.setAttribute('accent', accent);
@@ -5621,6 +5761,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         
         <!-- LEFT COLUMN: Settings -->
         <div class="w-full md:w-1/3 space-y-4">
+          <!-- Schema-driven config (fb-1789015021586): filled from the component's static configSchema -->
+          <div id="edit-widget-config" class="hidden space-y-3 pb-4 border-b border-dark-border">
+            <div class="text-xs font-bold text-indigo-300 uppercase tracking-wider"><i class="fa-solid fa-sliders mr-1.5"></i>Configuration</div>
+            <div id="edit-widget-config-fields" class="space-y-3"></div>
+          </div>
           <div>
             <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Title</label>
             <input type="text" id="edit-widget-title" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="Widget Title">
@@ -5678,10 +5823,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         </div>
         
         <!-- RIGHT COLUMN: Raw HTML Source -->
-        <div class="w-full md:w-2/3 flex flex-col">
-          <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Raw HTML / Web Component Source</label>
-          <textarea id="edit-widget-html" spellcheck="false" class="flex-1 min-h-[300px] w-full bg-black/40 border border-dark-border rounded-xl p-4 text-emerald-400 font-mono text-xs focus:outline-none focus:border-indigo-500 transition-colors custom-scrollbar" placeholder="<ada-clock></ada-clock>"></textarea>
-        </div>
+        <details id="edit-widget-advanced" open class="w-full md:w-2/3 flex flex-col">
+          <style>#edit-widget-advanced > summary::-webkit-details-marker { display: none; } #edit-widget-advanced[open] .adv-chev { transform: rotate(90deg); }</style>
+          <summary class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 cursor-pointer select-none hover:text-white"><i class="adv-chev fa-solid fa-chevron-right text-[10px] mr-1.5 transition-transform"></i>Advanced — Raw HTML / Web Component Source</summary>
+          <textarea id="edit-widget-html" oninput="syncConfigFieldsFromHtml()" spellcheck="false" class="flex-1 min-h-[300px] w-full bg-black/40 border border-dark-border rounded-xl p-4 text-emerald-400 font-mono text-xs focus:outline-none focus:border-indigo-500 transition-colors custom-scrollbar" placeholder="<ada-clock></ada-clock>"></textarea>
+        </details>
         
       </div>
       

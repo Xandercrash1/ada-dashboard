@@ -1,4 +1,10 @@
 class TimerWidget extends HTMLElement {
+  // Config fields the Widget Inspector renders (fb-1789015021586).
+  static configSchema = [
+    { attr: 'minutes', label: 'Minutes', type: 'number', min: 1, default: '5' },
+    { attr: 'title', label: 'Title', type: 'text', default: 'Timer' },
+  ];
+
   constructor() {
     super();
     this.remaining = 0;

@@ -1,4 +1,11 @@
 class StatBoxWidget extends HTMLElement {
+  // Config fields the Widget Inspector renders (fb-1789015021586).
+  static configSchema = [
+    { attr: 'stat', label: 'Statistic', type: 'select', options: ['todo', 'jobs', 'bugs', 'cpu', 'cpu_5m', 'cpu_15m', 'cpu_cores', 'ram', 'ram_percent', 'ram_total', 'disk_used', 'disk_percent', 'disk_free', 'uptime'], default: 'todo' },
+    { attr: 'title', label: 'Title', type: 'text', default: 'Statistic' },
+    { attr: 'icon', label: 'Icon (FontAwesome)', type: 'text', default: 'fa-chart-bar' },
+  ];
+
   connectedCallback() {
     this.classList.add("block", "w-full", "h-full"); this.render(); }
   static get observedAttributes() { return ['stat', 'title', 'icon', 'accent']; }

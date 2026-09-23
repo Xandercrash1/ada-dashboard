@@ -1,4 +1,10 @@
 class ClockWidget extends HTMLElement {
+  // Config fields the Widget Inspector renders (fb-1789015021586).
+  static configSchema = [
+    { attr: 'format', label: 'Time format', type: 'select', options: [['12h', '12-hour'], ['24h', '24-hour']], default: '12h' },
+    { attr: 'font', label: 'Font (CSS font-family)', type: 'text', default: "'Courier New', monospace" },
+  ];
+
   connectedCallback() {
     this.classList.add("block", "w-full", "h-full");
     this.render();

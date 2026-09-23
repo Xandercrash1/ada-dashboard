@@ -1,4 +1,11 @@
 class ScriptRunnerWidget extends HTMLElement {
+  // Config fields the Widget Inspector renders (fb-1789015021586).
+  static configSchema = [
+    { attr: 'script-id', label: 'Script', type: 'select', source: { url: '/api/scripts', value: 'id', label: 'name' }, default: 'sys-health' },
+    { attr: 'label', label: 'Button label', type: 'text', default: 'Run Script' },
+    { attr: 'icon', label: 'Icon (FontAwesome)', type: 'text', default: 'fa-terminal' },
+  ];
+
   connectedCallback() {
     this.classList.add("block", "w-full", "h-full"); this.render(); }
   static get observedAttributes() { return ['script-id', 'label', 'icon', 'accent']; }

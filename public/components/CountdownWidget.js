@@ -1,4 +1,10 @@
 class CountdownWidget extends HTMLElement {
+  // Config fields the Widget Inspector renders (fb-1789015021586).
+  static configSchema = [
+    { attr: 'target', label: 'Count down to', type: 'datetime' },
+    { attr: 'title', label: 'Title', type: 'text', default: 'Countdown' },
+  ];
+
   connectedCallback() {
     this.classList.add("block", "w-full", "h-full");
     this.render();

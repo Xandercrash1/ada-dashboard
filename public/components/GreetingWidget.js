@@ -1,4 +1,9 @@
 class GreetingWidget extends HTMLElement {
+  // Config fields the Widget Inspector renders (fb-1789015021586).
+  static configSchema = [
+    { attr: 'name', label: 'Name', type: 'text', default: 'Alex' },
+  ];
+
   connectedCallback() {
     this.classList.add("block", "w-full", "h-full"); this.render(); }
   static get observedAttributes() { return ['name']; }

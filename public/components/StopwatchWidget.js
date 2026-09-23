@@ -1,4 +1,9 @@
 class StopwatchWidget extends HTMLElement {
+  // Config fields the Widget Inspector renders (fb-1789015021586).
+  static configSchema = [
+    { attr: 'title', label: 'Title', type: 'text', default: 'Stopwatch' },
+  ];
+
   constructor() {
     super();
     this.elapsed = 0;

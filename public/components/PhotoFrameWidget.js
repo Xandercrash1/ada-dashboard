@@ -1,4 +1,10 @@
 class PhotoFrameWidget extends HTMLElement {
+  // Config fields the Widget Inspector renders (fb-1789015021586).
+  static configSchema = [
+    { attr: 'library', label: 'Photo library', type: 'select', source: { url: '/api/media/libraries' }, default: 'default' },
+    { attr: 'interval', label: 'Seconds per photo', type: 'number', min: 3, default: '10' },
+  ];
+
   connectedCallback() { this.classList.add("block", "w-full");
     this.images = [];
     this.currentIndex = 0;
