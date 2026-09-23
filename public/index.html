@@ -250,6 +250,8 @@
           <button onclick="redoLayout()" id="redo-layout-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Redo layout change (Shift-Cmd-Z)"><i class="fa-solid fa-rotate-right"></i></button>
           <button onclick="savePageAsTemplate()" id="save-template-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Save this page as a template"><i class="fa-solid fa-clone"></i></button>
           <!-- PAGE THEME PRESET (fb-1788928004000) — edit mode only; applies one cohesive theme/accent to every widget on this page -->
+          <button onclick="exportPage('preview')" id="export-preview-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Preview this page as a standalone website"><i class="fa-solid fa-eye"></i></button>
+          <button onclick="exportPage('download')" id="export-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Export this page as one HTML file"><i class="fa-solid fa-file-export"></i></button>
           <button onclick="openPageStyle()" id="page-style-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Page style — fonts, colours, spacing"><i class="fa-solid fa-palette"></i></button>
           <select id="page-theme-select" onchange="applyPageTheme(this.value)" title="Page theme preset" class="hidden px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-300 hover:text-white hover:border-gray-500 text-xs font-medium focus:outline-none focus:border-indigo-500 transition-all">
             <option value="custom">Theme: Custom</option>
@@ -5173,6 +5175,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (t) t.classList.toggle('hidden', !window.isEditingLayout);
       const ps = document.getElementById('page-style-btn');
       if (ps) ps.classList.toggle('hidden', !window.isEditingLayout);
+      ['export-page-btn', 'export-preview-btn'].forEach(id => { const b = document.getElementById(id); if (b) b.classList.toggle('hidden', !window.isEditingLayout); });
     }
     async function restoreLayoutSnapshot(snap) {
       // Keep the live version stamp so the optimistic save is not refused.
@@ -5344,7 +5347,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       return (Array.isArray(doc && doc.pageSections) ? doc.pageSections : []).filter(s => s && !s.hidden && PAGE_SECTION_TYPES[s.type]);
     }
 
-    function renderPageSection(sec, innerHtml) {
+    function renderPageSection(sec, innerHtml, opts) {
+      const plain = !!(opts && opts.plain);   // export: no editor chrome
       const def = PAGE_SECTION_TYPES[sec.type];
       // Only attributes the component declares in its configSchema; before
       // the module has loaded, a deny-list (event handlers, style, identity).
@@ -5361,14 +5365,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       // Explicit colours: the light theme remaps Tailwind grays, which washed
       // the toolbar out. It is a dark chip in both themes.
       const btn = (icon, title, call) => `<button onclick="${call}" title="${title}" class="w-8 h-8 rounded-md hover:bg-white/15 flex items-center justify-center" style="color:#f3f4f6"><i class="fa-solid ${icon} text-xs"></i></button>`;
-      const chrome = window.isEditingLayout ? `
+      const chrome = (window.isEditingLayout && !plain) ? `
         <div class="section-toolbar absolute top-0 right-0 z-30 flex items-center gap-0.5 backdrop-blur rounded-lg p-0.5 shadow-lg" style="background:rgba(17,24,39,.92)">
           <span class="px-2 text-[10px] uppercase font-bold tracking-wider" style="color:#d1d5db"><i class="fa-solid ${def.icon} mr-1"></i>${def.label}</span>
           ${btn('fa-arrow-up', 'Move up', `moveSection('${sid}', -1)`)}${btn('fa-arrow-down', 'Move down', `moveSection('${sid}', 1)`)}
           ${btn('fa-sliders', 'Edit section', `editSection('${sid}')`)}
           ${btn('fa-trash', 'Remove section', `removeSection('${sid}')`)}
         </div>` : '';
-      const editCls = window.isEditingLayout ? ' pt-10 outline-dashed outline-2 outline-offset-4 outline-indigo-400/40 rounded-xl' : '';
+      const editCls = (window.isEditingLayout && !plain) ? ' pt-10 outline-dashed outline-2 outline-offset-4 outline-indigo-400/40 rounded-xl' : '';
       return `<div class="page-section relative w-full${editCls}" data-section-id="${sid}" data-section-type="${sec.type}">${chrome}${body}</div>`;
     }
 
@@ -5506,6 +5510,119 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const data = await res.json().catch(() => ({}));
       showAppToast(res.ok ? `Saved section "${data.name}"` : (data.error || 'Could not save the section'), res.ok ? 'success' : 'error');
     }
+
+    // --- Static export / publish (fb-1790201502202) ---
+    // One standalone HTML file: the page's sections rendered to plain markup
+    // (no scripts, no dashboard chrome, no auth), the design tokens inlined as
+    // CSS variables, and only the Tailwind rules that markup uses. Widget
+    // grids are left out — they need the dashboard's API to work.
+    const EXPORT_FA = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';
+
+    function selectorClasses(sel) {
+      const out = [];
+      sel.replace(/\.((?:\\.|[A-Za-z0-9_-])+)/g, (m, c) => { out.push(c.replace(/\\(.)/g, '$1')); return m; });
+      return out;
+    }
+    // Keep a rule if every class in (one of) its selectors is used by the
+    // export and it doesn't target dashboard state (#ids, .dark, html.light…).
+    function exportCssFor(usedClasses) {
+      const tw = [...document.querySelectorAll('style')].find(st => /--tw-/.test(st.textContent));
+      if (!tw || !tw.sheet) return '';
+      const keepRule = (rule) => {
+        if (rule.type === CSSRule.MEDIA_RULE) {
+          const inner = [...rule.cssRules].map(keepRule).filter(Boolean).join('\n');
+          return inner ? `@media ${rule.conditionText || rule.media.mediaText} {\n${inner}\n}` : '';
+        }
+        if (rule.type !== CSSRule.STYLE_RULE) return rule.type === CSSRule.KEYFRAMES_RULE ? '' : '';
+        const sels = rule.selectorText.split(',').map(x => x.trim()).filter(sel => {
+          if (/#|\[data-theme|:root\.|html\.|\.dark\b/.test(sel)) return false;
+          const cls = selectorClasses(sel);
+          return cls.every(c => usedClasses.has(c));
+        });
+        return sels.length ? `${sels.join(', ')} { ${rule.style.cssText} }` : '';
+      };
+      return [...tw.sheet.cssRules].map(keepRule).filter(Boolean).join('\n');
+    }
+
+    async function buildPageExport() {
+      const secs = visiblePageSections(homepageDoc).filter(x => x.type !== 'grid');
+      if (!secs.length) return null;
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1280px;';
+      document.body.appendChild(host);
+      try {
+        applyPageTokens(host, homepageDoc);
+        host.innerHTML = secs.map(x => renderPageSection(x, '', { plain: true })).join('');
+        await Promise.all([...new Set(secs.map(x => PAGE_SECTION_TYPES[x.type].tag))].map(t => customElements.whenDefined(t)));
+        await new Promise(r => requestAnimationFrame(() => setTimeout(r, 60)));   // let Tailwind see the classes
+        const body = [...host.querySelectorAll('.page-section')].map(el => {
+          const comp = el.firstElementChild;
+          return comp ? comp.innerHTML.trim() : '';
+        }).join('\n');
+        const used = new Set();
+        const tmp = document.createElement('div'); tmp.innerHTML = body;
+        tmp.querySelectorAll('[class]').forEach(e => e.classList.forEach(c => used.add(c)));
+        const vars = ['--ada-font-heading', '--ada-font-body', '--ada-h1', '--ada-h2', '--ada-body', '--ada-space', '--ada-radius', '--ada-brand', '--ada-surface', '--ada-text', '--ada-muted', '--ada-on-brand']
+          .map(v => `${v}: ${host.style.getPropertyValue(v)};`).join(' ');
+        const t = resolvePageTokens(homepageDoc);
+        const fonts = [t.fontHeading, t.fontBody].map(st => { const m = /^['"]?([^'",]+)['"]?/.exec(st || ''); return m && WEB_FONTS[(FONT_ALIASES[m[1].trim()] || m[1].trim())] ? WEB_FONTS[FONT_ALIASES[m[1].trim()] || m[1].trim()] : null; }).filter(Boolean);
+        const fontLink = fonts.length ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?${[...new Set(fonts)].map(f => 'family=' + f).join('&')}&display=swap">` : '';
+        const pageInfo = customPages.find(pg => pg.id === currentCanvasPage);
+        const hero = secs.find(x => x.type === 'hero');
+        const title = (hero && hero.props && hero.props.heading) || (pageInfo ? pageInfo.title : 'Page');
+        const desc = (hero && hero.props && hero.props.subheading) || '';
+        const pageBg = /^#/.test(t.surface || '') ? t.surface : '#ffffff';
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+${desc ? `<meta name="description" content="${escapeHtml(desc)}">` : ''}
+<meta name="generator" content="Ada Operations Hub — Page Builder">
+${fontLink}
+<link rel="stylesheet" href="${EXPORT_FA}">
+<style>
+:root { ${vars} }
+*, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: ${pageBg}; font-family: var(--ada-font-body); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+h1, h2, h3, p, figure, ul { margin: 0; } ul { list-style: none; padding: 0; } a { color: inherit; text-decoration: none; } img { display: block; max-width: 100%; }
+.ada-export { max-width: 1200px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 24px; }
+${exportCssFor(used)}
+</style>
+</head>
+<body>
+<main class="ada-export">
+${body}
+</main>
+</body>
+</html>
+`;
+        return { html, title, sections: secs.length };
+      } finally {
+        host.remove();
+      }
+    }
+
+    async function exportPage(mode) {
+      if (!homepageDoc) return;
+      const out = await buildPageExport();
+      if (!out) { showAppToast('Add sections first — the export contains a page\'s sections (widget grids need the dashboard and are left out).', 'warn'); return; }
+      const blob = new Blob([out.html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      if (mode === 'preview') {
+        window.open(url, '_blank');
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(currentCanvasPage || 'page').replace(/[^a-z0-9-]/gi, '-')}.html`;
+        document.body.appendChild(a); a.click(); a.remove();
+        showAppToast(`Exported "${out.title}" — one HTML file, ${out.sections} section${out.sections === 1 ? '' : 's'}, ready to host anywhere.`, 'success');
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+    window.buildPageExport = buildPageExport;
 
     // --- Page Style (tokens) editor (fb-1790201502171)
     let pageStyleEdit = null;   // original tokens, restored on cancel
