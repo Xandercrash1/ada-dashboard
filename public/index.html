@@ -250,6 +250,7 @@
           <button onclick="redoLayout()" id="redo-layout-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Redo layout change (Shift-Cmd-Z)"><i class="fa-solid fa-rotate-right"></i></button>
           <button onclick="savePageAsTemplate()" id="save-template-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Save this page as a template"><i class="fa-solid fa-clone"></i></button>
           <!-- PAGE THEME PRESET (fb-1788928004000) — edit mode only; applies one cohesive theme/accent to every widget on this page -->
+          <button onclick="openPageStyle()" id="page-style-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Page style — fonts, colours, spacing"><i class="fa-solid fa-palette"></i></button>
           <select id="page-theme-select" onchange="applyPageTheme(this.value)" title="Page theme preset" class="hidden px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-300 hover:text-white hover:border-gray-500 text-xs font-medium focus:outline-none focus:border-indigo-500 transition-all">
             <option value="custom">Theme: Custom</option>
           </select>
@@ -5117,6 +5118,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (r) { r.classList.toggle('hidden', !window.isEditingLayout); r.disabled = layoutHistory.future.length === 0; r.classList.toggle('opacity-40', r.disabled); }
       const t = document.getElementById('save-template-btn');
       if (t) t.classList.toggle('hidden', !window.isEditingLayout);
+      const ps = document.getElementById('page-style-btn');
+      if (ps) ps.classList.toggle('hidden', !window.isEditingLayout);
     }
     async function restoreLayoutSnapshot(snap) {
       // Keep the live version stamp so the optimistic save is not refused.
@@ -5210,6 +5213,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
     function applyPageTokens(el, doc) {
       const t = resolvePageTokens(doc);
+      ensurePageFonts(t);
       const [h1, h2, body] = TOKEN_SCALE[t.scale] || TOKEN_SCALE.normal;
       const vars = {
         '--ada-font-heading': t.fontHeading, '--ada-font-body': t.fontBody,
@@ -5227,8 +5231,40 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     const PAGE_SECTION_TYPES = {
       hero:     { label: 'Hero',        icon: 'fa-star',      tag: 'ada-section-hero' },
       features: { label: 'Features',    icon: 'fa-table-cells-large', tag: 'ada-section-features' },
-      grid:     { label: 'Widget grid', icon: 'fa-grip',      tag: null }
+      grid:     { label: 'Widget grid', icon: 'fa-grip',      tag: null },
+      gallery:  { label: 'Gallery',     icon: 'fa-images',    tag: 'ada-section-gallery' },
+      pricing:  { label: 'Pricing',     icon: 'fa-tags',      tag: 'ada-section-pricing' },
+      cta:      { label: 'Call to action', icon: 'fa-bullhorn', tag: 'ada-section-cta' },
+      text:     { label: 'Text',        icon: 'fa-align-left', tag: 'ada-section-text' },
+      footer:   { label: 'Footer',      icon: 'fa-shoe-prints', tag: 'ada-section-footer' }
     };
+
+    // Typography presets (fb-1790201502171). Web fonts load on demand, only
+    // when a page actually uses them.
+    const TYPE_PRESETS = {
+      modern:    { label: 'Modern — Inter',                    fontHeading: "'Inter', system-ui, sans-serif", fontBody: "'Inter', system-ui, sans-serif" },
+      classic:   { label: 'Classic — Playfair + Source Sans',  fontHeading: "'Playfair Display', Georgia, serif", fontBody: "'Source Sans 3', system-ui, sans-serif" },
+      editorial: { label: 'Editorial — Fraunces + Inter',      fontHeading: "'Fraunces', Georgia, serif", fontBody: "'Inter', system-ui, sans-serif" },
+      friendly:  { label: 'Friendly — Nunito',                 fontHeading: "'Nunito', system-ui, sans-serif", fontBody: "'Nunito', system-ui, sans-serif" },
+      geometric: { label: 'Geometric — Poppins',               fontHeading: "'Poppins', system-ui, sans-serif", fontBody: "'Poppins', system-ui, sans-serif" },
+      technical: { label: 'Technical — JetBrains Mono + Inter', fontHeading: "'JetBrains Mono', ui-monospace, monospace", fontBody: "'Inter', system-ui, sans-serif" }
+    };
+    const WEB_FONTS = {
+      'Inter': 'Inter:wght@400;600;700;800', 'Playfair Display': 'Playfair+Display:wght@600;700;800',
+      'Source Sans 3': 'Source+Sans+3:wght@400;600;700', 'Fraunces': 'Fraunces:wght@600;700;800',
+      'Nunito': 'Nunito:wght@400;600;700;800', 'Poppins': 'Poppins:wght@400;600;700;800', 'JetBrains Mono': 'JetBrains+Mono:wght@500;700'
+    };
+    function ensurePageFonts(t) {
+      [t.fontHeading, t.fontBody].forEach(stack => {
+        const m = /^'([^']+)'/.exec(stack || '');
+        const spec = m && WEB_FONTS[m[1]];
+        if (!spec || document.querySelector(`link[data-ada-font="${m[1]}"]`)) return;
+        const l = document.createElement('link');
+        l.rel = 'stylesheet'; l.dataset.adaFont = m[1];
+        l.href = `https://fonts.googleapis.com/css2?family=${spec}&display=swap`;
+        document.head.appendChild(l);
+      });
+    }
 
     function visiblePageSections(doc) {
       return (Array.isArray(doc && doc.pageSections) ? doc.pageSections : []).filter(s => s && !s.hidden && PAGE_SECTION_TYPES[s.type]);
@@ -5397,13 +5433,58 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       showAppToast(res.ok ? `Saved section "${data.name}"` : (data.error || 'Could not save the section'), res.ok ? 'success' : 'error');
     }
 
+    // --- Page Style (tokens) editor (fb-1790201502171)
+    let pageStyleEdit = null;   // original tokens, restored on cancel
+    function openPageStyle() {
+      if (!homepageDoc) return;
+      pageStyleEdit = { orig: homepageDoc.tokens ? JSON.parse(JSON.stringify(homepageDoc.tokens)) : null };
+      const t = resolvePageTokens(homepageDoc);
+      const sel = (id, opts, v) => { const e = document.getElementById(id); e.innerHTML = opts.map(([k, l]) => `<option value="${k}">${l}</option>`).join(''); e.value = v; };
+      sel('ps-preset', [['', 'Follow page theme'], ...Object.keys(TOKEN_PRESETS).map(k => [k, k[0].toUpperCase() + k.slice(1)])], (homepageDoc.tokens && homepageDoc.tokens.preset) || '');
+      const typeKey = Object.keys(TYPE_PRESETS).find(k => TYPE_PRESETS[k].fontHeading === t.fontHeading && TYPE_PRESETS[k].fontBody === t.fontBody) || '';
+      sel('ps-type', [['', 'Custom / from preset'], ...Object.entries(TYPE_PRESETS).map(([k, v]) => [k, v.label])], typeKey);
+      sel('ps-scale', [['compact', 'Compact'], ['normal', 'Normal'], ['large', 'Large']], t.scale);
+      sel('ps-density', [['compact', 'Tight'], ['normal', 'Normal'], ['airy', 'Airy']], t.density);
+      sel('ps-radius', [['none', 'Square'], ['sm', 'Small'], ['md', 'Medium'], ['lg', 'Large'], ['xl', 'Extra large']], t.radius);
+      ['brand', 'surface', 'text', 'muted'].forEach(k => { document.getElementById('ps-' + k).value = /^#[0-9a-f]{6}$/i.test(t[k]) ? t[k] : '#000000'; });
+      document.getElementById('page-style-modal').classList.remove('hidden');
+    }
+    function onPageStyleInput(field) {
+      if (!pageStyleEdit) return;
+      const tk = homepageDoc.tokens = homepageDoc.tokens || {};
+      const v = document.getElementById('ps-' + field).value;
+      if (field === 'preset') {
+        // A new base preset starts clean: drop per-value overrides.
+        homepageDoc.tokens = v ? { preset: v } : {};
+        openPageStyleRefresh();
+      } else if (field === 'type') {
+        if (v && TYPE_PRESETS[v]) { tk.fontHeading = TYPE_PRESETS[v].fontHeading; tk.fontBody = TYPE_PRESETS[v].fontBody; }
+      } else {
+        tk[field] = v;
+      }
+      applyPageTokens(document.getElementById('home-widgets'), homepageDoc);
+    }
+    function openPageStyleRefresh() { const keep = pageStyleEdit; openPageStyle(); pageStyleEdit = keep; }
+    async function closePageStyle(mode) {
+      if (!pageStyleEdit) return;
+      if (mode === 'reset') homepageDoc.tokens = null;
+      else if (mode !== 'save') homepageDoc.tokens = pageStyleEdit.orig;
+      if (homepageDoc.tokens && !Object.keys(homepageDoc.tokens).length) homepageDoc.tokens = null;
+      pageStyleEdit = null;
+      document.getElementById('page-style-modal').classList.add('hidden');
+      renderHomepage();
+      if (mode === 'save' || mode === 'reset') await saveHomepageDoc();
+    }
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pageStyleEdit) closePageStyle('cancel'); });
+    document.addEventListener('click', (e) => { if (e.target && e.target.id === 'page-style-modal') closePageStyle('cancel'); });
+
     // --- Section Library
     async function openSectionLibrary() {
       const grid = document.getElementById('section-library-types');
       grid.innerHTML = Object.entries(PAGE_SECTION_TYPES).map(([type, d]) => `
         <button onclick="addSection('${type}')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex items-center gap-3">
           <i class="fa-solid ${d.icon} text-indigo-400 text-lg w-6 text-center"></i>
-          <div><div class="text-white font-semibold text-sm">${d.label}</div><div class="text-gray-400 text-xs">${{ hero: 'Big headline, text and a button', features: 'Heading and a grid of cards', grid: 'A grid that holds widgets' }[type] || ''}</div></div>
+          <div><div class="text-white font-semibold text-sm">${d.label}</div><div class="text-gray-400 text-xs">${{ hero: 'Big headline, text and a button', features: 'Heading and a grid of cards', grid: 'A grid that holds widgets', gallery: 'A grid of photos with captions', pricing: 'Plans side by side', cta: 'A bold band with buttons', text: 'Paragraphs with bold, italics and links', footer: 'Name, small print and links' }[type] || ''}</div></div>
         </button>`).join('');
       document.getElementById('section-library-modal').classList.remove('hidden');
       const saved = document.getElementById('section-library-saved');
@@ -6437,6 +6518,25 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Saved sections</div>
           <div id="section-library-saved" class="space-y-2"></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page Style (fb-1790201502171) -->
+  <div id="page-style-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+      <div class="p-4 border-b border-dark-border flex justify-between items-center bg-dark-card flex-shrink-0">
+        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-palette text-indigo-400 mr-2"></i>Page style</h3>
+        <button onclick="closePageStyle('cancel')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-5 flex-1 overflow-y-auto custom-scrollbar space-y-4">
+        <div><label for="ps-preset" class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Colour & style preset</label><select id="ps-preset" onchange="onPageStyleInput('preset')" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select></div><div><label for="ps-type" class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Typography</label><select id="ps-type" onchange="onPageStyleInput('type')" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select></div><div><label for="ps-scale" class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Text size</label><select id="ps-scale" onchange="onPageStyleInput('scale')" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select></div><div><label for="ps-density" class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Spacing</label><select id="ps-density" onchange="onPageStyleInput('density')" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select></div><div><label for="ps-radius" class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Corners</label><select id="ps-radius" onchange="onPageStyleInput('radius')" class="w-full bg-black/20 border border-white/5 hover:border-white/10 transition-colors text-white text-sm rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select></div><div class="grid grid-cols-2 gap-3"><label class="flex items-center gap-2 text-xs text-gray-300"><input type="color" id="ps-brand" oninput="onPageStyleInput('brand')" class="w-10 h-10 rounded-lg bg-transparent border border-white/10 cursor-pointer"> Brand</label><label class="flex items-center gap-2 text-xs text-gray-300"><input type="color" id="ps-surface" oninput="onPageStyleInput('surface')" class="w-10 h-10 rounded-lg bg-transparent border border-white/10 cursor-pointer"> Background</label><label class="flex items-center gap-2 text-xs text-gray-300"><input type="color" id="ps-text" oninput="onPageStyleInput('text')" class="w-10 h-10 rounded-lg bg-transparent border border-white/10 cursor-pointer"> Text</label><label class="flex items-center gap-2 text-xs text-gray-300"><input type="color" id="ps-muted" oninput="onPageStyleInput('muted')" class="w-10 h-10 rounded-lg bg-transparent border border-white/10 cursor-pointer"> Muted text</label></div>
+      </div>
+      <div class="p-4 border-t border-dark-border bg-dark-card flex items-center gap-2 flex-shrink-0">
+        <button onclick="closePageStyle('reset')" class="px-3 py-2 text-xs text-gray-300 hover:text-white rounded-lg border border-white/10">Reset</button>
+        <div class="flex-1"></div>
+        <button onclick="closePageStyle('cancel')" class="px-4 py-2 text-sm text-gray-300 hover:text-white">Cancel</button>
+        <button onclick="closePageStyle('save')" id="page-style-save" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg shadow-lg">Save</button>
       </div>
     </div>
   </div>

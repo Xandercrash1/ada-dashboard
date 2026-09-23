@@ -620,7 +620,7 @@ const DEFAULT_HOMEPAGE = {
 // toggles {stats, quickLinks}) is an ordered list of full-width blocks. A
 // `grid` section holds widgets (w.section = its id; unassigned widgets go to
 // the first grid). A page without pageSections renders exactly as before.
-const PAGE_SECTION_TYPES = ['hero', 'features', 'grid'];
+const PAGE_SECTION_TYPES = ['hero', 'features', 'grid', 'gallery', 'pricing', 'cta', 'text', 'footer'];
 const PAGE_SECTIONS_MAX = 30;
 function sanitizePageSections(raw) {
   if (!Array.isArray(raw)) return undefined;
