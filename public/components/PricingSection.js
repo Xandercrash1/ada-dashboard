@@ -22,7 +22,7 @@ class PricingSection extends HTMLElement {
       <div class="text-center" style="margin-bottom: 2.5rem;"><h2 style="${headingStyle()}">${esc(a('heading', 'Pricing'))}</h2>${sub ? `<p style="color: var(--ada-muted); margin-top: .75rem;">${esc(sub)}</p>` : ''}</div>
       <div data-pricing class="grid grid-cols-1 sm:grid-cols-2 ${cols} gap-5 items-stretch">${plans.map(p => `
         <div class="flex flex-col p-6" style="border-radius: calc(var(--ada-radius) * 0.75); ${p.featured ? 'border: 2px solid var(--ada-brand); background: color-mix(in srgb, var(--ada-brand) 10%, transparent);' : 'border: 1px solid color-mix(in srgb, var(--ada-text) 12%, transparent); background: color-mix(in srgb, var(--ada-text) 4%, transparent);'}">
-          ${p.featured ? `<span class="self-start text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 mb-3" style="background: var(--ada-brand); color: #fff; border-radius: 999px;">Popular</span>` : ''}
+          ${p.featured ? `<span class="self-start text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 mb-3" style="background: var(--ada-brand); color: var(--ada-on-brand, #fff); border-radius: 999px;">Popular</span>` : ''}
           <h3 style="font-family: var(--ada-font-heading); font-weight: 700; font-size: calc(var(--ada-body) * 1.2);">${esc(p.name)}</h3>
           <div data-price style="font-family: var(--ada-font-heading); font-size: calc(var(--ada-h2) * .95); font-weight: 800; margin: .5rem 0 1rem;">${esc(p.price)}</div>
           <ul class="space-y-2 flex-1" style="font-size: var(--ada-body);">${p.feats.map(f => `<li class="flex gap-2"><i class="fa-solid fa-check mt-1" style="color: var(--ada-brand);"></i><span>${esc(f)}</span></li>`).join('')}</ul>

@@ -291,6 +291,8 @@ class BubbleManager {
     inp.value = '';
     this.resetTimer(sessionId);
     
+    // Lets the page snapshot + refresh itself around Designer jobs (fb-1790201502182).
+    if (typeof window.onAgentPromptSent === 'function') window.onAgentPromptSent(sessionId);
     try {
       await fetch(`/api/agent/sessions/${sessionId}/chat`, {
         method: 'POST',

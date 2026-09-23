@@ -19,15 +19,15 @@ export function safeSrc(v) {
 // `tone` 'brand' fills with the brand colour instead of the surface.
 export function shell(inner, tone) {
   const bg = tone === 'brand' ? 'var(--ada-brand)' : 'var(--ada-surface)';
-  const fg = tone === 'brand' ? '#ffffff' : 'var(--ada-text)';
+  const fg = tone === 'brand' ? 'var(--ada-on-brand, #ffffff)' : 'var(--ada-text)';
   return `<section class="w-full overflow-hidden" style="background: ${bg}; color: ${fg}; border-radius: var(--ada-radius); padding: var(--ada-space) 1.5rem; font-family: var(--ada-font-body);">${inner}</section>`;
 }
 export const headingStyle = (size) => `font-family: var(--ada-font-heading); font-size: clamp(1.5rem, 4.5vw, var(${size || '--ada-h2'})); line-height: 1.15; font-weight: 750;`;
 export const buttonStyle = (tone) => tone === 'ghost'
   ? 'border: 1.5px solid currentColor; border-radius: calc(var(--ada-radius) * 0.6);'
   : tone === 'light'
-    ? 'background: #ffffff; color: var(--ada-brand); border-radius: calc(var(--ada-radius) * 0.6);'
-    : 'background: var(--ada-brand); color: #ffffff; border-radius: calc(var(--ada-radius) * 0.6);';
+    ? 'background: var(--ada-on-brand, #ffffff); color: var(--ada-brand); border-radius: calc(var(--ada-radius) * 0.6);'
+    : 'background: var(--ada-brand); color: var(--ada-on-brand, #ffffff); border-radius: calc(var(--ada-radius) * 0.6);';
 // Escaped text with **bold**, *italic* and [label](url) — links go through
 // safeHref. Input is escaped FIRST, so no markup can come through.
 export function miniMarkdown(text) {

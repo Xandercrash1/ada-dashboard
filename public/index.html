@@ -2919,7 +2919,59 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       }
     }
 
+    // Designer jobs (fb-1790201502182): snapshot the page when the job starts;
+    // when it ends, reload the page so the edits show without a refresh (the
+    // bubble path never did this) and put the snapshot on the undo history.
+    const designerSnapshots = {};
+    function docFingerprint(d) { return JSON.stringify({ ...(d || {}), updatedAt: undefined, updatedBy: undefined, path: undefined }); }
+    function designerSessionFor(sessionId) {
+      let s = (typeof agentSessions !== 'undefined' ? agentSessions : []).find(x => x.id === sessionId);
+      if (!s && window.bubbleManager && window.bubbleManager.bubbles && window.bubbleManager.bubbles[sessionId]) s = window.bubbleManager.bubbles[sessionId].session;
+      return s && s.role === 'designer' ? s : null;
+    }
+
+    async function afterDesignerJob(sessionId) {
+      const ds = designerSessionFor(sessionId);
+      const snap = designerSnapshots[sessionId];
+      delete designerSnapshots[sessionId];
+      if (!ds || (ds.page || 'home') !== currentCanvasPage) return;
+      await loadPage(currentCanvasPage);
+      if (snap && snap.page === currentCanvasPage && homepageDoc && docFingerprint(snap.doc) !== docFingerprint(homepageDoc)) {
+        layoutHistory.past.push(snap.doc);
+        layoutHistory.future = [];
+        updateLayoutHistoryButtons();
+        showBuilderToast('The Designer changed this page', { label: 'Undo', onClick: undoLayout });
+      }
+    }
+
+    // The chat bubble (the Designer's real entry point) posts the prompt and
+    // leaves pickup to the message poller, so nothing ever ran on job end.
+    // It calls this hook; a Designer job on the page being viewed is then
+    // snapshotted and watched until it finishes.
+    window.onAgentPromptSent = function (sessionId) {
+      const ds = designerSessionFor(sessionId);
+      if (!ds || !homepageDoc || (ds.page || 'home') !== currentCanvasPage) return;
+      if (!designerSnapshots[sessionId]) designerSnapshots[sessionId] = { page: currentCanvasPage, doc: cloneDoc(homepageDoc) };
+      if (jobPolls[sessionId]) return;             // the job poller will finalize it
+      let seenRunning = false, tries = 0;
+      const tick = async () => {
+        tries++;
+        try {
+          const res = await fetch(`/api/agent/sessions/${sessionId}/job`);
+          const job = res.ok ? await res.json() : null;
+          if (job && job.status === 'running') { seenRunning = true; return setTimeout(tick, 2500); }
+          if (!seenRunning && tries < 4) return setTimeout(tick, 1000);   // job not registered yet
+        } catch (e) { if (tries < 400) return setTimeout(tick, 2500); }
+        afterDesignerJob(sessionId);
+      };
+      setTimeout(tick, 800);
+    };
+
     function startJobPolling(sessionId, jobId, initialJob) {
+      const ds = designerSessionFor(sessionId);
+      if (ds && homepageDoc && (ds.page || 'home') === currentCanvasPage && !designerSnapshots[sessionId]) {
+        designerSnapshots[sessionId] = { page: currentCanvasPage, doc: cloneDoc(homepageDoc) };
+      }
       if (jobPolls[sessionId] && jobPolls[sessionId].timer) {
         clearTimeout(jobPolls[sessionId].timer);
       }
@@ -3012,6 +3064,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       }
 
       await refreshSessionMessages(sessionId);
+      if (designerSessionFor(sessionId)) await afterDesignerJob(sessionId);
       // The PM panel renders from agentSessions too, but only on its own
       // change-detection tick — redraw it now so the typing dots clear the
       // moment the job ends rather than up to 4 s later.
@@ -5211,8 +5264,19 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       return { ...(TOKEN_PRESETS[presetKey] || TOKEN_PRESETS.default), ...t, preset: presetKey };
     }
 
+    function brandIsLight(hex) {
+      const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(hex || '');   // 6 first, or #f59e0b reads as #f59
+      if (!m) return false;
+      const h = m[1].length === 3 ? m[1].split('').map(c => c + c).join('') : m[1];
+      const [r, g, b] = [0, 2, 4].map(i => { const c = parseInt(h.slice(i, i + 2), 16) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
+      const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      // Whichever of white or near-black (#111827, L ~0.012) contrasts more.
+      return (L + 0.05) / 0.062 > 1.05 / (L + 0.05);
+    }
+
     function applyPageTokens(el, doc) {
       const t = resolvePageTokens(doc);
+      ['fontHeading', 'fontBody'].forEach(k => { for (const [from, to] of Object.entries(FONT_ALIASES)) if ((t[k] || '').includes(from)) t[k] = t[k].replace(from, to); });
       ensurePageFonts(t);
       const [h1, h2, body] = TOKEN_SCALE[t.scale] || TOKEN_SCALE.normal;
       const vars = {
@@ -5220,7 +5284,10 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         '--ada-h1': h1, '--ada-h2': h2, '--ada-body': body,
         '--ada-space': TOKEN_SPACE[t.density] || TOKEN_SPACE.normal,
         '--ada-radius': TOKEN_RADIUS[t.radius] || TOKEN_RADIUS.lg,
-        '--ada-brand': t.brand, '--ada-surface': t.surface, '--ada-text': t.text, '--ada-muted': t.muted
+        '--ada-brand': t.brand, '--ada-surface': t.surface, '--ada-text': t.text, '--ada-muted': t.muted,
+        // Text on the brand colour: black or white by luminance, so a pale
+        // brand never gets unreadable white buttons (fb-1790201502182).
+        '--ada-on-brand': brandIsLight(t.brand) ? '#111827' : '#ffffff'
       };
       for (const [k, v] of Object.entries(vars)) el.style.setProperty(k, v);
     }
@@ -5252,11 +5319,18 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     const WEB_FONTS = {
       'Inter': 'Inter:wght@400;600;700;800', 'Playfair Display': 'Playfair+Display:wght@600;700;800',
       'Source Sans 3': 'Source+Sans+3:wght@400;600;700', 'Fraunces': 'Fraunces:wght@600;700;800',
-      'Nunito': 'Nunito:wght@400;600;700;800', 'Poppins': 'Poppins:wght@400;600;700;800', 'JetBrains Mono': 'JetBrains+Mono:wght@500;700'
+      'Nunito': 'Nunito:wght@400;600;700;800', 'Poppins': 'Poppins:wght@400;600;700;800', 'JetBrains Mono': 'JetBrains+Mono:wght@500;700',
+      'Lato': 'Lato:wght@400;700;900', 'Montserrat': 'Montserrat:wght@400;600;700;800', 'Roboto': 'Roboto:wght@400;500;700',
+      'Open Sans': 'Open+Sans:wght@400;600;700', 'Merriweather': 'Merriweather:wght@400;700;900', 'Lora': 'Lora:wght@400;600;700',
+      'Raleway': 'Raleway:wght@400;600;700;800', 'DM Sans': 'DM+Sans:wght@400;500;700', 'DM Serif Display': 'DM+Serif+Display',
+      'Source Sans Pro': 'Source+Sans+3:wght@400;600;700'
     };
+    // Legacy family names an agent may write -> the family Google now serves.
+    const FONT_ALIASES = { 'Source Sans Pro': 'Source Sans 3' };
     function ensurePageFonts(t) {
       [t.fontHeading, t.fontBody].forEach(stack => {
-        const m = /^'([^']+)'/.exec(stack || '');
+        const m = /^['"]?([^'",]+)['"]?/.exec(stack || '');
+        if (m) m[1] = m[1].trim();
         const spec = m && WEB_FONTS[m[1]];
         if (!spec || document.querySelector(`link[data-ada-font="${m[1]}"]`)) return;
         const l = document.createElement('link');
@@ -5883,7 +5957,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       sendDesignerMessage(text);
     }
 
+    // Designer edits are undoable like manual ones (fb-1790201502182): the
+    // page as it was before the job goes onto the layout history when the
+    // job's changes are loaded.
+    let designerBefore = null;
+
     async function sendDesignerMessage(text) {
+      designerBefore = homepageDoc ? { page: currentCanvasPage, doc: cloneDoc(homepageDoc) } : null;
       if (designerBusy) {
         renderDesignerNotice('The Designer is still working — one request at a time.');
         return;
@@ -5940,7 +6020,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           if (sres.ok) designerSession = await sres.json();
           renderDesignerMessages();
           setDesignerBusy(false);
-          loadPage(currentCanvasPage);
+          const before = designerBefore;
+          designerBefore = null;
+          await loadPage(currentCanvasPage);
+          if (before && before.page === currentCanvasPage && homepageDoc && docFingerprint(before.doc) !== docFingerprint(homepageDoc)) {
+            layoutHistory.past.push(before.doc);
+            layoutHistory.future = [];
+            updateLayoutHistoryButtons();
+            showBuilderToast('The Designer changed this page', { label: 'Undo', onClick: undoLayout });
+          }
         } catch (err) {
           setDesignerBusy(false);
           renderDesignerNotice('Lost contact with the design job: ' + err.message);

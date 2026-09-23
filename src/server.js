@@ -622,6 +622,28 @@ const DEFAULT_HOMEPAGE = {
 // the first grid). A page without pageSections renders exactly as before.
 const PAGE_SECTION_TYPES = ['hero', 'features', 'grid', 'gallery', 'pricing', 'cta', 'text', 'footer'];
 const PAGE_SECTIONS_MAX = 30;
+
+// List props (feature cards, plans, images, links) are one string, one item
+// per line. Agents naturally send arrays — of strings or of objects — so those
+// are converted to the line format instead of silently dropped
+// (fb-1790201502182: gpt-4o-mini's first page lost every list this way).
+const pick = (o, keys) => { for (const k of keys) if (o && o[k] !== undefined && o[k] !== null && typeof o[k] !== 'object') return String(o[k]).trim(); return ''; };
+const LIST_ITEM_FORMAT = {
+  items: (o) => { const icon = (pick(o, ['icon']).match(/fa-[a-z0-9-]+/g) || []).filter(c => !/^fa-(solid|regular|brands|light)$/.test(c))[0] || ''; return [icon, pick(o, ['title', 'name', 'heading']), pick(o, ['text', 'description', 'body', 'subtitle'])].filter((v, i) => v || i === 1).join(' | '); },
+  plans: (o) => { const feats = Array.isArray(o.features) ? o.features.map(String).join('; ') : pick(o, ['features', 'description']); return [(o.featured || o.highlight || o.popular ? '*' : '') + pick(o, ['name', 'title']), pick(o, ['price', 'cost']), feats, pick(o, ['button', 'cta', 'buttonLabel', 'label']), pick(o, ['link', 'href', 'url'])].join(' | '); },
+  images: (o) => [pick(o, ['src', 'url', 'image', 'href']), pick(o, ['caption', 'alt', 'title'])].join(' | '),
+  links: (o) => [pick(o, ['label', 'text', 'title', 'name']), pick(o, ['url', 'href', 'link'])].join(' | ')
+};
+function coercePropValue(key, v) {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (Array.isArray(v)) {
+    const fmt = LIST_ITEM_FORMAT[key];
+    return v.slice(0, 24).map(x => (x && typeof x === 'object') ? (fmt ? fmt(x) : Object.values(x).filter(y => typeof y !== 'object').join(' | ')) : String(x ?? '')).map(l => l.replace(/\n/g, ' ').trim()).filter(Boolean).join('\n');
+  }
+  return null;
+}
+
 function sanitizePageSections(raw) {
   if (!Array.isArray(raw)) return undefined;
   const out = [];
@@ -637,8 +659,8 @@ function sanitizePageSections(raw) {
         // Props become HTML attributes: never event handlers or attributes that
         // restyle/re-identify the element.
         if (!/^[a-z][a-z0-9-]{0,39}$/.test(k) || /^on/.test(k) || ['style', 'id', 'class', 'is', 'slot'].includes(k)) continue;
-        if (typeof v === 'string') props[k] = v.slice(0, 5000);
-        else if (typeof v === 'number' || typeof v === 'boolean') props[k] = String(v);
+        const cv = coercePropValue(k, v);
+        if (cv !== null) props[k] = cv.slice(0, 5000);
       }
     }
     const clean = { id, type: sec.type, props };
@@ -669,6 +691,83 @@ function sanitizeTokens(raw) {
     if (typeof raw[k] === 'string' && re.test(raw[k])) out[k] = raw[k];
   }
   return Object.keys(out).length ? out : undefined;
+}
+
+// Custom-page docs keep their free-form widgets, but the Page Builder fields
+// go through the same sanitizers as the homepage (fb-1790201502182). Returns
+// what was dropped so the Designer can be told.
+function sanitizePageDocFields(doc) {
+  const report = [];
+  if (!doc || typeof doc !== 'object') return { doc: { widgets: [] }, report: ['document was not an object'] };
+  if ('pageSections' in doc) {
+    const before = Array.isArray(doc.pageSections) ? doc.pageSections : [];
+    const ps = sanitizePageSections(doc.pageSections) || [];
+    if (ps.length < before.length) report.push(`dropped ${before.length - ps.length} section(s) with an unknown type or bad shape (allowed types: ${PAGE_SECTION_TYPES.join(', ')})`);
+    before.forEach((b, i) => {
+      const kept = ps.find(x => x.id === b.id) || null;
+      if (kept && b && b.props && typeof b.props === 'object') {
+        const lost = Object.keys(b.props).filter(k => !(k in kept.props));
+        if (lost.length) report.push(`section ${kept.id}: dropped props ${lost.join(', ')}`);
+      }
+    });
+    if (ps.length) doc.pageSections = ps; else delete doc.pageSections;
+  }
+  if ('tokens' in doc) {
+    const tk = sanitizeTokens(doc.tokens);
+    const lost = doc.tokens && typeof doc.tokens === 'object' ? Object.keys(doc.tokens).filter(k => !tk || !(k in tk)) : [];
+    if (lost.length) report.push(`tokens: dropped invalid ${lost.join(', ')}`);
+    if (tk) doc.tokens = tk; else delete doc.tokens;
+  }
+  if (!Array.isArray(doc.widgets)) doc.widgets = [];
+  doc.widgets.forEach(w => { if (w && w.section !== undefined && !(typeof w.section === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(w.section))) { delete w.section; report.push(`widget ${w.id}: invalid section id removed`); } });
+  return { doc, report };
+}
+
+// Section + widget catalog for agent prompts, generated from the components'
+// own `static configSchema` so the Designer can never drift from the code
+// (the hand-written list once told it lib= for photo-frame; the attribute is
+// library=). Cached by the components directory's mtimes.
+const vm = require('vm');
+let componentCatalogCache = { key: '', value: { sections: [], widgets: [] } };
+function extractArrayLiteral(src, start) {
+  let depth = 0, inStr = null;
+  for (let i = start; i < src.length; i++) {
+    const c = src[i];
+    if (inStr) { if (c === '\\') { i++; continue; } if (c === inStr) inStr = null; continue; }
+    if (c === "'" || c === '"' || c === '`') { inStr = c; continue; }
+    if (c === '[') depth++;
+    else if (c === ']') { depth--; if (depth === 0) return src.slice(start, i + 1); }
+  }
+  return null;
+}
+function readComponentCatalog() {
+  const dir = path.join(__dirname, '../public/components');
+  let files = [];
+  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.js')); } catch (e) { return componentCatalogCache.value; }
+  const key = files.map(f => { try { return f + fs.statSync(path.join(dir, f)).mtimeMs; } catch (e) { return f; } }).join('|');
+  if (key === componentCatalogCache.key) return componentCatalogCache.value;
+  const out = { sections: [], widgets: [] };
+  for (const f of files) {
+    let src = '';
+    try { src = fs.readFileSync(path.join(dir, f), 'utf8'); } catch (e) { continue; }
+    const def = /customElements\.define\(\s*['"]([a-z0-9-]+)['"]/.exec(src);
+    const at = src.indexOf('static configSchema');
+    if (!def || at === -1) continue;
+    const lit = extractArrayLiteral(src, src.indexOf('[', at));
+    let schema = null;
+    try { schema = vm.runInNewContext('(' + lit + ')', {}, { timeout: 50 }); } catch (e) { continue; }
+    if (!Array.isArray(schema)) continue;
+    const tag = def[1];
+    if (tag.startsWith('ada-section-')) out.sections.push({ type: tag.slice('ada-section-'.length), tag, schema });
+    else out.widgets.push({ tag, schema });
+  }
+  componentCatalogCache = { key, value: out };
+  return out;
+}
+function describeSchemaField(f) {
+  const opts = Array.isArray(f.options) ? ' one of ' + f.options.map(o => Array.isArray(o) ? o[0] : o).join('|') : '';
+  const dflt = f.default ? ` (default ${JSON.stringify(String(f.default)).slice(0, 80)})` : '';
+  return `${f.attr} — ${f.label}${opts}${dflt}`;
 }
 
 // Whitelist + cap a single widget; null if unsalvageable (dropped, not fatal).
@@ -969,9 +1068,12 @@ app.post('/api/pages', (req, res) => {
 
 app.get('/api/pages/:id/content', (req, res) => {
   const id = req.params.id;
+  // Sanitized on READ too (fb-1790201502182): the Designer's Claude engine
+  // writes the file directly, bypassing every write-path check.
+  if (id === 'home') return res.json(readHomepage());
   const docPath = getPageDocPath(id);
   if (!fs.existsSync(docPath)) return res.json({ widgets: [] });
-  res.json(readJsonStoreOrThrow(docPath));
+  res.json(sanitizePageDocFields(readJsonStoreOrThrow(docPath)).doc);
 });
 
 
@@ -1008,9 +1110,7 @@ app.post('/api/pages/:id/content', (req, res) => {
         return res.status(409).json({ error: 'stale', message: 'This page changed elsewhere since you loaded it.', updatedAt: current.updatedAt, updatedBy: current.updatedBy });
       }
     }
-    if ('pageSections' in doc) { const ps = sanitizePageSections(doc.pageSections); if (ps && ps.length) doc.pageSections = ps; else delete doc.pageSections; }
-    if ('tokens' in doc) { const tk = sanitizeTokens(doc.tokens); if (tk) doc.tokens = tk; else delete doc.tokens; }
-    if (Array.isArray(doc.widgets)) doc.widgets.forEach(w => { if (w && w.section !== undefined && !(typeof w.section === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(w.section))) delete w.section; });
+    sanitizePageDocFields(doc);
     doc.updatedAt = new Date().toISOString();
     fs.writeFileSync(docPath, JSON.stringify(doc, null, 2));
     res.json({ success: true, updatedAt: doc.updatedAt });
@@ -1448,6 +1548,24 @@ function executeLocalTool(toolName, args, role, sessionId) {
         if (target !== pageDoc) {
           return resolve({ error: `Permission Denied: the Designer may only write its page document: ${pageDoc}. Read access elsewhere is fine.` });
         }
+        // Validated section JSON only (fb-1790201502182): refuse non-JSON,
+        // run the same sanitizer the UI's saves go through, and tell the
+        // agent exactly what was dropped so it can correct itself.
+        let parsed;
+        try { parsed = JSON.parse(args.content); } catch (e) {
+          return resolve({ error: `Not written: the page document must be valid JSON (${e.message}). Nothing was changed.` });
+        }
+        let report = [];
+        if (pageId === 'home') {
+          const before = JSON.stringify(parsed);
+          parsed = sanitizeHomepage({ ...parsed, updatedAt: new Date().toISOString(), updatedBy: 'designer' });
+          if ((parsed.pageSections || []).length !== (JSON.parse(before).pageSections || []).length) report.push('some sections were dropped (unknown type or bad shape)');
+        } else {
+          ({ doc: parsed, report } = sanitizePageDocFields(parsed));
+          parsed.updatedAt = new Date().toISOString();
+        }
+        args.content = JSON.stringify(parsed, null, 2);
+        args.__designerReport = report.length ? report : ['ok — passed the sanitizer unchanged'];
       }
       if (toolName === 'feedback' && args.action && args.action !== 'list') {
         return resolve({ error: 'Permission Denied: the Designer role does not manage feedback tickets.' });
@@ -1485,6 +1603,7 @@ function executeLocalTool(toolName, args, role, sessionId) {
       fs.writeFile(target, args.content, 'utf8', (err) => {
         if (err) return resolve({ error: err.message });
         const written = { success: true, filePath: target, bytesWritten: Buffer.byteLength(args.content) };
+        if (args.__designerReport) written.sanitizer = args.__designerReport;
 
         // --- Write-time syntax gate (added 2026-08-26) ----------------------
         // A .js file that does not parse cannot boot. Writing one silently is
@@ -2549,19 +2668,27 @@ Role: Remote Bridge. (This role does not use the local LLM; messages are polled 
 Role: Page Designer ("Designer"). RULING: you are containerized to exactly ONE page — this session is bound to the dashboard "${session.page || 'home'}" page, which renders entirely from the JSON document at ${getPageDocPath(session.page || 'home')}. That file is your ONLY writable surface (enforced at the tool layer: no shell, writes outside it are denied). You may NOT edit code, other data files, cron jobs, or server state.
 CRITICAL: NEVER overwrite homepage.json from scratch! You MUST ALWAYS use read_file on it first, parse the existing widgets, and ONLY modify the specific widgets requested by the user, leaving the rest exactly as they were.
 DESIGN CANVAS: { glanceTheme: {theme, accent}, widgets: [{id, title, icon, accent, html, link, hidden}] }. IMPORTANT: You are absolutely FORBIDDEN from writing raw javascript or <script> tags in the 'html' field. Instead, you MUST build the dashboard using the available Web Components (Custom Elements) from the Component Library. All components are transparent by default (no borders), but you can optionally pass theme="glass" (for a sleek translucent blur) or theme="solid". Available blocks:
-1. <ada-clock theme="glass|transparent|solid|neon|gradient"  format="12h|24h" font="'Orbitron', sans-serif"></ada-clock>
-2. <ada-analog-clock theme="glass|dark|light|transparent"></ada-analog-clock>
-3. <ada-countdown target="2027-01-01T00:00:00" title="New Year" accent="indigo" theme="glass|transparent|solid|neon|gradient" ></ada-countdown>
-4. <ada-stopwatch title="Stopwatch" accent="emerald" theme="glass|transparent|solid|neon|gradient" ></ada-stopwatch>
-5. <ada-timer minutes="5" title="Timer" accent="amber" theme="glass|transparent|solid|neon|gradient" ></ada-timer>
-6. <ada-script-runner script-id="sys-health|web-scraper|data-cleaner" label="Run diagnostic" icon="fa-terminal" accent="indigo" theme="glass|transparent|solid|neon|gradient" ></ada-script-runner>
-7. <ada-stat-box stat="todo|jobs|cpu|bugs|ram" title="Label" icon="fa-chart-bar" accent="indigo" theme="glass|transparent|solid|neon|gradient" ></ada-stat-box>
-8. <ada-greeting name="User" theme="glass|transparent|solid|neon|gradient" ></ada-greeting>
-9. <ada-sysmon theme="glass|transparent|solid|neon|gradient" accent="emerald"></ada-sysmon>
-10. <ada-scratchpad theme="glass|transparent|solid|neon|gradient" accent="amber"></ada-scratchpad>
-11. <ada-calendar theme="glass|transparent|solid|neon|gradient" accent="indigo"></ada-calendar>
-12. <ada-photo-frame lib="vacation" interval="10" theme="glass|transparent|solid|neon|gradient" accent="sky"></ada-photo-frame>
-If the user wants a widget that isn't in the library, tell them to ask the Architect to build the Custom Element first! Changes appear instantly on save.`
+${(() => { const cat = readComponentCatalog(); return cat.widgets.map(w => `- <${w.tag}> attributes: ${w.schema.map(describeSchemaField).join('; ')}; plus theme (glass|transparent|solid|neon|gradient) and accent (indigo|purple|emerald|rose|amber|sky)`).join('\n'); })()}
+- <ada-analog-clock theme="glass|dark|light|transparent"></ada-analog-clock>
+- <ada-sysmon theme="glass|transparent|solid|neon|gradient" accent="emerald"></ada-sysmon>
+- <ada-scratchpad theme="glass|transparent|solid|neon|gradient" accent="amber"></ada-scratchpad>
+- <ada-calendar theme="glass|transparent|solid|neon|gradient" accent="indigo"></ada-calendar>
+(The attribute lists above are generated from the components' own code — trust them over memory.)
+If the user wants a widget that isn't in the library, tell them to ask the Architect to build the Custom Element first! Changes appear instantly on save.
+
+PAGE SECTIONS (Page Builder v2) — use these to build real, polished pages (landing pages, portfolios, event pages, anything "professional"). The document may hold "pageSections": an ordered list rendered top to bottom:
+  [{ "id": "sec-hero1", "type": "<type>", "props": { "<attr>": "<string>" } }]
+Section types and their props (generated from the section components' code):
+${readComponentCatalog().sections.map(x => `- ${x.type}: ${x.schema.map(describeSchemaField).join('; ')}`).join('\n')}
+- grid: holds widgets. props: heading (optional).
+LIST PROPS are ONE string, one item per line ("\\n" between lines), fields separated by " | " — fill them with real content, never leave them to the defaults. Examples:
+  features.items: "fa-bread-slice | Baked daily | Out of the oven before 7am\\nfa-leaf | Local flour | Milled 20 miles away"
+  pricing.plans:  "Small box | $12 | 4 pastries; Mix and match | Order | /order\\n*Family box | $28 | 10 pastries; Free coffee | Order | /order"
+  gallery.images: "https://example.com/a.jpg | Caption"   footer.links: "Instagram | https://instagram.com/x\\nContact | mailto:hi@x.com"
+  (Arrays are converted to this format, but a string is preferred.) A widget joins a grid with "section": "<grid section id>"; widgets without "section" go to the first grid.
+RULES: every prop value is a STRING. Only the listed props exist; unknown types/props are DROPPED by the server's sanitizer. Props are shown as TEXT — never put HTML in them (lists use the line formats in the labels). Links: https://, /path, #anchor or mailto: only. Ids: letters, digits, - and _. When a page has widgets but no pageSections and you add sections, ALSO add a grid section so the existing widgets keep a home.
+LOOK — "tokens": { "preset": "default|midnight|glass|minimalist|neon|sunset|rose", "fontHeading"/"fontBody": a CSS font stack (good pairs: 'Playfair Display' + 'Source Sans 3'; 'Fraunces' + 'Inter'; 'Nunito'; 'Poppins'; 'Inter'), "scale": "compact|normal|large", "density": "compact|normal|airy", "radius": "none|sm|md|lg|xl", "brand"/"surface"/"text"/"muted": "#rrggbb" }. Choose a coherent palette with readable contrast (text on surface; buttons pick black or white text automatically). Fonts that load: Inter, Playfair Display, Source Sans 3, Fraunces, Nunito, Poppins, JetBrains Mono, Lato, Montserrat, Roboto, Open Sans, Merriweather, Lora, Raleway, DM Sans, DM Serif Display — use these names exactly, first in the stack.
+EDIT, DON'T REBUILD: when asked to change something, re-read the file and change only that — keep every other section, widget and token exactly as it was. Your write_file result includes a "sanitizer" report; if it says anything was dropped, fix it and write again. The user can undo your change from the builder.`
   };
 
   const systemInstruction = rolePrompts[session.role] || rolePrompts.debugger;
