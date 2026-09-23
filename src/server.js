@@ -19,7 +19,12 @@ const PORT = process.env.PORT || 3000;
 //      one global lockout — anyone could lock Alex out with 5 bad requests.
 //   2. requireAuth MUST precede express.static, or index.html is served to
 //      anonymous visitors before any auth check runs.
-app.set('trust proxy', 1);            // single Caddy hop on the same host
+// 'loopback', NOT 1: a hop count trusts X-Forwarded-For from ANY socket, so a
+// direct request to :3000 carrying "X-Forwarded-For: 127.0.0.1" got req.ip ==
+// 127.0.0.1 and walked through auth.js's loopback exemption (verified
+// 2026-09-23). Trusting only loopback sockets keeps Caddy's real client IP
+// (Caddy connects from 127.0.0.1) while spoofed headers from outside are ignored.
+app.set('trust proxy', 'loopback');
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));              // must precede mountAuth: /api/login reads req.body
 const { requireAuth } = mountAuth(app, {
