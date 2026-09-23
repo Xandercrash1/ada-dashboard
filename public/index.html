@@ -2385,7 +2385,7 @@
 
     async function savePageAsTemplate() {
       if (!homepageDoc) return;
-      if (!(homepageDoc.widgets || []).length) { showAppToast('This page has no widgets to save as a template.', 'warn'); return; }
+      if (!(homepageDoc.widgets || []).length && !(homepageDoc.pageSections || []).length) { showAppToast('This page has nothing to save as a template.', 'warn'); return; }
       const page = currentCanvasPage === 'home' ? { title: 'Home' } : (customPages.find(p => p.id === currentCanvasPage) || { title: currentCanvasPage });
       const name = (await adaPrompt({ title: 'Save page as template', message: 'Template name', defaultValue: page.title, confirmLabel: 'Save template' }) || '').trim();
       if (!name) return;
@@ -2393,7 +2393,7 @@
         const res = await fetch('/api/templates', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, sourcePage: currentCanvasPage, doc: { widgets: homepageDoc.widgets, pageTheme: homepageDoc.pageTheme, glanceTheme: homepageDoc.glanceTheme } })
+          body: JSON.stringify({ name, sourcePage: currentCanvasPage, doc: { widgets: homepageDoc.widgets, pageTheme: homepageDoc.pageTheme, glanceTheme: homepageDoc.glanceTheme, pageSections: homepageDoc.pageSections, tokens: homepageDoc.tokens } })
         });
         const data = await res.json();
         if (!res.ok) { showAppToast(data.error || 'Could not save the template', 'error'); return; }
@@ -4447,6 +4447,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       } else if (f.type === 'toggle') {
         input = `<label class="flex items-center gap-2 text-sm text-gray-300"><input id="${id}" data-cfg-attr="${f.attr}" type="checkbox" ${on} class="accent-indigo-500"> ${escapeHtml(f.label)}</label>`;
         return `<div>${input}</div>`;
+      } else if (f.type === 'textarea') {
+        input = `<textarea id="${id}" data-cfg-attr="${f.attr}" rows="4"${ph} ${on} class="${CONFIG_INPUT_CLS} font-mono text-xs"></textarea>`;
       } else {
         const type = f.type === 'number' ? 'number' : f.type === 'datetime' ? 'datetime-local' : 'text';
         const min = f.min !== undefined ? ` min="${f.min}"` : '';
@@ -5149,6 +5151,69 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       }
     }
 
+    // ===================== PAGE BUILDER v2 — tokens + sections (fb-1790201502141) =====================
+    // Design tokens become --ada-* CSS custom properties on the page root.
+    // Token sets are keyed like PAGE_THEME_PRESETS, so picking a page theme
+    // also restyles every section; doc.tokens overrides individual values.
+    const TOKEN_PRESETS = {
+      default:    { fontHeading: "'Inter', system-ui, sans-serif", fontBody: "'Inter', system-ui, sans-serif", scale: 'normal', density: 'normal', radius: 'lg', brand: '#6366f1', surface: '#0f172a', text: '#f8fafc', muted: '#94a3b8' },
+      midnight:   { fontHeading: "'Inter', system-ui, sans-serif", fontBody: "'Inter', system-ui, sans-serif", scale: 'normal', density: 'normal', radius: 'lg', brand: '#6366f1', surface: '#0b1020', text: '#e2e8f0', muted: '#94a3b8' },
+      glass:      { fontHeading: "'Inter', system-ui, sans-serif", fontBody: "'Inter', system-ui, sans-serif", scale: 'normal', density: 'airy', radius: 'xl', brand: '#0ea5e9', surface: '#0c1a2b', text: '#f0f9ff', muted: '#93c5fd' },
+      minimalist: { fontHeading: "Georgia, 'Times New Roman', serif", fontBody: "'Inter', system-ui, sans-serif", scale: 'large', density: 'airy', radius: 'sm', brand: '#059669', surface: '#fafaf9', text: '#1c1917', muted: '#57534e' },
+      neon:       { fontHeading: "'Inter', system-ui, sans-serif", fontBody: "'Inter', system-ui, sans-serif", scale: 'large', density: 'normal', radius: 'md', brand: '#a855f7', surface: '#09090b', text: '#faf5ff', muted: '#c4b5fd' },
+      sunset:     { fontHeading: "Georgia, 'Times New Roman', serif", fontBody: "'Inter', system-ui, sans-serif", scale: 'normal', density: 'normal', radius: 'lg', brand: '#f59e0b', surface: '#1c1008', text: '#fff7ed', muted: '#fdba74' },
+      rose:       { fontHeading: "Georgia, 'Times New Roman', serif", fontBody: "'Inter', system-ui, sans-serif", scale: 'normal', density: 'airy', radius: 'xl', brand: '#e11d48', surface: '#1f0a12', text: '#fff1f2', muted: '#fda4af' }
+    };
+    const TOKEN_SCALE = { compact: ['2rem', '1.5rem', '0.9rem'], normal: ['2.75rem', '1.9rem', '1rem'], large: ['3.5rem', '2.3rem', '1.08rem'] };
+    const TOKEN_SPACE = { compact: '2.5rem', normal: '4rem', airy: '6rem' };
+    const TOKEN_RADIUS = { none: '0px', sm: '6px', md: '10px', lg: '16px', xl: '24px' };
+
+    function resolvePageTokens(doc) {
+      const t = (doc && doc.tokens) || {};
+      const presetKey = t.preset || (doc && doc.pageTheme && doc.pageTheme.preset) || 'default';
+      return { ...(TOKEN_PRESETS[presetKey] || TOKEN_PRESETS.default), ...t, preset: presetKey };
+    }
+
+    function applyPageTokens(el, doc) {
+      const t = resolvePageTokens(doc);
+      const [h1, h2, body] = TOKEN_SCALE[t.scale] || TOKEN_SCALE.normal;
+      const vars = {
+        '--ada-font-heading': t.fontHeading, '--ada-font-body': t.fontBody,
+        '--ada-h1': h1, '--ada-h2': h2, '--ada-body': body,
+        '--ada-space': TOKEN_SPACE[t.density] || TOKEN_SPACE.normal,
+        '--ada-radius': TOKEN_RADIUS[t.radius] || TOKEN_RADIUS.lg,
+        '--ada-brand': t.brand, '--ada-surface': t.surface, '--ada-text': t.text, '--ada-muted': t.muted
+      };
+      for (const [k, v] of Object.entries(vars)) el.style.setProperty(k, v);
+    }
+
+    // Section types the page renderer knows. `grid` is rendered here (it
+    // holds widget cards); the rest are web components that declare their
+    // own configSchema. Keep in step with PAGE_SECTION_TYPES in server.js.
+    const PAGE_SECTION_TYPES = {
+      hero:     { label: 'Hero',        icon: 'fa-star',      tag: 'ada-section-hero' },
+      features: { label: 'Features',    icon: 'fa-table-cells-large', tag: 'ada-section-features' },
+      grid:     { label: 'Widget grid', icon: 'fa-grip',      tag: null }
+    };
+
+    function visiblePageSections(doc) {
+      return (Array.isArray(doc && doc.pageSections) ? doc.pageSections : []).filter(s => s && !s.hidden && PAGE_SECTION_TYPES[s.type]);
+    }
+
+    function renderPageSection(sec, innerHtml) {
+      const def = PAGE_SECTION_TYPES[sec.type];
+      // Only attributes the component declares in its configSchema; before
+      // the module has loaded, a deny-list (event handlers, style, identity).
+      const ctor = def.tag && customElements.get(def.tag);
+      const allowed = ctor && Array.isArray(ctor.configSchema) ? new Set(ctor.configSchema.map(f => f.attr)) : null;
+      const attrs = Object.entries(sec.props || {})
+        .filter(([k]) => /^[a-z][a-z0-9-]{0,39}$/.test(k) && !/^on/.test(k) && !['style', 'id', 'class', 'is', 'slot'].includes(k))
+        .filter(([k]) => !allowed || allowed.has(k))
+        .map(([k, v]) => `${k}="${escapeHtml(String(v))}"`).join(' ');
+      const body = def.tag ? `<${def.tag} ${attrs}></${def.tag}>` : innerHtml;
+      return `<div class="page-section relative w-full" data-section-id="${escapeHtml(sec.id)}" data-section-type="${sec.type}">${body}</div>`;
+    }
+
     function renderHomepage() {
       const pageInfo = customPages.find(p => p.id === currentCanvasPage);
       const titleText = pageInfo ? pageInfo.title : 'Dashboard';
@@ -5176,7 +5241,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       // Alex or his agents — the same trust level as the agents' bash access.
       const grid = document.getElementById('home-widgets');
       const widgets = (homepageDoc.widgets || []).filter(w => w && !w.hidden);
-      grid.classList.toggle('hidden', widgets.length === 0 && !window.isEditingLayout);
+      grid.classList.toggle('hidden', widgets.length === 0 && !visiblePageSections(homepageDoc).length && !window.isEditingLayout);
+      applyPageTokens(grid, homepageDoc);
             const bodyWidget = widgets.find(w => w.html && w.html.includes('ada-doc-body'));
       
       const renderWidgetCard = (w) => {
@@ -5245,6 +5311,27 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             </div>
           </div>
         `;
+      } else if (visiblePageSections(homepageDoc).length) {
+        // Section page (fb-1790201502141). Widgets live in `grid` sections:
+        // w.section names one, anything unassigned goes to the first grid,
+        // and if there is no grid at all they get a trailing one so nothing
+        // silently disappears.
+        const secs = visiblePageSections(homepageDoc);
+        const gridIds = secs.filter(s => s.type === 'grid').map(s => s.id);
+        const home = (w) => (w.section && gridIds.includes(w.section)) ? w.section : gridIds[0];
+        const gridHtml = (ws, withAdd) => `
+          <div class="w-full grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[10px]">
+             ${ws.map(renderWidgetCard).join('')}
+             ${withAdd ? addBtnHtml : ''}
+          </div>`;
+        const parts = secs.map(sec => {
+          if (sec.type !== 'grid') return renderPageSection(sec);
+          const heading = sec.props && sec.props.heading
+            ? `<h2 class="text-lg font-bold text-gray-900 dark:text-white mb-3" style="font-family: var(--ada-font-heading);">${escapeHtml(sec.props.heading)}</h2>` : '';
+          return renderPageSection(sec, heading + gridHtml(widgets.filter(w => home(w) === sec.id), sec.id === gridIds[0]));
+        });
+        if (!gridIds.length && (widgets.length || window.isEditingLayout)) parts.push(gridHtml(widgets, true));
+        grid.innerHTML = `<div class="ada-page w-full flex flex-col gap-6">${parts.join('')}</div>`;
       } else {
         grid.innerHTML = `
           <div class="w-full grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[10px]">

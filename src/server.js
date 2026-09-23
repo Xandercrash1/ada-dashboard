@@ -615,6 +615,62 @@ const DEFAULT_HOMEPAGE = {
   widgets: []
 };
 
+// --- Page Builder v2 (fb-1790201502141): page sections + design tokens ---
+// `pageSections` (NOT `sections` — that key already holds the built-in Home
+// toggles {stats, quickLinks}) is an ordered list of full-width blocks. A
+// `grid` section holds widgets (w.section = its id; unassigned widgets go to
+// the first grid). A page without pageSections renders exactly as before.
+const PAGE_SECTION_TYPES = ['hero', 'features', 'grid'];
+const PAGE_SECTIONS_MAX = 30;
+function sanitizePageSections(raw) {
+  if (!Array.isArray(raw)) return undefined;
+  const out = [];
+  const seen = new Set();
+  for (const sec of raw.slice(0, PAGE_SECTIONS_MAX)) {
+    if (!sec || typeof sec !== 'object' || !PAGE_SECTION_TYPES.includes(sec.type)) continue;
+    let id = (typeof sec.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(sec.id)) ? sec.id : `sec-${Date.now()}-${out.length}`;
+    if (seen.has(id)) id = `${id.slice(0, 56)}-${out.length}`;
+    seen.add(id);
+    const props = {};
+    if (sec.props && typeof sec.props === 'object' && !Array.isArray(sec.props)) {
+      for (const [k, v] of Object.entries(sec.props).slice(0, 30)) {
+        // Props become HTML attributes: never event handlers or attributes that
+        // restyle/re-identify the element.
+        if (!/^[a-z][a-z0-9-]{0,39}$/.test(k) || /^on/.test(k) || ['style', 'id', 'class', 'is', 'slot'].includes(k)) continue;
+        if (typeof v === 'string') props[k] = v.slice(0, 5000);
+        else if (typeof v === 'number' || typeof v === 'boolean') props[k] = String(v);
+      }
+    }
+    const clean = { id, type: sec.type, props };
+    if (sec.hidden === true) clean.hidden = true;
+    out.push(clean);
+  }
+  return out;
+}
+
+// Values end up in CSS custom properties, so they are validated tightly:
+// hex colours, a font-family character set with no ; ( ) or url, and enums.
+const TOKEN_RULES = {
+  preset: /^[a-z0-9-]{1,32}$/,
+  fontHeading: /^[A-Za-z0-9 ,'"-]{1,120}$/,
+  fontBody: /^[A-Za-z0-9 ,'"-]{1,120}$/,
+  scale: /^(compact|normal|large)$/,
+  density: /^(compact|normal|airy)$/,
+  radius: /^(none|sm|md|lg|xl)$/,
+  brand: /^#[0-9a-fA-F]{3,8}$/,
+  surface: /^#[0-9a-fA-F]{3,8}$/,
+  text: /^#[0-9a-fA-F]{3,8}$/,
+  muted: /^#[0-9a-fA-F]{3,8}$/,
+};
+function sanitizeTokens(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out = {};
+  for (const [k, re] of Object.entries(TOKEN_RULES)) {
+    if (typeof raw[k] === 'string' && re.test(raw[k])) out[k] = raw[k];
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 // Whitelist + cap a single widget; null if unsalvageable (dropped, not fatal).
 function sanitizeHomepageWidget(w, index) {
   if (!w || typeof w !== 'object') return null;
@@ -636,6 +692,7 @@ function sanitizeHomepageWidget(w, index) {
     html: typeof w.html === 'string' ? w.html.slice(0, 20000) : '',
     hidden: w.hidden === true
   };
+  if (typeof w.section === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(w.section)) clean.section = w.section;
   // Per-widget settings a component persists itself (e.g. <ada-todo> section
   // toggles). Was silently dropped here, so they never survived a homepage
   // save or an import. Plain object, size-capped.
@@ -683,6 +740,10 @@ function sanitizeHomepage(raw) {
     if (HOMEPAGE_ACCENTS.includes(raw.pageTheme.accent)) pt.accent = raw.pageTheme.accent;
     if (Object.keys(pt).length) doc.pageTheme = pt;
   }
+  const ps = sanitizePageSections(raw.pageSections);
+  if (ps && ps.length) doc.pageSections = ps;
+  const tk = sanitizeTokens(raw.tokens);
+  if (tk) doc.tokens = tk;
   if (raw.glanceTheme && typeof raw.glanceTheme === 'object') {
     doc.glanceTheme = {
       theme: HOMEPAGE_THEMES.includes(raw.glanceTheme.theme) ? raw.glanceTheme.theme : 'glass',
@@ -713,7 +774,7 @@ app.get('/api/homepage', (req, res) => {
 // the file directly instead.
 app.put('/api/homepage', (req, res) => {
   const current = readHomepage();
-  const { announcement, widgets, sections, updatedBy, pageTheme, glanceTheme, expectedUpdatedAt } = req.body || {};
+  const { announcement, widgets, sections, updatedBy, pageTheme, glanceTheme, expectedUpdatedAt, pageSections, tokens } = req.body || {};
   // Optimistic concurrency (fb-1789015021701): a client that says which
   // version it loaded is refused if the page moved on since. Callers that
   // send nothing (agents, older clients) keep last-write-wins.
@@ -737,6 +798,8 @@ app.put('/api/homepage', (req, res) => {
     // Explicit null clears the preset (sanitizeHomepage drops a null).
     ...(pageTheme !== undefined ? { pageTheme } : {}),
     ...(glanceTheme !== undefined ? { glanceTheme } : {}),
+    ...(pageSections !== undefined ? { pageSections } : {}),
+    ...(tokens !== undefined ? { tokens } : {}),
     updatedAt: new Date().toISOString(),
     updatedBy: typeof updatedBy === 'string' && updatedBy ? updatedBy : 'dashboard'
   });
@@ -945,6 +1008,9 @@ app.post('/api/pages/:id/content', (req, res) => {
         return res.status(409).json({ error: 'stale', message: 'This page changed elsewhere since you loaded it.', updatedAt: current.updatedAt, updatedBy: current.updatedBy });
       }
     }
+    if ('pageSections' in doc) { const ps = sanitizePageSections(doc.pageSections); if (ps && ps.length) doc.pageSections = ps; else delete doc.pageSections; }
+    if ('tokens' in doc) { const tk = sanitizeTokens(doc.tokens); if (tk) doc.tokens = tk; else delete doc.tokens; }
+    if (Array.isArray(doc.widgets)) doc.widgets.forEach(w => { if (w && w.section !== undefined && !(typeof w.section === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(w.section))) delete w.section; });
     doc.updatedAt = new Date().toISOString();
     fs.writeFileSync(docPath, JSON.stringify(doc, null, 2));
     res.json({ success: true, updatedAt: doc.updatedAt });
@@ -982,6 +1048,10 @@ function sanitizeTemplateDoc(raw) {
   const themed = sanitizeHomepage({ pageTheme: src.pageTheme, glanceTheme: src.glanceTheme });
   const doc = { widgets };
   if (themed.pageTheme) doc.pageTheme = themed.pageTheme;
+  const ps = sanitizePageSections(src.pageSections);
+  if (ps && ps.length) doc.pageSections = ps;
+  const tk = sanitizeTokens(src.tokens);
+  if (tk) doc.tokens = tk;
   if (src.glanceTheme && themed.glanceTheme) doc.glanceTheme = themed.glanceTheme;
   return doc;
 }
@@ -1019,7 +1089,7 @@ app.post('/api/templates', (req, res) => {
   const cleanName = typeof name === 'string' ? name.trim().slice(0, 80) : '';
   if (!cleanName) return res.status(400).json({ error: 'Template name required' });
   const cleanDoc = sanitizeTemplateDoc(doc);
-  if (!cleanDoc.widgets.length) return res.status(400).json({ error: 'This page has no widgets to save' });
+  if (!cleanDoc.widgets.length && !(cleanDoc.pageSections || []).length) return res.status(400).json({ error: 'This page has no widgets or sections to save' });
   const t = {
     id: 'tpl-' + Date.now(),
     name: cleanName,

@@ -17,3 +17,7 @@ import './DocBodyWidget.js';
 import './TodoWidget.js';
 import './KanbanWidget.js';
 import './WeatherWidget.js';
+
+// Page Builder v2 sections (fb-1790201502141)
+import "./HeroSection.js";
+import "./FeaturesSection.js";
