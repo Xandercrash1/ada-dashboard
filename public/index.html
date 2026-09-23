@@ -282,6 +282,7 @@
           <button onclick="redoLayout()" id="redo-layout-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Redo layout change (Shift-Cmd-Z)"><i class="fa-solid fa-rotate-right"></i></button>
           <button onclick="savePageAsTemplate()" id="save-template-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Save this page as a template"><i class="fa-solid fa-clone"></i></button>
           <!-- PAGE THEME PRESET (fb-1788928004000) — edit mode only; applies one cohesive theme/accent to every widget on this page -->
+          <button onclick="openPublishDialog()" id="publish-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Publish this page as a public (unlisted) website"><i class="fa-solid fa-globe"></i> <span>Publish</span></button>
           <button onclick="togglePageShared()" id="share-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Share this page with everyone"><i class="fa-solid fa-lock"></i> <span>Private</span></button>
           <button onclick="exportPage('preview')" id="export-preview-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Preview this page as a standalone website"><i class="fa-solid fa-eye"></i></button>
           <button onclick="exportPage('download')" id="export-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Export this page as one HTML file"><i class="fa-solid fa-file-export"></i></button>
@@ -468,6 +469,9 @@
           <button onclick="switchServerSubTab('scheduled')" id="subtab-btn-scheduled" title="Scheduler" aria-label="Scheduler" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
             <i class="fa-solid fa-clock text-amber-400"></i> <span class="hidden sm:inline">Scheduler</span>
             <span id="subtab-scheduled-badge" class="hidden bg-amber-900 border border-amber-500 text-amber-200 text-[9px] font-bold px-1.5 py-0.5 rounded-full">0</span>
+          </button>
+          <button onclick="switchServerSubTab('publishing')" id="subtab-btn-publishing" title="Publishing" aria-label="Publishing" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-globe text-emerald-400"></i> <span class="hidden sm:inline">Publishing</span>
           </button>
           <button onclick="switchServerSubTab('users')" id="subtab-btn-users" title="Users" aria-label="Users" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
             <i class="fa-solid fa-users text-sky-400"></i> <span class="hidden sm:inline">Users</span>
@@ -741,6 +745,27 @@
           </div>
         </div>
       </div>
+      <!-- Publishing (fb-1790206467643) — admin only -->
+      <div id="server-sub-publishing" class="hidden space-y-4">
+        <div class="bg-dark-card border border-dark-border rounded-2xl p-5 space-y-3">
+          <div>
+            <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-globe text-emerald-400 mr-2"></i>Cloudflare Pages</h3>
+            <p class="text-xs text-gray-400 mt-1">Published pages are static copies on Cloudflare — an unlisted https link, nothing that leads back to this server. Setup: <em>Steps — Cloudflare Pages Publishing Token</em> in the vault.</p>
+          </div>
+          <div><label for="pub-account" class="block text-xs text-gray-400 mb-1">Account ID</label><input id="pub-account" autocomplete="off" spellcheck="false" class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono" placeholder="32 hexadecimal characters"></div>
+          <div><label for="pub-token" class="block text-xs text-gray-400 mb-1">API token <span id="pub-token-state" class="text-gray-500"></span></label><input id="pub-token" type="password" autocomplete="new-password" spellcheck="false" class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono" placeholder="Pages: Edit token"></div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="savePublishSettings()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Save</button>
+            <button onclick="testPublishSettings()" class="px-4 py-2 rounded-lg border border-white/10 text-gray-300 hover:text-white text-xs">Test connection</button>
+            <span id="pub-status" class="text-xs text-gray-400"></span>
+          </div>
+        </div>
+        <div class="bg-dark-card border border-dark-border rounded-2xl p-5">
+          <h3 class="text-white font-bold text-sm mb-2">Published pages</h3>
+          <div id="pub-list" class="divide-y divide-white/5 text-sm"></div>
+        </div>
+      </div>
+
       <!-- Users (fb-1790201502191) — admin only -->
       <div id="server-sub-users" class="hidden space-y-4">
         <div class="bg-dark-card border border-dark-border rounded-2xl p-5">
@@ -1377,7 +1402,8 @@
       currentServerSubTab = sub;
       try { localStorage.setItem('ada_serverSubTab', sub); } catch (e) {}
       if (sub === 'users') loadUsers();
-      ['health', 'agents', 'feedback', 'scheduled', 'users'].forEach(s => {
+      if (sub === 'publishing') loadPublishing();
+      ['health', 'agents', 'feedback', 'scheduled', 'users', 'publishing'].forEach(s => {
         document.getElementById(`server-sub-${s}`).classList.add('hidden');
         const btn = document.getElementById(`subtab-btn-${s}`);
         if (btn) {
@@ -5464,6 +5490,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (!ok && window.isEditingLayout) toggleEditLayout();
       const share = document.getElementById('share-page-btn');
       const pg = currentPageEntry();
+      const pub = document.getElementById('publish-page-btn');
+      if (pub) {
+        pub.classList.toggle('hidden', !(window.isEditingLayout && pg && ok));
+        pub.innerHTML = pg && pg.published ? '<i class="fa-solid fa-globe text-emerald-400"></i> <span>Published</span>' : '<i class="fa-solid fa-globe"></i> <span>Publish</span>';
+      }
       if (share) {
         share.classList.toggle('hidden', !(window.isEditingLayout && pg && ok));
         if (pg) share.innerHTML = pg.shared ? '<i class="fa-solid fa-user-group"></i> <span>Shared</span>' : '<i class="fa-solid fa-lock"></i> <span>Private</span>';
@@ -5559,6 +5590,94 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       loadUsers();
     }
     window.__meReady.then(() => { applyRoleUI(); if (typeof renderHomepage === 'function' && homepageDoc) renderHomepage(); });
+
+    // ===================== PUBLISHING (fb-1790206467643) =====================
+    async function loadPublishing() {
+      let st = {};
+      try { st = await (await fetch('/api/publish/settings')).json(); } catch (e) {}
+      document.getElementById('pub-account').value = st.accountId || '';
+      document.getElementById('pub-token').value = '';
+      document.getElementById('pub-token-state').textContent = st.tokenSet ? '(saved — leave empty to keep it)' : '(not set)';
+      document.getElementById('pub-status').textContent = st.configured ? 'Saved.' : 'Not set up yet.';
+      await loadCustomPages();
+      const pub = customPages.filter(pg => pg.published);
+      document.getElementById('pub-list').innerHTML = pub.length ? pub.map(pg => `
+        <div class="flex flex-wrap items-center gap-2 py-2">
+          <span class="text-white font-semibold">${escapeHtml(pg.title)}</span><span class="text-[11px] text-gray-500">by ${escapeHtml(pg.published.by || pg.owner || '')}</span>
+          <a href="${escapeHtml(pg.published.url)}" target="_blank" rel="noopener noreferrer" class="text-emerald-400 text-xs underline break-all">${escapeHtml(pg.published.url)}</a>
+          <button onclick="unpublishPage('${escapeHtml(pg.id)}', true)" class="ml-auto px-2.5 py-1 rounded-lg text-xs text-rose-400 border border-white/10">Unpublish</button>
+        </div>`).join('') : '<p class="text-xs text-gray-400 py-2">Nothing published yet.</p>';
+    }
+    async function savePublishSettings() {
+      const res = await fetch('/api/publish/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: document.getElementById('pub-account').value.trim(), token: document.getElementById('pub-token').value.trim() }) });
+      const data = await res.json().catch(() => ({}));
+      document.getElementById('pub-status').textContent = res.ok ? 'Saved. Now Test connection.' : (data.error || 'Could not save');
+      if (res.ok) { document.getElementById('pub-token').value = ''; document.getElementById('pub-token-state').textContent = '(saved — leave empty to keep it)'; }
+    }
+    async function testPublishSettings() {
+      const st = document.getElementById('pub-status');
+      st.textContent = 'Testing…';
+      const data = await (await fetch('/api/publish/test', { method: 'POST' })).json().catch(() => ({ ok: false, error: 'No response' }));
+      st.innerHTML = data.ok ? `<span class="text-emerald-400 font-semibold">Connected</span> — ${data.projects} Pages project(s) on the account.` : `<span class="text-rose-400">${escapeHtml(data.error || 'Failed')}</span>`;
+    }
+    function publishModal(inner) {
+      let m = document.getElementById('publish-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'publish-modal';
+        m.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4';
+        m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+        document.body.appendChild(m);
+      }
+      m.innerHTML = `<div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-3">${inner}</div>`;
+      return m;
+    }
+    function openPublishDialog(note) {
+      const pg = currentPageEntry();
+      if (!pg) return;
+      const p = pg.published;
+      const m = publishModal(`
+        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-globe text-emerald-400 mr-2"></i>${p ? 'Published' : 'Publish this page'}</h3>
+        ${p ? `<div class="flex items-center gap-2 bg-black/20 border border-white/10 rounded-lg px-3 py-2"><a id="pub-url" href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer" class="text-emerald-400 text-sm break-all flex-1">${escapeHtml(p.url)}</a><button id="pub-copy" class="text-gray-400 hover:text-white" title="Copy link"><i class="fa-solid fa-copy"></i></button></div>
+             <p class="text-xs text-gray-400">Anyone with this link can see the page. It is not listed anywhere and search engines are told to ignore it. Changes appear after you Republish.</p>`
+          : `<p class="text-xs text-gray-400">Makes a static copy of this page's sections on Cloudflare with a private, unguessable https link you can send to friends. Visitors see only this page — nothing of your dashboard or server. Widget grids are left out.</p>`}
+        ${note || ''}
+        <div class="flex flex-wrap gap-2 pt-1">
+          ${p ? '<button id="pub-unpublish" class="px-3 py-2 rounded-lg text-xs text-rose-400 border border-white/10">Unpublish</button>' : ''}
+          <div class="flex-1"></div>
+          <button id="pub-cancel" class="px-4 py-2 text-xs text-gray-400 hover:text-white">Close</button>
+          <button id="pub-go" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold">${p ? 'Republish' : 'Publish'}</button>
+        </div>`);
+      m.querySelector('#pub-cancel').onclick = () => m.remove();
+      m.querySelector('#pub-go').onclick = () => publishCurrentPage();
+      const cp = m.querySelector('#pub-copy');
+      if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(p.url); showAppToast('Link copied', 'success'); } catch (e) { showAppToast(p.url, 'info'); } };
+      const un = m.querySelector('#pub-unpublish');
+      if (un) un.onclick = () => unpublishPage(pg.id);
+    }
+    async function publishCurrentPage() {
+      const pg = currentPageEntry();
+      const out = await buildPageExport();
+      if (!out) { showAppToast('Add sections first — only sections are published.', 'warn'); return; }
+      publishModal(`<div class="flex items-center gap-3 text-sm text-gray-300"><i class="fa-solid fa-spinner fa-spin text-emerald-400"></i> Publishing to Cloudflare… (about 10–30 seconds)</div>`);
+      const res = await fetch(`/api/pages/${encodeURIComponent(pg.id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html: out.html }) });
+      const data = await res.json().catch(() => ({}));
+      await loadCustomPages();
+      const warn = (data.warnings || []).length ? `<div class="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2">${data.warnings.map(escapeHtml).join('<br>')}</div>` : '';
+      if (!res.ok) { openPublishDialog(`<div class="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg p-2">${escapeHtml(data.error || 'Publishing failed')}</div>${warn}`); return; }
+      openPublishDialog(`<div class="text-xs text-emerald-300">Live. It can take a minute before the link answers the first time.</div>${warn}`);
+      updatePageAccessUI();
+    }
+    async function unpublishPage(id, fromPanel) {
+      if (!await adaConfirm({ title: 'Unpublish?', message: 'The public link stops working. You can publish again later (it gets a new link).', confirmLabel: 'Unpublish', danger: true })) return;
+      const res = await fetch(`/api/pages/${encodeURIComponent(id)}/publish`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      showAppToast(res.ok ? 'Unpublished.' : (data.error || 'Could not unpublish'), res.ok ? 'success' : 'error');
+      await loadCustomPages();
+      const m = document.getElementById('publish-modal'); if (m) m.remove();
+      if (fromPanel) loadPublishing(); else updatePageAccessUI();
+    }
 
     // ===================== PAGE BUILDER v2 — manual section builder (fb-1790201502161) =====================
     const GRID_SECTION_SCHEMA = [{ attr: 'heading', label: 'Heading (optional)', type: 'text', default: '' }];

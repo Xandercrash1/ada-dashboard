@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { exec, spawn, execFile } = require('child_process');
+const crypto = require('crypto');
 const { mountAuth } = require('./auth');
 const todoEngine = require('./todo-engine');
 const todoStore = require('./todo-store');
@@ -1132,6 +1133,7 @@ function authorizeRole(req, res, next) {
     if (m === 'POST') return pageOwnedBy(u, mm[1]) ? next() : deny();
   }
   if ((mm = /^\/api\/pages\/([^/]+)$/.exec(p)) && (m === 'DELETE' || m === 'PATCH')) return pageOwnedBy(u, mm[1]) ? next() : deny();
+  if ((mm = /^\/api\/pages\/([^/]+)\/publish$/.exec(p)) && (m === 'POST' || m === 'DELETE')) return pageOwnedBy(u, mm[1]) ? next() : deny();
   if (p === '/api/homepage' && m === 'GET') return next();
   if (p === '/api/templates' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/templates\/([^/]+)$/.exec(p))) {
@@ -1173,6 +1175,134 @@ app.patch('/api/users/:username', (req, res) => {
   if (req.params.username === ownerName(req) && disabled) return res.status(400).json({ error: 'You cannot disable your own account.' });
   try { res.json(userStore.update(req.params.username, { password, disabled })); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// --- PUBLISHING to Cloudflare Pages (fb-1790206467643) -----------------------
+// A published page is a standalone static site on Cloudflare — visitors never
+// touch this server. Credentials live OUTSIDE the tree (shared by live and
+// staging), mode 600, and the token is never sent back to a browser.
+const PUBLISH_CREDS_FILE = '/home/ubuntu/.ada-cloudflare.json';
+const WRANGLER_BIN = '/home/ubuntu/ops/wrangler/node_modules/.bin/wrangler';
+const PUBLISH_TMP = '/home/ubuntu/ops/publish-tmp';
+function readPublishCreds() {
+  try { const c = JSON.parse(fs.readFileSync(PUBLISH_CREDS_FILE, 'utf8')); return (c && c.accountId && c.token) ? c : null; } catch (e) { return null; }
+}
+async function cfApi(creds, method, pathPart, body) {
+  const res = await fetch(`https://api.cloudflare.com/client/v4${pathPart}`, {
+    method, headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000)
+  });
+  let j = null; try { j = await res.json(); } catch (e) {}
+  return { status: res.status, ok: res.ok && j && j.success !== false, json: j };
+}
+const cfErr = (r) => ((r.json && r.json.errors && r.json.errors[0] && r.json.errors[0].message) || `HTTP ${r.status}`);
+
+app.get('/api/publish/settings', (req, res) => {
+  const c = readPublishCreds();
+  res.json({ configured: !!c, accountId: c ? c.accountId : '', tokenSet: !!(c && c.token), updatedAt: c ? c.updatedAt : null });
+});
+app.put('/api/publish/settings', (req, res) => {
+  const { accountId, token } = req.body || {};
+  const prev = readPublishCreds() || {};
+  const acc = typeof accountId === 'string' ? accountId.trim() : '';
+  if (!/^[a-f0-9]{32}$/.test(acc)) return res.status(400).json({ error: 'The Account ID is 32 hexadecimal characters.' });
+  const tok = (typeof token === 'string' && token.trim()) ? token.trim() : prev.token;
+  if (!tok || !/^[A-Za-z0-9_-]{30,200}$/.test(tok)) return res.status(400).json({ error: 'Paste the API token (it looks like a long string of letters, digits, - and _).' });
+  fs.writeFileSync(PUBLISH_CREDS_FILE, JSON.stringify({ accountId: acc, token: tok, updatedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
+  fs.chmodSync(PUBLISH_CREDS_FILE, 0o600);
+  res.json({ configured: true, accountId: acc, tokenSet: true });
+});
+app.post('/api/publish/test', async (req, res) => {
+  const c = readPublishCreds();
+  if (!c) return res.status(400).json({ ok: false, error: 'Not configured yet.' });
+  try {
+    const v = await cfApi(c, 'GET', '/user/tokens/verify');
+    if (!v.ok) return res.json({ ok: false, error: 'Cloudflare rejected the token: ' + cfErr(v) });
+    const pr = await cfApi(c, 'GET', `/accounts/${c.accountId}/pages/projects`);
+    if (!pr.ok) return res.json({ ok: false, error: 'Token works but cannot use Pages on that account: ' + cfErr(pr) });
+    res.json({ ok: true, projects: (pr.json.result || []).length });
+  } catch (e) { res.json({ ok: false, error: 'Could not reach Cloudflare: ' + e.message }); }
+});
+
+// What a published page may contain. The export is built in the browser, so
+// the server re-checks it: static markup only.
+function validatePublishHtml(html) {
+  if (typeof html !== 'string' || !html.trim()) return 'Nothing to publish.';
+  if (html.length > 3 * 1024 * 1024) return 'The page is too large to publish (3 MB max).';
+  if (/<script\b/i.test(html)) return 'Published pages may not contain scripts.';
+  if (/<(iframe|object|embed|form|base)\b/i.test(html)) return 'Published pages may not contain frames, embeds or forms yet.';
+  if (/\son[a-z]+\s*=/i.test(html)) return 'Published pages may not contain event handlers.';
+  if (/(href|src)\s*=\s*["']?\s*(javascript|data|vbscript):/i.test(html)) return 'Published pages may not contain script links.';
+  return null;
+}
+
+app.post('/api/pages/:id/publish', async (req, res) => {
+  const id = req.params.id;
+  const c = readPublishCreds();
+  if (!c) return res.status(400).json({ error: 'Publishing is not set up yet — Alex adds the Cloudflare details under Server → Publishing.' });
+  const pages = readPagesRegistry();
+  const pg = pages.find(x => x.id === id);
+  if (!pg) return res.status(404).json({ error: 'Only custom pages can be published.' });
+  const bad = validatePublishHtml(req.body && req.body.html);
+  if (bad) return res.status(400).json({ error: bad });
+  let html = req.body.html;
+  const warnings = [];
+  const project = (pg.published && pg.published.project) ||
+    `${(pg.title || id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'page'}-${crypto.randomBytes(4).toString('hex')}`;
+  const dir = path.join(PUBLISH_TMP, project);
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
+    // Images under /media need the dashboard login — copy them in.
+    html = html.replace(/(["'(])\/media\/([A-Za-z0-9_-]{1,64})\/([^"')\s?#]{1,200})/g, (m0, q, lib, file) => {
+      const clean = path.basename(decodeURIComponent(file));
+      const src = path.join(MEDIA_DIR, lib, clean);
+      if (!src.startsWith(MEDIA_DIR + path.sep) || !fs.existsSync(src)) { warnings.push(`image not found: /media/${lib}/${clean}`); return m0; }
+      const dest = `${lib}-${clean}`.replace(/[^A-Za-z0-9._-]/g, '_');
+      fs.copyFileSync(src, path.join(dir, 'assets', dest));
+      return `${q}assets/${dest}`;
+    });
+    // Anything still pointing at this server's paths would lead visitors back to it.
+    const dashLinks = [...new Set((html.match(/href="\/(?!\/)[^"]*"/g) || []).map(x => x.slice(6, -1)))];
+    if (dashLinks.length) warnings.push(`links that point at the dashboard (visitors cannot open them): ${dashLinks.slice(0, 8).join(', ')}`);
+    html = html.replace(/<meta name="generator"[^>]*>\n?/i, '')
+               .replace('<meta name="viewport"', '<meta name="robots" content="noindex, nofollow">\n<meta name="viewport"');
+    fs.writeFileSync(path.join(dir, 'index.html'), html);
+    fs.writeFileSync(path.join(dir, '_headers'), '/*\n  X-Robots-Tag: noindex, nofollow\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n');
+    // Project: create on first publish (unguessable name = unlisted link).
+    if (!(pg.published && pg.published.project)) {
+      const cr = await cfApi(c, 'POST', `/accounts/${c.accountId}/pages/projects`, { name: project, production_branch: 'main' });
+      if (!cr.ok) throw new Error('Could not create the Cloudflare project: ' + cfErr(cr));
+    }
+    const out = await new Promise((resolve) => {
+      execFile(WRANGLER_BIN, ['pages', 'deploy', dir, '--project-name', project, '--branch', 'main', '--commit-dirty=true'], {
+        cwd: PUBLISH_TMP, timeout: 180000, maxBuffer: 4 * 1024 * 1024,
+        env: { PATH: process.env.PATH, HOME: '/home/ubuntu', CLOUDFLARE_API_TOKEN: c.token, CLOUDFLARE_ACCOUNT_ID: c.accountId, WRANGLER_SEND_METRICS: 'false', CI: '1' }
+      }, (err, stdout, stderr) => resolve({ err, text: `${stdout || ''}\n${stderr || ''}` }));
+    });
+    if (out.err) throw new Error('Deploy failed: ' + out.text.replace(new RegExp(c.token, 'g'), '***').trim().split('\n').slice(-4).join(' '));
+    const url = `https://${project}.pages.dev`;
+    pg.published = { project, url, publishedAt: new Date().toISOString(), by: ownerName(req) };
+    writePagesRegistry(pages);
+    res.json({ ok: true, url, project, warnings });
+  } catch (e) {
+    res.status(502).json({ error: e.message, warnings });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+app.delete('/api/pages/:id/publish', async (req, res) => {
+  const pages = readPagesRegistry();
+  const pg = pages.find(x => x.id === req.params.id);
+  if (!pg || !pg.published) return res.status(404).json({ error: 'This page is not published.' });
+  const c = readPublishCreds();
+  if (!c) return res.status(400).json({ error: 'Publishing is not set up.' });
+  const r = await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${pg.published.project}`);
+  if (!r.ok && r.status !== 404) return res.status(502).json({ error: 'Cloudflare refused: ' + cfErr(r) });
+  delete pg.published;
+  writePagesRegistry(pages);
+  res.json({ ok: true });
 });
 
 // --- PAGES API ---
