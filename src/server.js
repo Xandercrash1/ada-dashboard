@@ -1070,7 +1070,8 @@ app.get('/api/templates', (req, res) => {
       .filter(f => TEMPLATE_ID_RE.test(f.replace(/\.json$/, '')))
       .map(f => readTemplate(f.replace(/\.json$/, '')))
       .filter(Boolean)
-      .map(t => ({ id: t.id, name: t.name, createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: (t.doc.widgets || []).length }))
+      .map(t => ({ id: t.id, name: t.name, kind: t.kind || 'page', createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: (t.doc.widgets || []).length, sectionType: t.kind === 'section' ? ((t.doc.pageSections || [])[0] || {}).type : undefined }))
+      .filter(t => !req.query.kind || t.kind === req.query.kind)
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     res.json(list);
   } catch (err) {
@@ -1086,13 +1087,20 @@ app.get('/api/templates/:id', (req, res) => {
 
 app.post('/api/templates', (req, res) => {
   const { name, doc, sourcePage } = req.body || {};
+  // kind 'section' (Page Builder v2 phase 2, fb-1790201502161): one reusable
+  // section, listed in the Section Library instead of New Page.
+  const kind = req.body && req.body.kind === 'section' ? 'section' : 'page';
   const cleanName = typeof name === 'string' ? name.trim().slice(0, 80) : '';
   if (!cleanName) return res.status(400).json({ error: 'Template name required' });
   const cleanDoc = sanitizeTemplateDoc(doc);
   if (!cleanDoc.widgets.length && !(cleanDoc.pageSections || []).length) return res.status(400).json({ error: 'This page has no widgets or sections to save' });
+  if (kind === 'section' && (cleanDoc.widgets.length || (cleanDoc.pageSections || []).length !== 1 || cleanDoc.pageSections[0].type === 'grid')) {
+    return res.status(400).json({ error: 'A section template is exactly one non-grid section' });
+  }
   const t = {
     id: 'tpl-' + Date.now(),
     name: cleanName,
+    kind,
     createdAt: new Date().toISOString(),
     sourcePage: typeof sourcePage === 'string' ? sourcePage.slice(0, 64) : null,
     doc: cleanDoc
@@ -1100,7 +1108,7 @@ app.post('/api/templates', (req, res) => {
   try {
     if (!fs.existsSync(TEMPLATES_DIR)) fs.mkdirSync(TEMPLATES_DIR);
     fs.writeFileSync(path.join(TEMPLATES_DIR, `${t.id}.json`), JSON.stringify(t, null, 2));
-    res.status(201).json({ id: t.id, name: t.name, createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: cleanDoc.widgets.length });
+    res.status(201).json({ id: t.id, name: t.name, kind, createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: cleanDoc.widgets.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

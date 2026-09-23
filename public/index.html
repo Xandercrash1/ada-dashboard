@@ -234,11 +234,11 @@
       <ada-glance id="home-glance-banner" class="block mb-6"></ada-glance>
 
       <!-- Agent-designed widget cards (homepage.json .widgets). Hidden when empty. -->
-            <div class="flex items-center justify-between mb-4">
+            <div class="flex flex-wrap items-center justify-between gap-y-2 mb-4">
         <h2 class="text-gray-200 font-semibold text-lg flex items-center gap-2">
           <i id="canvas-title-icon" class="fa-solid fa-layer-group text-indigo-400"></i> <span id="canvas-title-text">Dashboard</span>
         </h2>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center justify-end gap-2">
                     <button onclick="deleteCurrentPage()" id="delete-page-btn" class="hidden px-3 py-1.5 rounded-lg bg-rose-50 border border-rose-300 text-rose-700 hover:bg-rose-100 dark:bg-rose-600/20 dark:border-rose-500/60 dark:text-rose-300 dark:hover:text-white dark:hover:bg-rose-600/40 text-xs font-medium items-center gap-2 transition-all">
             <i class="fa-solid fa-trash-can"></i> <span>Delete Page</span>
           </button>
@@ -2317,7 +2317,7 @@
       try {
         const res = await fetch('/api/templates');
         const list = await res.json();
-        pageTemplates = Array.isArray(list) ? list : [];
+        pageTemplates = Array.isArray(list) ? list.filter(t => t.kind !== 'section') : [];
       } catch (e) { pageTemplates = []; }
       const sel = document.getElementById('new-page-template');
       if (!sel) return;
@@ -2425,6 +2425,7 @@
         showAppToast('Home holds at most 24 widgets — remove one first.', 'warn');
         return;
       }
+      if (window.__spawnSection && (homepageDoc.pageSections || []).some(s => s.id === window.__spawnSection)) w.section = window.__spawnSection;
       homepageDoc.widgets.push(w);
       closeWidgetLibrary();
       renderHomepage();
@@ -4431,28 +4432,30 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       return raw === null ? '' : raw;
     }
 
-    function configFieldHtml(f, raw) {
-      const id = 'cfg-' + f.attr;
+    function configFieldHtml(f, raw, opts) {
+      const o = opts || {};
+      const DA = o.dataAttr || 'data-cfg-attr';
+      const id = (o.prefix || 'cfg-') + f.attr;
       const val = configFieldValue(f, raw);
       const ph = f.default ? ` placeholder="${escapeHtml(String(f.default))}"` : '';
-      const on = `oninput="onConfigFieldInput('${f.attr}')" onchange="onConfigFieldInput('${f.attr}')"`;
+      const on = `oninput="${o.handler || 'onConfigFieldInput'}('${f.attr}')" onchange="${o.handler || 'onConfigFieldInput'}('${f.attr}')"`;
       let input;
       if (f.type === 'select') {
         const opts = (f.options || []).map(o => Array.isArray(o) ? o : [o, o]);
         if (val && !opts.some(o => o[0] === val)) opts.push([val, val + ' (current)']);
-        input = `<select id="${id}" data-cfg-attr="${f.attr}" ${on} class="${CONFIG_INPUT_CLS}">`
+        input = `<select id="${id}" ${DA}="${f.attr}" ${on} class="${CONFIG_INPUT_CLS}">`
           + `<option value="">${f.default ? 'Default (' + escapeHtml(String(f.default)) + ')' : '—'}</option>`
           + opts.map(([v, l]) => `<option value="${escapeHtml(v)}">${escapeHtml(l)}</option>`).join('')
           + `</select>`;
       } else if (f.type === 'toggle') {
-        input = `<label class="flex items-center gap-2 text-sm text-gray-300"><input id="${id}" data-cfg-attr="${f.attr}" type="checkbox" ${on} class="accent-indigo-500"> ${escapeHtml(f.label)}</label>`;
+        input = `<label class="flex items-center gap-2 text-sm text-gray-300"><input id="${id}" ${DA}="${f.attr}" type="checkbox" ${on} class="accent-indigo-500"> ${escapeHtml(f.label)}</label>`;
         return `<div>${input}</div>`;
       } else if (f.type === 'textarea') {
-        input = `<textarea id="${id}" data-cfg-attr="${f.attr}" rows="4"${ph} ${on} class="${CONFIG_INPUT_CLS} font-mono text-xs"></textarea>`;
+        input = `<textarea id="${id}" ${DA}="${f.attr}" rows="4"${ph} ${on} class="${CONFIG_INPUT_CLS} font-mono text-xs"></textarea>`;
       } else {
         const type = f.type === 'number' ? 'number' : f.type === 'datetime' ? 'datetime-local' : 'text';
         const min = f.min !== undefined ? ` min="${f.min}"` : '';
-        input = `<input id="${id}" data-cfg-attr="${f.attr}" type="${type}"${min}${ph} ${on} class="${CONFIG_INPUT_CLS}">`;
+        input = `<input id="${id}" ${DA}="${f.attr}" type="${type}"${min}${ph} ${on} class="${CONFIG_INPUT_CLS}">`;
       }
       return `<div><label for="${id}" class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">${escapeHtml(f.label)}</label>${input}</div>`;
     }
@@ -4585,7 +4588,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     
-  function openWidgetLibrary() {
+  function openWidgetLibrary(sectionId) {
+    // Which grid section a new widget lands in (fb-1790201502161); '' = first grid.
+    window.__spawnSection = sectionId || null;
     document.getElementById('widget-library-modal').classList.remove('hidden');
   }
   function closeWidgetLibrary() {
@@ -4684,6 +4689,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     if (!homepageDoc.widgets) homepageDoc.widgets = [];
+    if (window.__spawnSection && (homepageDoc.pageSections || []).some(s => s.id === window.__spawnSection)) newWidget.section = window.__spawnSection;
     homepageDoc.widgets.push(newWidget);
     
     closeWidgetLibrary();
@@ -4753,6 +4759,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (sourceIndex > -1 && targetIndex > -1) {
         const [movedWidget] = homepageDoc.widgets.splice(sourceIndex, 1);
         homepageDoc.widgets.splice(targetIndex, 0, movedWidget);
+        adoptSection(movedWidget, homepageDoc.widgets.find(w => w.id === targetId));
         renderHomepage();
         await saveHomepageDoc();
       }
@@ -4791,7 +4798,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     function widgetMoveTargetAt(x, y) {
       const el = document.elementFromPoint(x, y);
       const container = el && el.closest('.widget-container');
-      if (!container || !container.id.endsWith('-container')) return null;
+      if (!container || !container.id.endsWith('-container')) {
+        // An empty spot in a grid section is a target too (fb-1790201502161).
+        const gs = el && el.closest('.page-section[data-section-type="grid"]');
+        return gs ? 'section:' + gs.dataset.sectionId : null;
+      }
       const id = container.id.slice(0, -'-container'.length);
       if (id === movingWidgetId) return null;
       const w = homepageDoc.widgets.find(w => w.id === id);
@@ -4801,19 +4812,31 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       return id;
     }
 
+    // Edge auto-scroll while moving a widget (fb-1790201502161): on a phone a
+    // target section is usually off-screen, and a held finger fires no moves.
+    let moveScroll = { timer: null, x: 0, y: 0 };
+    function moveAutoScrollTick() {
+      if (!movingWidgetId) { clearInterval(moveScroll.timer); moveScroll.timer = null; return; }
+      const edge = 70, y = moveScroll.y, h = window.innerHeight;
+      const dy = y < edge ? -Math.ceil((edge - y) / 4) : y > h - edge ? Math.ceil((y - (h - edge)) / 4) : 0;
+      if (dy) { window.scrollBy(0, dy); onWidgetMoveMove({ clientX: moveScroll.x, clientY: moveScroll.y, preventDefault() {} }); }
+    }
+
     function onWidgetMoveMove(e) {
       if (!movingWidgetId) return;
       e.preventDefault();
+      moveScroll.x = e.clientX; moveScroll.y = e.clientY;
+      if (!moveScroll.timer) moveScroll.timer = setInterval(moveAutoScrollTick, 16);
       const targetId = widgetMoveTargetAt(e.clientX, e.clientY);
       if (targetId === moveTargetId) return;
       if (moveTargetId) {
-        const prev = document.getElementById(moveTargetId + '-container');
+        const prev = moveTargetEl(moveTargetId);
         if (prev) prev.classList.remove('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
       }
       moveTargetId = targetId;
       if (moveTargetId) {
-        const next = document.getElementById(moveTargetId + '-container');
-        if (next) next.classList.add('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
+        const next = moveTargetEl(moveTargetId);
+        if (next) next.classList.add(...(moveTargetId.startsWith('section:') ? ['ring-2', 'ring-indigo-500'] : ['scale-105', 'ring-2', 'ring-indigo-500', 'z-50']));
       }
     }
 
@@ -4825,16 +4848,27 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const src = document.getElementById(movingWidgetId + '-container');
       if (src) src.style.opacity = '1';
       if (moveTargetId) {
-        const tgt = document.getElementById(moveTargetId + '-container');
+        const tgt = moveTargetEl(moveTargetId);
         if (tgt) tgt.classList.remove('scale-105', 'ring-2', 'ring-indigo-500', 'z-50');
       }
       const sourceIndex = homepageDoc.widgets.findIndex(w => w.id === movingWidgetId);
-      const targetIndex = homepageDoc.widgets.findIndex(w => w.id === moveTargetId);
+      const toSection = moveTargetId && moveTargetId.startsWith('section:') ? moveTargetId.slice(8) : null;
+      const targetIndex = toSection ? -1 : homepageDoc.widgets.findIndex(w => w.id === moveTargetId);
       movingWidgetId = null;
       moveTargetId = null;
-      if (sourceIndex > -1 && targetIndex > -1 && sourceIndex !== targetIndex) {
+      if (sourceIndex > -1 && toSection) {
+        // Dropped on a grid section's empty space: join it, at the end.
+        const [movedWidget] = homepageDoc.widgets.splice(sourceIndex, 1);
+        const firstGrid = (homepageDoc.pageSections || []).find(s => s.type === 'grid');
+        if (firstGrid && firstGrid.id === toSection) delete movedWidget.section; else movedWidget.section = toSection;
+        homepageDoc.widgets.push(movedWidget);
+        renderHomepage();
+        await saveHomepageDoc();
+      } else if (sourceIndex > -1 && targetIndex > -1 && sourceIndex !== targetIndex) {
+        const targetWidget = homepageDoc.widgets[targetIndex];
         const [movedWidget] = homepageDoc.widgets.splice(sourceIndex, 1);
         homepageDoc.widgets.splice(targetIndex, 0, movedWidget);
+        adoptSection(movedWidget, targetWidget);
         renderHomepage();
         await saveHomepageDoc();
       }
@@ -5211,8 +5245,201 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         .filter(([k]) => !allowed || allowed.has(k))
         .map(([k, v]) => `${k}="${escapeHtml(String(v))}"`).join(' ');
       const body = def.tag ? `<${def.tag} ${attrs}></${def.tag}>` : innerHtml;
-      return `<div class="page-section relative w-full" data-section-id="${escapeHtml(sec.id)}" data-section-type="${sec.type}">${body}</div>`;
+      // Edit mode (fb-1790201502161): an always-visible toolbar (touch has
+      // no hover) above a dashed outline; padding keeps it off the content.
+      const sid = escapeHtml(sec.id);
+      // Explicit colours: the light theme remaps Tailwind grays, which washed
+      // the toolbar out. It is a dark chip in both themes.
+      const btn = (icon, title, call) => `<button onclick="${call}" title="${title}" class="w-8 h-8 rounded-md hover:bg-white/15 flex items-center justify-center" style="color:#f3f4f6"><i class="fa-solid ${icon} text-xs"></i></button>`;
+      const chrome = window.isEditingLayout ? `
+        <div class="section-toolbar absolute top-0 right-0 z-30 flex items-center gap-0.5 backdrop-blur rounded-lg p-0.5 shadow-lg" style="background:rgba(17,24,39,.92)">
+          <span class="px-2 text-[10px] uppercase font-bold tracking-wider" style="color:#d1d5db"><i class="fa-solid ${def.icon} mr-1"></i>${def.label}</span>
+          ${btn('fa-arrow-up', 'Move up', `moveSection('${sid}', -1)`)}${btn('fa-arrow-down', 'Move down', `moveSection('${sid}', 1)`)}
+          ${btn('fa-sliders', 'Edit section', `editSection('${sid}')`)}
+          ${btn('fa-trash', 'Remove section', `removeSection('${sid}')`)}
+        </div>` : '';
+      const editCls = window.isEditingLayout ? ' pt-10 outline-dashed outline-2 outline-offset-4 outline-indigo-400/40 rounded-xl' : '';
+      return `<div class="page-section relative w-full${editCls}" data-section-id="${sid}" data-section-type="${sec.type}">${chrome}${body}</div>`;
     }
+
+    // ===================== PAGE BUILDER v2 — manual section builder (fb-1790201502161) =====================
+    const GRID_SECTION_SCHEMA = [{ attr: 'heading', label: 'Heading (optional)', type: 'text', default: '' }];
+    const newSectionId = () => 'sec-' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+
+    function moveTargetEl(targetId) {
+      if (!targetId) return null;
+      return targetId.startsWith('section:')
+        ? document.querySelector(`.page-section[data-section-id="${CSS.escape(targetId.slice(8))}"]`)
+        : document.getElementById(targetId + '-container');
+    }
+
+    // A widget dropped next to one in another grid joins that grid.
+    function adoptSection(moved, target) {
+      if (!moved || !target || !(homepageDoc.pageSections || []).length) return;
+      if (target.section) moved.section = target.section; else delete moved.section;
+    }
+
+    function addWidgetButtonHtml(sectionId) {
+      return `<div class="col-span-full h-[72px] rounded-2xl border-2 border-dashed border-dark-border hover:border-indigo-500/50 hover:bg-indigo-500/5 flex items-center justify-center gap-2 cursor-pointer transition-colors text-gray-500 hover:text-indigo-400 w-full" onclick="openWidgetLibrary('${escapeHtml(sectionId || '')}')">
+          <i class="fa-solid fa-plus"></i><span class="text-xs font-bold uppercase tracking-wider">Add widget</span></div>`;
+    }
+
+    function sectionSchema(sec) {
+      if (sec.type === 'grid') return GRID_SECTION_SCHEMA;
+      const def = PAGE_SECTION_TYPES[sec.type];
+      const ctor = def && def.tag && customElements.get(def.tag);
+      return (ctor && Array.isArray(ctor.configSchema)) ? ctor.configSchema : [];
+    }
+
+    // A page's first section wraps its existing widgets in a grid, so adding
+    // a hero to an old page never moves anything.
+    function ensureSectionMode() {
+      if (Array.isArray(homepageDoc.pageSections) && homepageDoc.pageSections.length) return;
+      homepageDoc.pageSections = (homepageDoc.widgets || []).length ? [{ id: newSectionId(), type: 'grid', props: {} }] : [];
+    }
+
+    async function addSection(type, props) {
+      if (!homepageDoc || !PAGE_SECTION_TYPES[type]) return;
+      ensureSectionMode();
+      const defaults = {};
+      if (!props) sectionSchema({ type }).forEach(f => { if (f.default) defaults[f.attr] = String(f.default); });
+      const sec = { id: newSectionId(), type, props: props ? { ...props } : defaults };
+      homepageDoc.pageSections.push(sec);
+      closeSectionLibrary();
+      renderHomepage();
+      await saveHomepageDoc();
+      editSection(sec.id);
+      const el = document.querySelector(`.page-section[data-section-id="${CSS.escape(sec.id)}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function moveSection(id, dir) {
+      const list = homepageDoc && homepageDoc.pageSections;
+      if (!list) return;
+      const i = list.findIndex(s => s.id === id), j = i + dir;
+      if (i < 0 || j < 0 || j >= list.length) return;
+      [list[i], list[j]] = [list[j], list[i]];
+      renderHomepage();
+      await saveHomepageDoc();
+    }
+
+    async function removeSection(id) {
+      const list = homepageDoc && homepageDoc.pageSections;
+      const sec = list && list.find(s => s.id === id);
+      if (!sec) return;
+      // A removed grid's widgets are kept: with their section gone they fall
+      // back to the first remaining grid (or a trailing one).
+      homepageDoc.pageSections = list.filter(s => s.id !== id);
+      renderHomepage();
+      await saveHomepageDoc();
+      showBuilderToast(`${PAGE_SECTION_TYPES[sec.type].label} section removed`, { label: 'Undo', onClick: undoLayout });
+    }
+
+    // --- Section Inspector
+    let sectionEdit = null;   // { id, orig } — orig props restored on cancel
+
+    function editSection(id) {
+      const sec = (homepageDoc.pageSections || []).find(s => s.id === id);
+      if (!sec) return;
+      sec.props = sec.props || {};
+      sectionEdit = { id, orig: JSON.parse(JSON.stringify(sec.props)) };
+      const schema = sectionSchema(sec);
+      document.getElementById('section-edit-title').textContent = PAGE_SECTION_TYPES[sec.type].label + ' section';
+      const box = document.getElementById('section-edit-fields');
+      const o = { prefix: 'scfg-', dataAttr: 'data-scfg-attr', handler: 'onSectionFieldInput' };
+      box.innerHTML = schema.length ? schema.map(f => configFieldHtml(f, sec.props[f.attr] ?? null, o)).join('')
+        : '<p class="text-xs text-gray-400">This section has no settings.</p>';
+      schema.forEach(f => {
+        const input = document.getElementById('scfg-' + f.attr);
+        if (!input) return;
+        if (f.type === 'select') input.value = sec.props[f.attr] || '';
+        else setConfigInputValue(input, f, sec.props[f.attr] ?? null);
+      });
+      document.getElementById('section-save-template-btn').classList.toggle('hidden', sec.type === 'grid');
+      document.getElementById('section-edit-modal').classList.remove('hidden');
+    }
+
+    function onSectionFieldInput(attr) {
+      if (!sectionEdit) return;
+      const sec = homepageDoc.pageSections.find(s => s.id === sectionEdit.id);
+      const input = document.querySelector(`[data-scfg-attr="${attr}"]`);
+      if (!sec || !input) return;
+      const value = input.type === 'checkbox' ? (input.checked ? 'true' : '') : input.value;
+      if (value.trim() === '') delete sec.props[attr]; else sec.props[attr] = value;
+      // Live preview straight onto the rendered component (it observes its
+      // attributes); a grid heading needs a re-render.
+      const def = PAGE_SECTION_TYPES[sec.type];
+      const el = def.tag && document.querySelector(`.page-section[data-section-id="${CSS.escape(sec.id)}"] > ${def.tag}`);
+      if (el) { if (value.trim() === '') el.removeAttribute(attr); else el.setAttribute(attr, value); }
+      else renderHomepage();
+    }
+
+    function closeSectionEdit(save) {
+      const m = document.getElementById('section-edit-modal');
+      if (!sectionEdit) { m.classList.add('hidden'); return; }
+      const sec = homepageDoc.pageSections.find(s => s.id === sectionEdit.id);
+      if (!save && sec) sec.props = sectionEdit.orig;
+      sectionEdit = null;
+      m.classList.add('hidden');
+      renderHomepage();
+      if (save) saveHomepageDoc();
+    }
+
+    async function saveSectionAsTemplate() {
+      if (!sectionEdit) return;
+      const sec = homepageDoc.pageSections.find(s => s.id === sectionEdit.id);
+      if (!sec || sec.type === 'grid') return;
+      const name = (await adaPrompt({ title: 'Save section as template', message: 'Name', defaultValue: sec.props.heading || PAGE_SECTION_TYPES[sec.type].label, confirmLabel: 'Save' }) || '').trim();
+      if (!name) return;
+      const res = await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, kind: 'section', sourcePage: currentCanvasPage, doc: { widgets: [], pageSections: [{ id: 'tpl', type: sec.type, props: sec.props }] } }) });
+      const data = await res.json().catch(() => ({}));
+      showAppToast(res.ok ? `Saved section "${data.name}"` : (data.error || 'Could not save the section'), res.ok ? 'success' : 'error');
+    }
+
+    // --- Section Library
+    async function openSectionLibrary() {
+      const grid = document.getElementById('section-library-types');
+      grid.innerHTML = Object.entries(PAGE_SECTION_TYPES).map(([type, d]) => `
+        <button onclick="addSection('${type}')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex items-center gap-3">
+          <i class="fa-solid ${d.icon} text-indigo-400 text-lg w-6 text-center"></i>
+          <div><div class="text-white font-semibold text-sm">${d.label}</div><div class="text-gray-400 text-xs">${{ hero: 'Big headline, text and a button', features: 'Heading and a grid of cards', grid: 'A grid that holds widgets' }[type] || ''}</div></div>
+        </button>`).join('');
+      document.getElementById('section-library-modal').classList.remove('hidden');
+      const saved = document.getElementById('section-library-saved');
+      saved.innerHTML = '<p class="text-xs text-gray-500">Loading…</p>';
+      let list = [];
+      try { list = await (await fetch('/api/templates?kind=section')).json(); } catch (e) { list = []; }
+      saved.innerHTML = Array.isArray(list) && list.length ? list.map(t => `
+        <div class="flex items-center gap-2 bg-black/20 border border-white/5 rounded-xl p-2 pl-3">
+          <i class="fa-solid ${(PAGE_SECTION_TYPES[t.sectionType] || {}).icon || 'fa-bookmark'} text-indigo-400"></i>
+          <button onclick="addSectionFromTemplate('${escapeHtml(t.id)}')" class="flex-1 text-left text-sm text-white truncate">${escapeHtml(t.name)}</button>
+          <button onclick="deleteSectionTemplate('${escapeHtml(t.id)}')" title="Delete" class="w-8 h-8 rounded-lg text-gray-400 hover:text-rose-400"><i class="fa-solid fa-trash text-xs"></i></button>
+        </div>`).join('') : '<p class="text-xs text-gray-500">No saved sections yet — use “Save as template” in a section\'s editor.</p>';
+    }
+    function closeSectionLibrary() { document.getElementById('section-library-modal').classList.add('hidden'); }
+    async function addSectionFromTemplate(id) {
+      try {
+        const t = await (await fetch('/api/templates/' + encodeURIComponent(id))).json();
+        const sec = t && t.doc && (t.doc.pageSections || [])[0];
+        if (sec) await addSection(sec.type, sec.props || {});
+      } catch (e) { showAppToast('Could not load that section', 'error'); }
+    }
+    async function deleteSectionTemplate(id) {
+      if (!await adaConfirm({ title: 'Delete saved section', message: 'Delete this saved section? Pages that used it keep their copy.', confirmLabel: 'Delete', danger: true })) return;
+      await fetch('/api/templates/' + encodeURIComponent(id), { method: 'DELETE' });
+      openSectionLibrary();
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!document.getElementById('ada-prompt-modal').classList.contains('hidden')) return;
+      if (!document.getElementById('section-edit-modal').classList.contains('hidden')) closeSectionEdit(false);
+      else if (!document.getElementById('section-library-modal').classList.contains('hidden')) closeSectionLibrary();
+    });
+    document.addEventListener('click', (e) => {
+      if (e.target && e.target.id === 'section-edit-modal') closeSectionEdit(false);
+      else if (e.target && e.target.id === 'section-library-modal') closeSectionLibrary();
+    });
 
     function renderHomepage() {
       const pageInfo = customPages.find(p => p.id === currentCanvasPage);
@@ -5319,18 +5546,18 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const secs = visiblePageSections(homepageDoc);
         const gridIds = secs.filter(s => s.type === 'grid').map(s => s.id);
         const home = (w) => (w.section && gridIds.includes(w.section)) ? w.section : gridIds[0];
-        const gridHtml = (ws, withAdd) => `
+        const gridHtml = (ws, sectionId, isFirst) => `
           <div class="w-full grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense auto-rows-[10px]">
              ${ws.map(renderWidgetCard).join('')}
-             ${withAdd ? addBtnHtml : ''}
+             ${!window.isEditingLayout ? '' : isFirst ? addBtnHtml.replace('openWidgetLibrary()', `openWidgetLibrary('${sectionId || ''}')`) : addWidgetButtonHtml(sectionId)}
           </div>`;
         const parts = secs.map(sec => {
           if (sec.type !== 'grid') return renderPageSection(sec);
           const heading = sec.props && sec.props.heading
             ? `<h2 class="text-lg font-bold text-gray-900 dark:text-white mb-3" style="font-family: var(--ada-font-heading);">${escapeHtml(sec.props.heading)}</h2>` : '';
-          return renderPageSection(sec, heading + gridHtml(widgets.filter(w => home(w) === sec.id), sec.id === gridIds[0]));
+          return renderPageSection(sec, heading + gridHtml(widgets.filter(w => home(w) === sec.id), sec.id, sec.id === gridIds[0]));
         });
-        if (!gridIds.length && (widgets.length || window.isEditingLayout)) parts.push(gridHtml(widgets, true));
+        if (!gridIds.length && (widgets.length || window.isEditingLayout)) parts.push(gridHtml(widgets, '', true));
         grid.innerHTML = `<div class="ada-page w-full flex flex-col gap-6">${parts.join('')}</div>`;
       } else {
         grid.innerHTML = `
@@ -5341,6 +5568,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         `;
       }
       
+      // "Add section" (fb-1790201502161). Not on doc-body pages — they keep
+      // their own sidebar layout.
+      if (window.isEditingLayout && !bodyWidget) {
+        grid.insertAdjacentHTML('beforeend', `
+          <button onclick="openSectionLibrary()" id="add-section-btn" class="mt-6 w-full h-14 rounded-2xl border-2 border-dashed border-indigo-400/40 hover:border-indigo-400 hover:bg-indigo-500/5 flex items-center justify-center gap-2 text-indigo-400 text-xs font-bold uppercase tracking-wider transition-colors">
+            <i class="fa-solid fa-layer-group"></i> Add section
+          </button>`);
+      }
       // Execute any scripts the Designer injected (since innerHTML ignores them by default)
       grid.querySelectorAll('script').forEach(oldScript => {
         const newScript = document.createElement('script');
@@ -6185,6 +6420,40 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       <div class="p-4 border-t border-dark-border bg-dark-card flex justify-end gap-3 flex-shrink-0">
         <button onclick="closeWidgetEditModal()" class="px-4 py-2 text-sm text-gray-300 hover:text-white">Cancel</button>
         <button onclick="saveWidgetEdit()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg shadow-lg">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section Library (fb-1790201502161) -->
+  <div id="section-library-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+      <div class="p-4 border-b border-dark-border flex justify-between items-center bg-dark-card flex-shrink-0">
+        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-layer-group text-indigo-400 mr-2"></i>Add a section</h3>
+        <button onclick="closeSectionLibrary()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-5 flex-1 overflow-y-auto custom-scrollbar space-y-5">
+        <div id="section-library-types" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+        <div>
+          <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Saved sections</div>
+          <div id="section-library-saved" class="space-y-2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section Inspector (fb-1790201502161) -->
+  <div id="section-edit-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+      <div class="p-4 border-b border-dark-border flex justify-between items-center bg-dark-card flex-shrink-0">
+        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-sliders text-indigo-400 mr-2"></i><span id="section-edit-title">Section</span></h3>
+        <button onclick="closeSectionEdit(false)" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="section-edit-fields" class="p-5 flex-1 overflow-y-auto custom-scrollbar space-y-4"></div>
+      <div class="p-4 border-t border-dark-border bg-dark-card flex items-center gap-2 flex-shrink-0">
+        <button id="section-save-template-btn" onclick="saveSectionAsTemplate()" class="px-3 py-2 text-xs text-gray-300 hover:text-white rounded-lg border border-white/10"><i class="fa-solid fa-bookmark mr-1"></i>Save as template</button>
+        <div class="flex-1"></div>
+        <button onclick="closeSectionEdit(false)" class="px-4 py-2 text-sm text-gray-300 hover:text-white">Cancel</button>
+        <button onclick="closeSectionEdit(true)" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg shadow-lg">Save</button>
       </div>
     </div>
   </div>
