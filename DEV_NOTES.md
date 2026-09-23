@@ -1,5 +1,24 @@
 # Session Handover & Progress Log
 
+## 2026-09-23 — Ada sub-session `vps-tickets`: queue cleared, auth bypass closed
+
+### Shipped (each verified on staging :3001, then on live)
+- **fb-1789015021586** `6881337` — components declare `static configSchema`; the Widget Inspector renders a Configuration section (text/number/select/toggle/datetime; selects can fetch options from `/api/scripts`, `/api/media/libraries`), writes through to the raw HTML box (now a collapsible Advanced panel), previews live, reverts on cancel. Attribute sync now parses widget HTML in an inert `<template>` — in a `<div>` the custom element upgraded and its rendered children were saved into `w.html`.
+- **fb-1789015021644** `21db074` — `adaConfirm()` (promise, reuses the prompt modal) replaced every native `confirm()`. **No native dialogs anywhere now — keep it that way; they block browser automation.**
+- **fb-1789015021674** `a73468b` — Widget Library "Paste widget JSON" (`POST /api/widgets/sanitize`, same whitelist as homepage widgets, fresh id); page templates (`data/templates/`, `/api/templates`), New Page dialog with Start-from-template. `sanitizeHomepageWidget` now keeps `w.config` (ada-todo toggles were dropped on every homepage save).
+- **fb-1789015021730** `7f52e07` — drag-resize updates only the resized card in place (shared `widgetSizeClasses()`), saves once on release, dashed column/row guide while dragging.
+- **Security** `3b88e76` — `trust proxy` is now `'loopback'` (was `1`) and UFW no longer allows 3000. Before this, a direct request to :3000 with `X-Forwarded-For: 127.0.0.1` passed auth.js's loopback exemption. **Do not change the exemption to `req.socket.remoteAddress`: Caddy connects from loopback, so that would exempt everyone.**
+
+### How to ship (read before deploying)
+Edit in `~/dashboard-staging` → `bash ~/ops/stage-check.sh` → test on :3001 → **`git fetch && git diff origin/main` must be empty before you start, then `git reset --mixed origin/main`** (stage-sync excludes `.git`, so staging's HEAD goes stale) → commit tracked files only (`git add -u`) → `git push origin main` → `bash ~/ops/promote.sh` → verify on live. `deploy.sh` is retired. Never `git clean` — `scripts/mac-bridge/` is untracked.
+
+### Open
+- `fb-1790022103995` — page builder for "professional commercial pages": a design decision for Alex, not an implementation ticket yet.
+- `fb-1790200720342` — the agent prompt below tells agents to POST async messages/scheduled items to :3001 (staging) even on live.
+
+---
+
+
 ## 2026-09-09 (afternoon) — PM session (Ada), ticket sweep + deploy path facts
 
 ### Shipped (all verified on staging :3001 before promote)
