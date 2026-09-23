@@ -1,5 +1,21 @@
 # Session Handover & Progress Log
 
+## 2026-09-23 (evening) — Page Builder v2, all six phases (Ada sub-session `vps-tickets`)
+
+Design: Ada vault `Projects/AI Server/Design — Page Builder v2.md`. Tickets fb-1790201502141…202 carry full notes.
+- **Page docs** may hold `pageSections` [{id, type, props}] — NOT `sections` (that key is the Home toggles) — and `tokens` (→ `--ada-*` CSS vars). Section types = web components `public/components/*Section.js` with `static configSchema`; `grid` holds widgets via `w.section`. Everything is sanitized on write AND read (`sanitizePageSections`, `sanitizeTokens`, `sanitizePageDocFields`).
+- **Adding a section type:** new component with configSchema + `PAGE_SECTION_TYPES` in index.html + `PAGE_SECTION_TYPES` in server.js. The Designer's catalog is generated from configSchema — don't hand-write attribute lists into prompts.
+- **Accounts:** `data/users.json` (per instance). Login = username + password (Alex = `alex`). Role `pages` = household accounts behind a deny-by-default wall (`authorizeRole` in server.js). **When you add an /api route, a pages user gets 403 on it automatically — only add it to authorizeRole if a household member genuinely needs it, and check ownership.** A pages user's saves go through `restrictPageDoc` (no raw HTML).
+- **Testing auth:** the loopback tunnel skips auth. Use `ssh -L 3102:158.69.211.140:3001 my-server` for real logins; probe accounts on staging only.
+- **Designer:** its real UI entry is the chat bubble (BubbleManager → `window.onAgentPromptSent`); the `designer-bubble-*` code in index.html is dead.
+- Export/Preview (edit mode) writes one standalone HTML file per page.
+
+### Open
+- `fb-1790204578669` — shared + individual tasks for household users (design input from Alex needed).
+
+---
+
+
 ## 2026-09-23 — Ada sub-session `vps-tickets`: queue cleared, auth bypass closed
 
 ### Shipped (each verified on staging :3001, then on live)
