@@ -27,11 +27,13 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 'loopback');
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));              // must precede mountAuth: /api/login reads req.body
-const { requireAuth } = mountAuth(app, {
+const { requireAuth, users: userStore } = mountAuth(app, {
+  usersFile: path.join(__dirname, '../data/users.json'),   // per instance: live and staging have separate accounts
   loginHtmlFile: path.join(__dirname, '../public/login.html'),
   behindProxy: true,                  // throws at startup if trust proxy is unset
 });
 app.use(requireAuth);                 // everything below requires a session
+app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1790201502191), defined below
 app.use(express.static(path.join(__dirname, '../public')));
 const MEDIA_DIR = path.join(__dirname, '../data/media');
 app.use('/media', express.static(MEDIA_DIR));
@@ -195,6 +197,7 @@ function looksLikeRoadblock(text) {
   return ROADBLOCK_RE.test(cleaned.slice(cut));
 }
 function notifyJobOutcome(job, session, agentMsg, errorInfo) {
+  if (session && session.owner && !isAdminUserName(session.owner)) return;   // a pages user's Designer (fb-1790201502191)
   const name = (session && session.name) || job.sessionId;
   const link = { tab: 'server', sub: 'agents', sessionId: job.sessionId };
   if (errorInfo) {
@@ -1008,7 +1011,8 @@ app.get('/api/glance', (req, res) => {
       }).catch(() => {});
     }
     
-    return res.json({ text: `${greeting}, Alex. ${weatherStr}`, icon, color });
+    const who = (req.user && req.user.role !== 'admin' && req.user.username) ? req.user.username[0].toUpperCase() + req.user.username.slice(1) : 'Alex';
+    return res.json({ text: `${greeting}, ${who}. ${weatherStr}`, icon, color });
   } catch (err) {
     return res.json({ text: "At a glance unavailable", icon: "fa-circle-exclamation", color: "gray" });
   }
@@ -1033,14 +1037,169 @@ app.post('/api/terminal/exec', (req, res) => {
 });
 
 
+// --- ROLES: limited 'pages' accounts (fb-1790201502191) ---------------------
+const PAGES_USER_DESIGNER_MODEL = 'gpt-4o-mini';
+// Alex is 'admin'. Household members get role 'pages': their own pages (plus
+// shared ones and Home, read-only), the Page Builder and a Designer for their
+// own pages — nothing else. DENY BY DEFAULT: authorizeRole lists the only
+// routes a pages user can reach; every handler below additionally filters by
+// owner. Loopback/local tools resolve to a 'system' admin in auth.js.
+const isAdminReq = (req) => !req.user || req.user.role === 'admin';
+const ownerName = (req) => (!req.user || req.user.username === 'system') ? 'alex' : req.user.username;
+const PAGE_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+function pageEntry(id) { return readPagesRegistry().find(pg => pg.id === id) || null; }
+function pageVisibleTo(user, id) {
+  if (id === 'home') return true;
+  const pg = pageEntry(id);
+  return !!pg && ((pg.owner || 'alex') === user.username || pg.shared === true);
+}
+function pageOwnedBy(user, id) {
+  const pg = id !== 'home' && pageEntry(id);
+  return !!pg && (pg.owner || 'alex') === user.username;
+}
+function isAdminUserName(name) {
+  const u = userStore && userStore.find(name || 'alex');
+  return !name || name === 'alex' || (u && u.role === 'admin');
+}
+function templateVisibleTo(user, t) { return !!t && ((t.owner || 'alex') === user.username || isAdminUserName(t.owner)); }
+function sessionOwnedBy(user, s) { return !!s && s.owner === user.username; }
+
+// What a pages user may SAVE. Their pages are opened by Alex too, in his admin
+// session, and w.html is injected raw — so a pages user never stores HTML:
+// only one allow-listed custom element with its declared attributes, and ids,
+// icons and links restricted to characters that cannot break out of the
+// onclick/class attributes the renderer builds them into.
+const SAFE_WIDGET_TAGS = {
+  'ada-clock': ['format', 'font'], 'ada-analog-clock': [], 'ada-countdown': ['target', 'title'],
+  'ada-timer': ['minutes', 'title'], 'ada-stopwatch': ['title'], 'ada-greeting': ['name'],
+  'ada-weather': [], 'ada-photo-frame': ['library', 'interval']
+};
+function restrictWidgetHtml(html) {
+  const m = /^\s*<(ada-[a-z-]+)((?:\s+[a-z][a-z0-9-]*="[^"<>]*")*)\s*>\s*<\/\1>\s*$/.exec(String(html || ''));
+  if (!m || !SAFE_WIDGET_TAGS[m[1]]) return '';
+  const allowed = new Set([...SAFE_WIDGET_TAGS[m[1]], 'theme', 'accent']);
+  const attrs = [...m[2].matchAll(/([a-z][a-z0-9-]*)="([^"<>]*)"/g)]
+    .filter(([, k, v]) => allowed.has(k) && /^[^;(){}<>"\\]{0,200}$/.test(v))
+    .map(([, k, v]) => `${k}="${v}"`);
+  return `<${m[1]}${attrs.length ? ' ' + attrs.join(' ') : ''}></${m[1]}>`;
+}
+function restrictWidget(w, i) {
+  const base = sanitizeHomepageWidget(w, i);
+  if (!base) return null;
+  const out = JSON.parse(JSON.stringify(base));
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(out.id)) out.id = `widget-${Date.now()}${i}`;
+  if (!/^fa-[a-z0-9-]{1,40}$/.test(out.icon || '')) out.icon = 'fa-cube';
+  out.title = String(out.title || '').replace(/[<>]/g, '').slice(0, 80);
+  if (out.link) {
+    const l = {};
+    if (out.link.tab && /^[a-z0-9-]{1,40}$/.test(out.link.tab)) l.tab = out.link.tab;
+    else if (out.link.href && /^https?:\/\/[^\s"'<>()\\]{1,400}$/.test(out.link.href)) l.href = out.link.href;
+    if (out.link.label) l.label = String(out.link.label).replace(/[<>]/g, '').slice(0, 60);
+    if (l.tab || l.href) out.link = l; else delete out.link;
+  }
+  if (out.size && !['1x1', '2x1', '2x2', 'full'].includes(out.size)) delete out.size;
+  delete out.config;
+  const hadHtml = !!(out.html && out.html.trim());
+  out.html = restrictWidgetHtml(out.html);
+  if (hadHtml && !out.html) return null;         // not an allowed widget: drop it, don't leave an empty card
+  return (out.html || out.title) ? out : null;
+}
+function restrictPageDoc(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const { doc, report } = sanitizePageDocFields({ pageSections: src.pageSections, tokens: src.tokens, widgets: [] });
+  const out = { widgets: (Array.isArray(src.widgets) ? src.widgets : []).slice(0, 60).map(restrictWidget).filter(Boolean) };
+  if (doc.pageSections) out.pageSections = doc.pageSections;
+  if (doc.tokens) out.tokens = doc.tokens;
+  const themed = sanitizeHomepage({ pageTheme: src.pageTheme, glanceTheme: src.glanceTheme });
+  if (themed.pageTheme) out.pageTheme = themed.pageTheme;
+  if (src.glanceTheme && themed.glanceTheme) out.glanceTheme = themed.glanceTheme;
+  const dropped = (Array.isArray(src.widgets) ? src.widgets.length : 0) - out.widgets.length;
+  if (dropped > 0) report.push(`dropped ${dropped} widget(s) that are not allowed on this account`);
+  return { doc: out, report };
+}
+
+function authorizeRole(req, res, next) {
+  if (isAdminReq(req)) return next();
+  const u = req.user, m = req.method, p = req.path;
+  const deny = () => res.status(403).json({ error: 'Not available for your account.' });
+  if (!p.startsWith('/api/')) return (m === 'GET' || m === 'HEAD') ? next() : deny();   // the app shell, components, media files
+  let mm;
+  if (p === '/api/me' && m === 'GET') return next();
+  if (p === '/api/me/password' && m === 'POST') return next();
+  if (p === '/api/pages' && (m === 'GET' || m === 'POST')) return next();
+  if ((mm = /^\/api\/pages\/([^/]+)\/content$/.exec(p))) {
+    if (m === 'GET') return pageVisibleTo(u, mm[1]) ? next() : deny();
+    if (m === 'POST') return pageOwnedBy(u, mm[1]) ? next() : deny();
+  }
+  if ((mm = /^\/api\/pages\/([^/]+)$/.exec(p)) && (m === 'DELETE' || m === 'PATCH')) return pageOwnedBy(u, mm[1]) ? next() : deny();
+  if (p === '/api/homepage' && m === 'GET') return next();
+  if (p === '/api/templates' && (m === 'GET' || m === 'POST')) return next();
+  if ((mm = /^\/api\/templates\/([^/]+)$/.exec(p))) {
+    const t = readTemplate(mm[1]);
+    if (m === 'GET') return templateVisibleTo(u, t) ? next() : deny();
+    if (m === 'DELETE') return (t && t.owner === u.username) ? next() : deny();
+  }
+  if (p === '/api/widgets/sanitize' && m === 'POST') return next();
+  if (m === 'GET' && ['/api/weather', '/api/glance', '/api/media/libraries', '/api/media/files', '/api/agent/models'].includes(p)) return next();
+  if (p === '/api/agent/sessions' && (m === 'GET' || m === 'POST')) return next();
+  if ((mm = /^\/api\/agent\/sessions\/([^/]+)(?:\/(chat|job))?$/.exec(p))) {
+    if (!sessionOwnedBy(u, readSessions().find(x => x.id === mm[1]))) return deny();
+    if ((!mm[2] && (m === 'GET' || m === 'DELETE')) || (mm[2] === 'chat' && m === 'POST') || (mm[2] === 'job' && m === 'GET')) return next();
+    return deny();
+  }
+  if ((mm = /^\/api\/agent\/jobs\/([^/]+)$/.exec(p)) && m === 'GET') {
+    const job = jobs.get(mm[1]);
+    return (job && sessionOwnedBy(u, readSessions().find(x => x.id === job.sessionId))) ? next() : deny();
+  }
+  return deny();
+}
+
+app.get('/api/me', (req, res) => res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : 'pages' }));
+app.post('/api/me/password', (req, res) => {
+  const name = ownerName(req);
+  const { current, next: nextPw } = req.body || {};
+  if (!userStore || !userStore.verify(name, String(current || ''))) return res.status(400).json({ error: 'Current password is incorrect.' });
+  try { userStore.update(name, { password: nextPw }); res.json({ ok: true, relogin: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Users admin (admin only — authorizeRole never lets a pages user reach these)
+app.get('/api/users', (req, res) => res.json(userStore ? userStore.list() : []));
+app.post('/api/users', (req, res) => {
+  try { res.status(201).json(userStore.create({ username: req.body && req.body.username, password: req.body && req.body.password, role: 'pages' })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/users/:username', (req, res) => {
+  const { password, disabled } = req.body || {};
+  if (req.params.username === ownerName(req) && disabled) return res.status(400).json({ error: 'You cannot disable your own account.' });
+  try { res.json(userStore.update(req.params.username, { password, disabled })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // --- PAGES API ---
 app.get('/api/pages', (req, res) => {
-  res.json({ pages: readPagesRegistry() });
+  const all = readPagesRegistry().map(pg => ({ ...pg, owner: pg.owner || 'alex', shared: pg.shared === true }));
+  res.json({ pages: isAdminReq(req) ? all : all.filter(pg => pg.owner === req.user.username || pg.shared) });
+});
+
+// Share / rename (owner or admin).
+app.patch('/api/pages/:id', (req, res) => {
+  const pages = readPagesRegistry();
+  const pg = pages.find(x => x.id === req.params.id);
+  if (!pg) return res.status(404).json({ error: 'Page not found' });
+  if (typeof req.body.shared === 'boolean') pg.shared = req.body.shared;
+  if (typeof req.body.title === 'string' && req.body.title.trim()) pg.title = req.body.title.replace(/[<>]/g, '').trim().slice(0, 60);
+  writePagesRegistry(pages);
+  res.json({ ...pg, owner: pg.owner || 'alex', shared: pg.shared === true });
 });
 
 app.post('/api/pages', (req, res) => {
-  const { id, title, icon, templateId } = req.body;
+  const { id, templateId } = req.body;
+  // Ids become file names and titles/icons are rendered into the tab bar:
+  // validated for everyone (fb-1790201502191).
+  const title = typeof req.body.title === 'string' ? req.body.title.replace(/[<>]/g, '').trim().slice(0, 60) : '';
+  const icon = /^fa-[a-z0-9-]{1,40}$/.test(req.body.icon || '') ? req.body.icon : 'fa-file';
   if (!id || !title) return res.status(400).json({ error: 'Missing id or title' });
+  if (!PAGE_ID_RE.test(id)) return res.status(400).json({ error: 'Page id: lowercase letters, digits and dashes only' });
   if (id === 'home' || id === 'server' || id === 'todo') return res.status(400).json({ error: 'Reserved id' });
   
   const pages = readPagesRegistry();
@@ -1051,11 +1210,11 @@ app.post('/api/pages', (req, res) => {
   let startDoc = { widgets: [] };
   if (templateId) {
     const tpl = readTemplate(templateId);
-    if (!tpl) return res.status(400).json({ error: 'Template not found' });
-    startDoc = { ...tpl.doc, updatedAt: new Date().toISOString() };
+    if (!tpl || (!isAdminReq(req) && !templateVisibleTo(req.user, tpl))) return res.status(400).json({ error: 'Template not found' });
+    startDoc = { ...(isAdminReq(req) ? tpl.doc : restrictPageDoc(tpl.doc).doc), updatedAt: new Date().toISOString() };
   }
   
-  pages.push({ id, title, icon: icon || 'fa-file' });
+  pages.push({ id, title, icon, owner: ownerName(req), shared: false });
   writePagesRegistry(pages);
   
   const docPath = getPageDocPath(id);
@@ -1063,7 +1222,7 @@ app.post('/api/pages', (req, res) => {
     fs.writeFileSync(docPath, JSON.stringify(startDoc, null, 2));
   }
   
-  res.json({ success: true, page: { id, title, icon } });
+  res.json({ success: true, page: { id, title, icon, owner: ownerName(req), shared: false } });
 });
 
 app.get('/api/pages/:id/content', (req, res) => {
@@ -1110,10 +1269,12 @@ app.post('/api/pages/:id/content', (req, res) => {
         return res.status(409).json({ error: 'stale', message: 'This page changed elsewhere since you loaded it.', updatedAt: current.updatedAt, updatedBy: current.updatedBy });
       }
     }
-    sanitizePageDocFields(doc);
-    doc.updatedAt = new Date().toISOString();
-    fs.writeFileSync(docPath, JSON.stringify(doc, null, 2));
-    res.json({ success: true, updatedAt: doc.updatedAt });
+    let saveDoc = doc;
+    if (!isAdminReq(req)) saveDoc = restrictPageDoc(doc).doc;   // pages users never store raw HTML
+    else sanitizePageDocFields(saveDoc);
+    saveDoc.updatedAt = new Date().toISOString();
+    fs.writeFileSync(docPath, JSON.stringify(saveDoc, null, 2));
+    res.json({ success: true, updatedAt: saveDoc.updatedAt });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1126,8 +1287,8 @@ app.post('/api/pages/:id/content', (req, res) => {
 // gets a fresh id so it can never collide with one already on the page.
 app.post('/api/widgets/sanitize', (req, res) => {
   const w = req.body && req.body.widget;
-  const clean = sanitizeHomepageWidget(w, 0);
-  if (!clean) return res.status(400).json({ error: 'Not a widget — it needs at least a title or html.' });
+  const clean = isAdminReq(req) ? sanitizeHomepageWidget(w, 0) : restrictWidget(w, 0);
+  if (!clean) return res.status(400).json({ error: isAdminReq(req) ? 'Not a widget — it needs at least a title or html.' : 'That widget is not available on your account.' });
   clean.id = 'widget-' + Date.now() + Math.floor(Math.random() * 1000);
   res.json({ widget: JSON.parse(JSON.stringify(clean)) }); // drops undefined keys
 });
@@ -1170,8 +1331,9 @@ app.get('/api/templates', (req, res) => {
       .filter(f => TEMPLATE_ID_RE.test(f.replace(/\.json$/, '')))
       .map(f => readTemplate(f.replace(/\.json$/, '')))
       .filter(Boolean)
-      .map(t => ({ id: t.id, name: t.name, kind: t.kind || 'page', createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: (t.doc.widgets || []).length, sectionType: t.kind === 'section' ? ((t.doc.pageSections || [])[0] || {}).type : undefined }))
+      .map(t => ({ id: t.id, name: t.name, owner: t.owner || 'alex', kind: t.kind || 'page', createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: (t.doc.widgets || []).length, sectionType: t.kind === 'section' ? ((t.doc.pageSections || [])[0] || {}).type : undefined }))
       .filter(t => !req.query.kind || t.kind === req.query.kind)
+      .filter(t => isAdminReq(req) || templateVisibleTo(req.user, t))
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     res.json(list);
   } catch (err) {
@@ -1192,7 +1354,7 @@ app.post('/api/templates', (req, res) => {
   const kind = req.body && req.body.kind === 'section' ? 'section' : 'page';
   const cleanName = typeof name === 'string' ? name.trim().slice(0, 80) : '';
   if (!cleanName) return res.status(400).json({ error: 'Template name required' });
-  const cleanDoc = sanitizeTemplateDoc(doc);
+  const cleanDoc = isAdminReq(req) ? sanitizeTemplateDoc(doc) : restrictPageDoc(doc).doc;
   if (!cleanDoc.widgets.length && !(cleanDoc.pageSections || []).length) return res.status(400).json({ error: 'This page has no widgets or sections to save' });
   if (kind === 'section' && (cleanDoc.widgets.length || (cleanDoc.pageSections || []).length !== 1 || cleanDoc.pageSections[0].type === 'grid')) {
     return res.status(400).json({ error: 'A section template is exactly one non-grid section' });
@@ -1200,6 +1362,7 @@ app.post('/api/templates', (req, res) => {
   const t = {
     id: 'tpl-' + Date.now(),
     name: cleanName,
+    owner: ownerName(req),
     kind,
     createdAt: new Date().toISOString(),
     sourcePage: typeof sourcePage === 'string' ? sourcePage.slice(0, 64) : null,
@@ -1540,6 +1703,21 @@ function executeLocalTool(toolName, args, role, sessionId) {
       const designerSess = readSessions().find(s => s.id === sessionId);
       const pageId = (designerSess && designerSess.page) || 'home';
       const pageDoc = getPageDocPath(pageId);
+      // A Designer working for a pages user (fb-1790201502191) reads only its
+      // own page and the component sources, has no tickets and no scheduler,
+      // and its writes go through the restricted sanitizer.
+      const forPagesUser = !!(designerSess && designerSess.owner && !isAdminUserName(designerSess.owner));
+      if (forPagesUser) {
+        const componentsDir = path.join(__dirname, '../public/components');
+        const inAllowed = (fp) => { const t = path.resolve('/home/ubuntu', fp || ''); return t === pageDoc || t === componentsDir || t.startsWith(componentsDir + path.sep); };
+        if ((toolName === 'read_file' || toolName === 'list_directory') && !inAllowed(args.filePath || args.dirPath || args.path)) {
+          return resolve({ error: `Permission Denied: on this account the Designer can read only its page (${pageDoc}) and the component library (${componentsDir}).` });
+        }
+        if (!['read_file', 'list_directory', 'write_file', 'search_web', 'send_message'].includes(toolName)) {   // allow-list
+          return resolve({ error: 'Permission Denied: not available on this account.' });
+        }
+        if (toolName === 'send_message') args.targetSessionId = sessionId;   // never into someone else's chat
+      }
       if (toolName === 'run_bash') {
         return resolve({ error: `Permission Denied: the Designer is containerized to its page document and cannot run shell commands. Edit ${pageDoc} with write_file instead.` });
       }
@@ -1556,7 +1734,10 @@ function executeLocalTool(toolName, args, role, sessionId) {
           return resolve({ error: `Not written: the page document must be valid JSON (${e.message}). Nothing was changed.` });
         }
         let report = [];
-        if (pageId === 'home') {
+        if (forPagesUser) {
+          ({ doc: parsed, report } = restrictPageDoc(parsed));
+          parsed.updatedAt = new Date().toISOString();
+        } else if (pageId === 'home') {
           const before = JSON.stringify(parsed);
           parsed = sanitizeHomepage({ ...parsed, updatedAt: new Date().toISOString(), updatedBy: 'designer' });
           if ((parsed.pageSections || []).length !== (JSON.parse(before).pageSections || []).length) report.push('some sections were dropped (unknown type or bad shape)');
@@ -1761,11 +1942,26 @@ function executeLocalTool(toolName, args, role, sessionId) {
 app.get('/api/agent/models', (req, res) => res.json({ models: MODEL_REGISTRY }));
 
 // Get all agent sessions
-app.get('/api/agent/sessions', (req, res) => res.json(readSessions()));
+// Admin views default to admin-owned sessions: other people's chats are theirs,
+// and their text never reaches the admin UI's markdown renderer.
+app.get('/api/agent/sessions', (req, res) => {
+  const all = readSessions();
+  if (!isAdminReq(req)) return res.json(all.filter(x => x.owner === req.user.username));
+  res.json(req.query.all === '1' ? all : all.filter(x => isAdminUserName(x.owner)));
+});
 
 // Create new agent session
 app.post('/api/agent/sessions', (req, res) => {
-  const { name, role, model, emoji } = req.body;
+  let { name, role, model, emoji } = req.body;
+  if (!isAdminReq(req)) {
+    // A pages user may only open a Designer on a page they own, on a model
+    // whose tools run through executeLocalTool (the Claude CLI can read any file).
+    const pg = req.body && req.body.page;
+    if (role !== 'designer' || !pageOwnedBy(req.user, pg)) return res.status(403).json({ error: 'You can open a Designer only on your own pages.' });
+    model = PAGES_USER_DESIGNER_MODEL;
+    name = `${(pageEntry(pg) || {}).title || pg} Designer`;
+    emoji = undefined;
+  }
   const sessions = readSessions();
   const sessionRole = role || 'debugger';
   // Validated against the registry; unknown/missing ids fall back to the
@@ -1818,6 +2014,7 @@ app.post('/api/agent/sessions', (req, res) => {
     ...(sessionPage ? { page: sessionPage } : {}),
     model: sessionModel,
     ...(emoji && emoji.trim() ? { emoji: emoji.trim() } : {}),
+    owner: ownerName(req),
     createdAt: new Date().toISOString(),
     messages: [
       {
@@ -1834,7 +2031,7 @@ app.post('/api/agent/sessions', (req, res) => {
   // happens even if the browser goes away right after. Unknown/stale id is
   // ignored — session creation must never fail over a dead ticket. Items
   // already done/wont-do are linked but NOT reopened.
-  const { feedbackId } = req.body || {};
+  const feedbackId = isAdminReq(req) ? (req.body || {}).feedbackId : undefined;   // pages users never touch tickets
   if (feedbackId) {
     const items = readFeedback();
     const item = items.find(i => i.id === feedbackId);
@@ -3155,8 +3352,9 @@ function finishJob(job, session, agentMsg, errorInfo, ctrl) {
 app.post('/api/agent/sessions/:id/chat', (req, res) => {
   try {
     const { id } = req.params;
-    const { prompt, model, persistModel } = req.body;
+    let { prompt, model, persistModel } = req.body;
     if (!prompt || !prompt.trim()) return res.status(400).json({ error: 'Prompt is required' });
+    if (!isAdminReq(req)) { model = PAGES_USER_DESIGNER_MODEL; persistModel = false; }
 
     const sessions = readSessions();
     const session = sessions.find(s => s.id === id);
@@ -3908,6 +4106,9 @@ app.get('/api/media/files', (req, res) => {
     const { library } = req.query;
     
     let results = [];
+    // A library is a folder NAME: "../.." listed arbitrary server directories
+    // (fb-1790201502191 — pages users can reach this route for the photo frame).
+    if (library && library !== 'all' && !/^[A-Za-z0-9_-]{1,64}$/.test(library)) return res.status(400).json({ error: 'Invalid library' });
     const libs = (library && library !== 'all') ? [library] : fs.readdirSync(MEDIA_DIR, { withFileTypes: true }).filter(i => i.isDirectory()).map(i => i.name);
     
     for (const lib of libs) {

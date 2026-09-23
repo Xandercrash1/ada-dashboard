@@ -117,6 +117,11 @@
 
     <form id="login-form" class="bg-dark-card border border-dark-border rounded-2xl p-6 shadow-xl space-y-4">
       <div>
+        <label for="username" class="block text-xs font-semibold text-gray-400 mb-1.5">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus
+          class="w-full bg-dark-bg border border-dark-border rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/60 focus:border-indigo-500 transition-all" placeholder="alex" />
+      </div>
+      <div>
         <label for="password" class="block text-xs font-semibold text-gray-400 mb-1.5">Password</label>
         <input
           type="password"
@@ -124,7 +129,6 @@
           name="password"
           autocomplete="current-password"
           required
-          autofocus
           class="w-full bg-dark-bg border border-dark-border rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/60 focus:border-indigo-500 transition-all"
           placeholder="••••••••"
         />
@@ -132,7 +136,7 @@
 
       <div id="error-box" class="hidden text-xs text-red-400 bg-red-950/40 border border-red-900/60 rounded-lg px-3 py-2">
         <i class="fa-solid fa-triangle-exclamation mr-1"></i>
-        <span id="error-text">Incorrect password.</span>
+        <span id="error-text">Incorrect username or password.</span>
       </div>
 
       <button
@@ -178,7 +182,7 @@
         const res = await fetch('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: passwordInput.value }),
+          body: JSON.stringify({ username: document.getElementById('username').value.trim().toLowerCase(), password: passwordInput.value }),
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.ok) {

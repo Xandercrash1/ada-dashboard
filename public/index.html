@@ -24,6 +24,36 @@
       catch (e) { window.__adaApplyTheme('dark'); }
     })();
   </script>
+  <script>
+    // Who is signed in (fb-1790201502191). A 'pages' account sees its own and
+    // shared pages; admin-only API calls are answered locally with empty data
+    // so the shared UI code stays quiet. The SERVER is the wall — this only
+    // keeps the UI honest.
+    window.ME = null;
+    window.__meReady = fetch('/api/me').then(r => r.ok ? r.json() : null).then(m => { window.ME = m; return m; }).catch(() => null);
+    (function () {
+      const nativeFetch = window.fetch.bind(window);
+      const PAGES_OK = [/^\/api\/me(\/password)?$/, /^\/api\/pages(\/|$)/, /^\/api\/homepage$/, /^\/api\/templates(\/|$)/, /^\/api\/widgets\/sanitize$/,
+        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/media\/(libraries|files)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/login$/, /^\/api\/logout$/];
+      window.fetch = async function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
+        if (path.startsWith('/api/') && !PAGES_OK.some(re => re.test(path))) {
+          const me = window.ME || await window.__meReady;
+          if (me && me.role === 'pages') {
+            const body = /\/api\/(system|scripts\/run)/.test(path) ? '{}' : '[]';
+            return new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+        }
+        return nativeFetch(input, init);
+      };
+    })();
+  </script>
+  <style>
+    .role-pages #tab-btn-todo, .role-pages #tab-btn-tools, .role-pages #tab-btn-server,
+    .role-pages #mob-btn-todo, .role-pages #mob-btn-tools, .role-pages #mob-btn-server,
+    .role-pages .ntf-bell, .role-pages #edit-widget-advanced, .role-pages .admin-only { display: none !important; }
+  </style>
   <script type="module" src="/components/index.js"></script>
   <script src="/components/BubbleManager.js"></script>
   <!-- Tailwind CSS -->
@@ -186,6 +216,7 @@
         </button>
       </nav>
       <div class="flex items-center gap-2">
+        <button onclick="openAccount()" class="theme-cycle account-btn" title="Account" aria-label="Account"><i class="fa-solid fa-circle-user"></i> <span class="account-name text-[11px] font-semibold"></span></button>
         <!-- NOTIFICATIONS — server event stream (fb-1787765370485) -->
         <div class="relative">
           <button onclick="toggleNotifPanel(event)" class="theme-cycle ntf-bell" title="Notifications" aria-label="Notifications">
@@ -209,6 +240,7 @@
     <div id="ntf-toasts" class="fixed top-3 left-1/2 -translate-x-1/2 z-[1200] flex flex-col gap-2 w-[min(92vw,420px)] pointer-events-none"></div>
     <!-- THEME TOGGLE (mobile) — desktop bar is hidden on small screens -->
     <div class="md:hidden flex justify-end items-center gap-2 -mb-2">
+      <button onclick="openAccount()" class="theme-cycle account-btn" title="Account" aria-label="Account"><i class="fa-solid fa-circle-user"></i> <span class="account-name text-[11px] font-semibold"></span></button>
       <div class="relative">
         <button onclick="toggleNotifPanel(event)" class="theme-cycle ntf-bell" title="Notifications" aria-label="Notifications">
           <i class="fa-solid fa-bell"></i>
@@ -250,6 +282,7 @@
           <button onclick="redoLayout()" id="redo-layout-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Redo layout change (Shift-Cmd-Z)"><i class="fa-solid fa-rotate-right"></i></button>
           <button onclick="savePageAsTemplate()" id="save-template-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Save this page as a template"><i class="fa-solid fa-clone"></i></button>
           <!-- PAGE THEME PRESET (fb-1788928004000) — edit mode only; applies one cohesive theme/accent to every widget on this page -->
+          <button onclick="togglePageShared()" id="share-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Share this page with everyone"><i class="fa-solid fa-lock"></i> <span>Private</span></button>
           <button onclick="exportPage('preview')" id="export-preview-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Preview this page as a standalone website"><i class="fa-solid fa-eye"></i></button>
           <button onclick="exportPage('download')" id="export-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Export this page as one HTML file"><i class="fa-solid fa-file-export"></i></button>
           <button onclick="openPageStyle()" id="page-style-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Page style — fonts, colours, spacing"><i class="fa-solid fa-palette"></i></button>
@@ -435,6 +468,9 @@
           <button onclick="switchServerSubTab('scheduled')" id="subtab-btn-scheduled" title="Scheduler" aria-label="Scheduler" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
             <i class="fa-solid fa-clock text-amber-400"></i> <span class="hidden sm:inline">Scheduler</span>
             <span id="subtab-scheduled-badge" class="hidden bg-amber-900 border border-amber-500 text-amber-200 text-[9px] font-bold px-1.5 py-0.5 rounded-full">0</span>
+          </button>
+          <button onclick="switchServerSubTab('users')" id="subtab-btn-users" title="Users" aria-label="Users" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-users text-sky-400"></i> <span class="hidden sm:inline">Users</span>
           </button>
         </div>
 
@@ -703,6 +739,19 @@
           <div id="scheduled-list" class="space-y-2">
             <div class="text-center py-10 text-gray-500 text-xs">No scheduled prompts yet.</div>
           </div>
+        </div>
+      </div>
+      <!-- Users (fb-1790201502191) — admin only -->
+      <div id="server-sub-users" class="hidden space-y-4">
+        <div class="bg-dark-card border border-dark-border rounded-2xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-users text-sky-400 mr-2"></i>People</h3>
+              <p class="text-xs text-gray-400 mt-1">Household accounts can make their own pages, see shared pages and Home, and use the Designer — nothing else on the server.</p>
+            </div>
+            <button onclick="addUser()" class="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex-shrink-0"><i class="fa-solid fa-user-plus mr-1"></i>Add person</button>
+          </div>
+          <div id="users-list" class="divide-y divide-white/5"></div>
         </div>
       </div>
 
@@ -1327,7 +1376,8 @@
     function switchServerSubTab(sub) {
       currentServerSubTab = sub;
       try { localStorage.setItem('ada_serverSubTab', sub); } catch (e) {}
-      ['health', 'agents', 'feedback', 'scheduled'].forEach(s => {
+      if (sub === 'users') loadUsers();
+      ['health', 'agents', 'feedback', 'scheduled', 'users'].forEach(s => {
         document.getElementById(`server-sub-${s}`).classList.add('hidden');
         const btn = document.getElementById(`subtab-btn-${s}`);
         if (btn) {
@@ -2274,7 +2324,8 @@
            btn.className = 'custom-page-tab tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all';
            btn.id = `tab-btn-${page.id}`;
            btn.onclick = () => switchTab(page.id);
-           btn.innerHTML = `<i class="fa-solid ${page.icon}"></i> ${page.title}`;
+           // Escaped (fb-1790201502191): with more than one user, a page title is someone else's text.
+           btn.innerHTML = `<i class="fa-solid ${escapeHtml(/^fa-[a-z0-9-]+$/.test(page.icon || '') ? page.icon : 'fa-file')}"></i> ${escapeHtml(page.title)}${page.shared ? ' <i class="fa-solid fa-user-group text-[10px] opacity-60" title="Shared"></i>' : ''}`;
            homeTab.after(btn);
          }
          // Mobile bottom nav (fb-1788989050743): mob-btn-<id> so switchTab's
@@ -2284,7 +2335,7 @@
            mBtn.className = 'custom-page-tab flex flex-col items-center justify-center w-full min-w-[56px] py-1 text-gray-400 text-[11px] gap-1 transition-colors';
            mBtn.id = `mob-btn-${page.id}`;
            mBtn.onclick = () => switchTab(page.id);
-           mBtn.innerHTML = `<i class="fa-solid ${page.icon} text-lg"></i><span class="truncate max-w-[72px]">${page.title}</span>`;
+           mBtn.innerHTML = `<i class="fa-solid ${escapeHtml(/^fa-[a-z0-9-]+$/.test(page.icon || '') ? page.icon : 'fa-file')} text-lg"></i><span class="truncate max-w-[72px]">${escapeHtml(page.title)}</span>`;
            mobileHome.after(mBtn);
          }
       });
@@ -4247,6 +4298,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         m.querySelector('#ada-prompt-message').textContent = opts.message || '';
         const input = m.querySelector('#ada-prompt-input');
         input.placeholder = opts.placeholder || '';
+        input.type = opts.password ? 'password' : 'text';
         input.value = opts.defaultValue || '';
         const ok = m.querySelector('#ada-prompt-ok');
         ok.textContent = opts.confirmLabel || 'OK';
@@ -4647,6 +4699,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
   function openWidgetLibrary(sectionId) {
     // Which grid section a new widget lands in (fb-1790201502161); '' = first grid.
     window.__spawnSection = sectionId || null;
+    if (typeof filterWidgetLibraryForRole === 'function') filterWidgetLibraryForRole();
     document.getElementById('widget-library-modal').classList.remove('hidden');
   }
   function closeWidgetLibrary() {
@@ -5176,6 +5229,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const ps = document.getElementById('page-style-btn');
       if (ps) ps.classList.toggle('hidden', !window.isEditingLayout);
       ['export-page-btn', 'export-preview-btn'].forEach(id => { const b = document.getElementById(id); if (b) b.classList.toggle('hidden', !window.isEditingLayout); });
+      if (typeof updatePageAccessUI === 'function') updatePageAccessUI();
     }
     async function restoreLayoutSnapshot(snap) {
       // Keep the live version stamp so the optimistic save is not refused.
@@ -5375,6 +5429,136 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const editCls = (window.isEditingLayout && !plain) ? ' pt-10 outline-dashed outline-2 outline-offset-4 outline-indigo-400/40 rounded-xl' : '';
       return `<div class="page-section relative w-full${editCls}" data-section-id="${sid}" data-section-type="${sec.type}">${chrome}${body}</div>`;
     }
+
+    // ===================== ACCOUNTS + ROLES (fb-1790201502191) =====================
+    const isPagesUser = () => !!(window.ME && window.ME.role === 'pages');
+    const SAFE_SPAWN_TYPES = ['clock', 'analog', 'countdown', 'weather', 'photo'];
+    function currentPageEntry() { return customPages.find(pg => pg.id === currentCanvasPage) || null; }
+    function canEditCurrentPage() {
+      if (!window.ME) return true;                       // still loading: server decides
+      if (window.ME.role === 'admin') return true;
+      const pg = currentPageEntry();
+      return !!pg && pg.owner === window.ME.username;    // never Home, never someone else's shared page
+    }
+    // Safe widgets only, for pages accounts. Also run on every library open:
+    // the modal markup can come after the role is known.
+    function filterWidgetLibraryForRole() {
+      if (!isPagesUser()) return;
+      document.querySelectorAll('#widget-library-modal button[onclick^="spawnWidget("]').forEach(b => {
+        const t = (/spawnWidget\('([a-z-]+)'\)/.exec(b.getAttribute('onclick')) || [])[1];
+        if (!SAFE_SPAWN_TYPES.includes(t)) b.remove();
+      });
+    }
+    function applyRoleUI() {
+      const me = window.ME;
+      document.querySelectorAll('.account-name').forEach(el => { el.textContent = me ? me.username : ''; });
+      if (!me || me.role !== 'pages') return;
+      document.body.classList.add('role-pages');
+      filterWidgetLibraryForRole();
+      if (['todo', 'tools', 'server'].includes(currentTab)) switchTab('home');
+    }
+    function updatePageAccessUI() {
+      const editBtn = document.getElementById('edit-layout-btn');
+      const ok = canEditCurrentPage();
+      if (editBtn) editBtn.classList.toggle('hidden', !ok);
+      if (!ok && window.isEditingLayout) toggleEditLayout();
+      const share = document.getElementById('share-page-btn');
+      const pg = currentPageEntry();
+      if (share) {
+        share.classList.toggle('hidden', !(window.isEditingLayout && pg && ok));
+        if (pg) share.innerHTML = pg.shared ? '<i class="fa-solid fa-user-group"></i> <span>Shared</span>' : '<i class="fa-solid fa-lock"></i> <span>Private</span>';
+      }
+    }
+    async function togglePageShared() {
+      const pg = currentPageEntry();
+      if (!pg) return;
+      const res = await fetch(`/api/pages/${encodeURIComponent(pg.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shared: !pg.shared }) });
+      if (!res.ok) { showAppToast('Could not change sharing', 'error'); return; }
+      pg.shared = !pg.shared;
+      await loadCustomPages();
+      updatePageAccessUI();
+      showAppToast(pg.shared ? 'Shared — everyone signed in can see this page.' : 'Private — only you can see this page.', 'success');
+    }
+    // Account: change password, admin → Users, sign out.
+    async function openAccount() {
+      const me = window.ME || await window.__meReady;
+      let m = document.getElementById('account-modal');
+      if (!m) {
+        m = document.createElement('div');
+        m.id = 'account-modal';
+        m.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4';
+        m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+        document.body.appendChild(m);
+      }
+      const btn = (id, icon, label, cls) => `<button id="${id}" class="w-full text-left px-4 py-3 rounded-xl border border-white/10 hover:border-indigo-500/60 hover:bg-indigo-500/10 text-sm ${cls || 'text-white'} flex items-center gap-3"><i class="fa-solid ${icon} w-4 text-center"></i>${label}</button>`;
+      m.innerHTML = `<div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-3">
+          <div class="flex items-center gap-3 pb-2">
+            <i class="fa-solid fa-circle-user text-3xl text-indigo-400"></i>
+            <div><div class="text-white font-bold">${escapeHtml(me ? me.username : '?')}</div><div class="text-xs text-gray-400">${me && me.role === 'admin' ? 'Admin' : 'Pages account'}</div></div>
+          </div>
+          ${btn('acct-password', 'fa-key', 'Change password')}
+          ${me && me.role === 'admin' ? btn('acct-users', 'fa-users', 'Manage people') : ''}
+          ${btn('acct-logout', 'fa-right-from-bracket', 'Sign out', 'text-rose-400')}
+          <button id="acct-close" class="w-full py-2 text-xs text-gray-400 hover:text-white">Close</button>
+        </div>`;
+      const close = () => m.remove();
+      m.querySelector('#acct-close').onclick = close;
+      m.querySelector('#acct-password').onclick = () => { close(); changeMyPassword(); };
+      const users = m.querySelector('#acct-users');
+      if (users) users.onclick = () => { close(); switchTab('server'); switchServerSubTab('users'); };
+      m.querySelector('#acct-logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login'; };
+    }
+    async function changeMyPassword() {
+      const current = await adaPrompt({ title: 'Change password', message: 'Current password', password: true, confirmLabel: 'Next' });
+      if (!current) return;
+      const next = await adaPrompt({ title: 'Change password', message: 'New password (at least 8 characters)', password: true, confirmLabel: 'Change' });
+      if (!next) return;
+      const res = await fetch('/api/me/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ current, next }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { showAppToast(data.error || 'Could not change the password', 'error'); return; }
+      showAppToast('Password changed — sign in again.', 'success');
+      setTimeout(() => { location.href = '/login'; }, 1200);
+    }
+    // Users sub-tab (admin)
+    async function loadUsers() {
+      const box = document.getElementById('users-list');
+      if (!box) return;
+      let list = [];
+      try { list = await (await fetch('/api/users')).json(); } catch (e) { list = []; }
+      box.innerHTML = (Array.isArray(list) ? list : []).map(u => `
+        <div class="flex items-center gap-3 py-3">
+          <i class="fa-solid ${u.role === 'admin' ? 'fa-user-shield text-amber-400' : 'fa-user text-sky-400'}"></i>
+          <div class="flex-1 min-w-0"><div class="text-sm text-white font-semibold">${escapeHtml(u.username)} ${u.disabled ? '<span class="text-[10px] text-rose-400 uppercase ml-1">disabled</span>' : ''}</div>
+            <div class="text-[11px] text-gray-400">${u.role === 'admin' ? 'Admin' : 'Pages account'}${u.createdAt ? ' · since ' + new Date(u.createdAt).toLocaleDateString() : ''}</div></div>
+          <button onclick="resetUserPassword('${escapeHtml(u.username)}')" class="px-2.5 py-1.5 rounded-lg text-xs text-gray-300 border border-white/10 hover:text-white">Reset password</button>
+          ${u.role === 'admin' ? '' : `<button onclick="toggleUserDisabled('${escapeHtml(u.username)}', ${!u.disabled})" class="px-2.5 py-1.5 rounded-lg text-xs border border-white/10 ${u.disabled ? 'text-emerald-400' : 'text-rose-400'}">${u.disabled ? 'Enable' : 'Disable'}</button>`}
+        </div>`).join('') || '<p class="text-xs text-gray-400 py-3">No accounts yet.</p>';
+    }
+    async function addUser() {
+      const username = ((await adaPrompt({ title: 'Add a person', message: 'Username (lowercase, e.g. "sam")', placeholder: 'sam', confirmLabel: 'Next' })) || '').trim().toLowerCase();
+      if (!username) return;
+      const password = await adaPrompt({ title: `Starting password for ${username}`, message: 'At least 8 characters — they can change it after signing in.', password: true, confirmLabel: 'Create account' });
+      if (!password) return;
+      const res = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+      const data = await res.json().catch(() => ({}));
+      showAppToast(res.ok ? `Account "${data.username}" created.` : (data.error || 'Could not create the account'), res.ok ? 'success' : 'error');
+      loadUsers();
+    }
+    async function resetUserPassword(username) {
+      const password = await adaPrompt({ title: `New password for ${username}`, message: 'At least 8 characters. Their current sessions end.', password: true, confirmLabel: 'Reset' });
+      if (!password) return;
+      const res = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+      const data = await res.json().catch(() => ({}));
+      showAppToast(res.ok ? `Password reset for ${username}.` : (data.error || 'Could not reset'), res.ok ? 'success' : 'error');
+    }
+    async function toggleUserDisabled(username, disabled) {
+      if (disabled && !await adaConfirm({ title: `Disable ${username}?`, message: 'They are signed out at once and cannot sign in. Their pages are kept.', confirmLabel: 'Disable', danger: true })) return;
+      const res = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) showAppToast(data.error || 'Could not update', 'error');
+      loadUsers();
+    }
+    window.__meReady.then(() => { applyRoleUI(); if (typeof renderHomepage === 'function' && homepageDoc) renderHomepage(); });
 
     // ===================== PAGE BUILDER v2 — manual section builder (fb-1790201502161) =====================
     const GRID_SECTION_SCHEMA = [{ attr: 'heading', label: 'Heading (optional)', type: 'text', default: '' }];
@@ -5724,6 +5908,7 @@ ${body}
 
       if (!homepageDoc) return;
       syncPageThemeSelect();
+      updatePageAccessUI();
       
       const gt = homepageDoc.glanceTheme || { theme: 'glass', accent: 'indigo' };
       const glance = document.getElementById('home-glance-banner');

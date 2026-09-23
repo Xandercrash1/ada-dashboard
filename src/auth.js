@@ -287,19 +287,21 @@ const GLOBAL_KEY = '__global__';
 // requireAuth middleware
 // ---------------------------------------------------------------------
 
-function makeRequireAuth(getSecret, exempt) {
+function makeRequireAuth(getSecret, exempt, users) {
   return function requireAuth(req, res, next) {
     // Caller-supplied exemption (e.g. the remote Mac bridge authenticating
     // with a shared token instead of a browser session cookie). The predicate
     // decides BOTH that the path is exempt-eligible AND that the credential
     // is valid — a bare path check here would be an unauthenticated hole.
     if (typeof exempt === 'function' && exempt(req)) {
+      req.user = { username: 'system', role: 'admin' };
       return next();
     }
 
     // Allow local tools (like the Antigravity Bridge Daemon) to bypass auth
     const ip = getClientIp(req);
     if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') {
+      req.user = { username: 'system', role: 'admin' };
       return next();
     }
 
@@ -313,8 +315,85 @@ function makeRequireAuth(getSecret, exempt) {
       }
       return res.redirect('/login');
     }
+    // Multi-user (fb-1790201502191): the token names a user and a password
+    // version. Resolved against the user store on EVERY request, so disabling
+    // an account or resetting its password ends its sessions at once.
+    // Tokens minted before users existed carry no `u`: they were admin tokens.
+    const user = users ? users.find(session.u || 'alex') : { username: 'alex', role: 'admin', pv: 0 };
+    if (!user || user.disabled || (user.pv || 0) !== (session.pv || 0)) {
+      if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
+      return res.redirect('/login');
+    }
     req.session = session;
+    req.user = { username: user.username, role: user.role };
     next();
+  };
+}
+
+// ---------------------------------------------------------------------
+// User store (fb-1790201502191). data/users.json:
+//   [{ username, role: 'admin'|'pages', salt, passwordHash, pv, disabled, createdAt }]
+// Absent file = one admin, 'alex', whose password is the original
+// credentials file's — so enabling users changes nothing for Alex.
+// ---------------------------------------------------------------------
+const USERNAME_RE = /^[a-z][a-z0-9_-]{1,31}$/;
+function createUserStore(usersFile, creds) {
+  let cache = null;
+  const seed = () => [{ username: 'alex', role: 'admin', salt: creds.salt, passwordHash: creds.passwordHash, pv: 0, createdAt: creds.createdAt || null }];
+  const load = () => {
+    if (cache) return cache;
+    try { cache = fs.existsSync(usersFile) ? JSON.parse(fs.readFileSync(usersFile, 'utf8')) : seed(); } catch (e) { cache = seed(); }
+    if (!Array.isArray(cache) || !cache.some(u => u.role === 'admin')) cache = seed();
+    return cache;
+  };
+  const save = (list) => {
+    fs.mkdirSync(path.dirname(usersFile), { recursive: true });
+    fs.writeFileSync(usersFile, JSON.stringify(list, null, 2), { mode: 0o600 });
+    cache = list;
+  };
+  const pub = (u) => ({ username: u.username, role: u.role, disabled: !!u.disabled, createdAt: u.createdAt || null });
+  const setPw = (u, password) => {
+    const salt = crypto.randomBytes(16);
+    u.salt = salt.toString('hex');
+    u.passwordHash = hashPassword(password, salt).toString('hex');
+    u.pv = (u.pv || 0) + 1;
+  };
+  return {
+    find: (name) => load().find(u => u.username === String(name || '').toLowerCase()) || null,
+    list: () => load().map(pub),
+    create: ({ username, password, role }) => {
+      const name = String(username || '').trim().toLowerCase();
+      if (!USERNAME_RE.test(name)) throw new Error('Username: 2–32 characters, lowercase letters, digits, - or _, starting with a letter.');
+      if (typeof password !== 'string' || password.length < 8) throw new Error('Password must be at least 8 characters.');
+      const list = load().slice();
+      if (list.some(u => u.username === name)) throw new Error('That username is taken.');
+      const u = { username: name, role: role === 'admin' ? 'admin' : 'pages', pv: -1, createdAt: new Date().toISOString() };
+      setPw(u, password);
+      list.push(u); save(list);
+      return pub(u);
+    },
+    update: (name, { password, disabled }) => {
+      const list = load().map(u => ({ ...u }));
+      const u = list.find(x => x.username === String(name || '').toLowerCase());
+      if (!u) throw new Error('No such user.');
+      if (password !== undefined) {
+        if (typeof password !== 'string' || password.length < 8) throw new Error('Password must be at least 8 characters.');
+        setPw(u, password);
+      }
+      if (disabled !== undefined) {
+        if (u.role === 'admin' && disabled && list.filter(x => x.role === 'admin' && !x.disabled).length <= 1) throw new Error('Cannot disable the last admin.');
+        u.disabled = !!disabled;
+        if (disabled) u.pv = (u.pv || 0) + 1;     // end its sessions
+      }
+      save(list);
+      return pub(u);
+    },
+    verify: (name, password) => {
+      const u = load().find(x => x.username === String(name || '').trim().toLowerCase());
+      // Always run scrypt, so an unknown username costs the same as a wrong password.
+      const ok = u ? verifyPassword(password, u.salt, u.passwordHash) : (verifyPassword(password, creds.salt, creds.passwordHash) && false);
+      return ok && !u.disabled ? u : null;
+    }
   };
 }
 
@@ -446,7 +525,8 @@ function mountAuth(app, options = {}) {
   checkTrustProxyConfig(app, options.behindProxy);
 
   const getSecret = () => creds.sessionSecret;
-  const requireAuth = makeRequireAuth(getSecret, options.exempt);
+  const users = options.usersFile ? createUserStore(options.usersFile, creds) : null;
+  const requireAuth = makeRequireAuth(getSecret, options.exempt, users);
 
   // GET /login — serve the login page itself (must stay reachable logged out)
   app.get('/login', (req, res) => {
@@ -475,21 +555,22 @@ function mountAuth(app, options = {}) {
     }
 
     const password = req.body && req.body.password;
-    if (typeof password !== 'string' || password.length === 0) {
-      return res.status(400).json({ error: 'Password required.' });
+    const username = req.body && req.body.username;
+    if (typeof password !== 'string' || password.length === 0 || (users && (typeof username !== 'string' || !username.trim()))) {
+      return res.status(400).json({ error: users ? 'Username and password required.' : 'Password required.' });
     }
 
-    const ok = verifyPassword(password, creds.salt, creds.passwordHash);
-    if (!ok) {
+    const user = users ? users.verify(username, password) : (verifyPassword(password, creds.salt, creds.passwordHash) ? { username: 'alex', pv: 0 } : null);
+    if (!user) {
       limiter.recordFailure(ip);
       globalLimiter.recordFailure(GLOBAL_KEY);
-      return res.status(401).json({ error: 'Incorrect password.' });
+      return res.status(401).json({ error: users ? 'Incorrect username or password.' : 'Incorrect password.' });
     }
 
     limiter.recordSuccess(ip);
     globalLimiter.recordSuccess(GLOBAL_KEY);
     const now = Date.now();
-    const token = signToken({ iat: now, exp: now + SESSION_TTL_MS }, getSecret());
+    const token = signToken({ iat: now, exp: now + SESSION_TTL_MS, u: user.username, pv: user.pv || 0 }, getSecret());
     res.setHeader('Set-Cookie', buildCookieHeader(token, req));
     res.json({ ok: true });
   });
@@ -500,7 +581,7 @@ function mountAuth(app, options = {}) {
     res.json({ ok: true });
   });
 
-  return { requireAuth };
+  return { requireAuth, users };
 }
 
 // ---------------------------------------------------------------------
