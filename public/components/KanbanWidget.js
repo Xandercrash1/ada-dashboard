@@ -60,8 +60,11 @@ class KanbanWidget extends HTMLElement {
     this.saveBoard();
   }
 
-  deleteTask(colId, taskId) {
-    if (!confirm('Delete this task?')) return;
+  async deleteTask(colId, taskId) {
+    const ok = window.adaConfirm
+      ? await window.adaConfirm({ title: 'Delete task', message: 'Delete this task?', confirmLabel: 'Delete', danger: true })
+      : window.confirm('Delete this task?');
+    if (!ok) return;
     const col = this.board.columns.find(c => c.id === colId);
     if (!col) return;
     

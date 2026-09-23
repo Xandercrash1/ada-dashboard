@@ -198,7 +198,7 @@ class ChatWidget extends HTMLElement {
 
   async pressButton() {
     const confirmText = this.attr('confirm');
-    if (confirmText && !window.confirm(confirmText)) return;
+    if (confirmText && !(window.adaConfirm ? await window.adaConfirm({ message: confirmText }) : window.confirm(confirmText))) return;
 
     const btn = this.querySelector('button');
     const iconEl = btn.querySelector('i');

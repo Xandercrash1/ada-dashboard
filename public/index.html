@@ -1677,7 +1677,7 @@
     }
 
     async function deleteTodoTask(id) {
-      if (!confirm('Delete this task? This cannot be undone from here.')) return;
+      if (!await adaConfirm({ title: 'Delete task', message: 'Delete this task? This cannot be undone from here.', confirmLabel: 'Delete', danger: true })) return;
       const result = await todoApiFetch(`/api/todo/tasks/${id}`, { method: 'DELETE' });
       if (!result.ok) {
         alert('Failed to delete task.');
@@ -2009,7 +2009,7 @@
     }
 
     async function deleteStorageMedia(library, filename) {
-      if (!confirm(`Are you sure you want to permanently delete ${filename}?`)) return;
+      if (!await adaConfirm({ title: 'Delete file', message: `Permanently delete ${filename}?`, confirmLabel: 'Delete', danger: true })) return;
       try {
         const res = await fetch('/api/media/files', {
           method: 'DELETE',
@@ -2621,7 +2621,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const n = (Array.isArray(items) ? items : []).filter(i => i.stagedAt).length;
         if (n) stagedNote = ` ${n} staged feedback ticket${n === 1 ? '' : 's'} will be auto-closed.`;
       } catch (e) { /* count unavailable — proceed without it */ }
-      if (!confirm("Are you sure you want to push Staging to Live? This will restart the dashboard." + stagedNote)) return;
+      if (!await adaConfirm({ title: 'Push staging to live?', message: 'This will restart the dashboard.' + stagedNote, confirmLabel: 'Push to live' })) return;
       
       const originalHtml = btn.innerHTML;
       btn.disabled = true;
@@ -3061,7 +3061,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
     async function clearCurrentChat() {
       if (!activeSessionId) return;
-      if (!confirm('Clear message history for this agent session?')) return;
+      if (!await adaConfirm({ title: 'Clear chat', message: 'Clear message history for this agent session?', confirmLabel: 'Clear', danger: true })) return;
       const res = await fetch(`/api/agent/sessions/${activeSessionId}/clear`, { method: 'POST' });
       const updated = await res.json();
       const session = agentSessions.find(s => s.id === activeSessionId);
@@ -3070,7 +3070,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     async function deleteAgentSession(id) {
-      if (!confirm('Delete this agent session?')) return;
+      if (!await adaConfirm({ title: 'Delete session', message: 'Delete this agent session?', confirmLabel: 'Delete', danger: true })) return;
       await fetch(`/api/agent/sessions/${id}`, { method: 'DELETE' });
       if (activeSessionId === id) activeSessionId = null;
       loadAgentSessions();
@@ -3497,7 +3497,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     async function deleteScheduled(id) {
-      if (!confirm('Remove this scheduled prompt?')) return;
+      if (!await adaConfirm({ title: 'Remove scheduled prompt', message: 'Remove this scheduled prompt?', confirmLabel: 'Remove', danger: true })) return;
       await fetch(`/api/agent/scheduled/${id}`, { method: 'DELETE' });
       await loadScheduled();
     }
@@ -3929,7 +3929,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     }
 
     async function deleteFeedback(id) {
-      if (!confirm('Delete this feedback item? This is for mistakes only — processing normally uses status, not delete.')) return;
+      if (!await adaConfirm({ title: 'Delete feedback', message: 'Delete this feedback item? This is for mistakes only — processing normally uses status, not delete.', confirmLabel: 'Delete', danger: true })) return;
       await fetch(`/api/feedback/${id}`, { method: 'DELETE' });
       await loadFeedback();
     }
@@ -4090,6 +4090,56 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       });
     }
     window.adaPrompt = adaPrompt;
+
+    // In-app confirm replacing window.confirm() (fb-1789015021644): resolves
+    // true on OK / Enter, false on Cancel / Escape / backdrop. Reuses the
+    // prompt modal with its input hidden. opts: title, message, confirmLabel,
+    // danger — or just a message string.
+    function adaConfirm(opts) {
+      if (typeof opts === 'string') opts = { message: opts };
+      return new Promise((resolve) => {
+        const m = document.getElementById('ada-prompt-modal');
+        if (!m) return resolve(false);
+        const input = m.querySelector('#ada-prompt-input');
+        const ok = m.querySelector('#ada-prompt-ok');
+        const cancel = m.querySelector('#ada-prompt-cancel');
+        m.querySelector('#ada-prompt-title').textContent = opts.title || 'Are you sure?';
+        m.querySelector('#ada-prompt-message').textContent = opts.message || '';
+        input.classList.add('hidden');
+        ok.textContent = opts.confirmLabel || 'OK';
+        ok.className = 'px-4 py-2 rounded-lg text-xs font-bold text-white ' + (opts.danger ? 'bg-rose-600 hover:bg-rose-500' : 'bg-indigo-600 hover:bg-indigo-500');
+        m.classList.remove('hidden');
+        setTimeout(() => ok.focus(), 30);
+        let settled = false;
+        const done = (val) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          input.classList.remove('hidden');   // hand the modal back to adaPrompt intact
+          m.classList.add('hidden');
+          resolve(val);
+        };
+        // Capture phase so Escape doesn't also close an Inspector underneath.
+        const onKey = (e) => {
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
+          else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(true); }
+        };
+        const onOk = () => done(true);
+        const onCancel = () => done(false);
+        const onBackdrop = (e) => { if (e.target === m) done(false); };
+        function cleanup() {
+          document.removeEventListener('keydown', onKey, true);
+          ok.removeEventListener('click', onOk);
+          cancel.removeEventListener('click', onCancel);
+          m.removeEventListener('click', onBackdrop);
+        }
+        document.addEventListener('keydown', onKey, true);
+        ok.addEventListener('click', onOk);
+        cancel.addEventListener('click', onCancel);
+        m.addEventListener('click', onBackdrop);
+      });
+    }
+    window.adaConfirm = adaConfirm;
 
     function showBuilderToast(text, action) {
       return showAppToast(text, 'info', action, 'fa-pen-ruler');
