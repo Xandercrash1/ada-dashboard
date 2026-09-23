@@ -4838,13 +4838,103 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       }
     }
 
+    // Size classes for one card. Shared by renderHomepage and the in-place
+    // resize path so the two can never disagree (fb-1789015021730).
+    function widgetSizeClasses(w, bodyWidget) {
+      const html = w.html || '';
+      let span = 'col-span-2'; // default auto is 2 cols
+      if (w.cols) {
+        const colMap = {
+          1: 'col-span-1 sm:col-span-1 lg:col-span-1',
+          2: 'col-span-2 sm:col-span-2 lg:col-span-2',
+          3: 'col-span-2 sm:col-span-2 lg:col-span-3',
+          4: 'col-span-2 sm:col-span-4 lg:col-span-4',
+          5: 'col-span-2 sm:col-span-4 lg:col-span-5',
+          6: 'col-span-2 sm:col-span-4 lg:col-span-6'
+        };
+        span = colMap[w.cols] || 'col-span-2';
+      }
+      let height = '';
+      if (!html.includes('ada-photo-frame') && !html.includes('ada-scratchpad') && !html.includes('ada-doc-body')) {
+        const heights = { 1: 'min-h-[120px]', 2: 'min-h-[256px]', 3: 'min-h-[392px]', 4: 'min-h-[528px]', 5: 'min-h-[664px]', 6: 'min-h-[800px]' };
+        height = heights[w.rows || 1] || 'h-[120px]';
+      }
+      if (bodyWidget && w.id === bodyWidget.id) {
+        span = 'w-full';
+      } else if (bodyWidget) {
+        const sbColMap = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-2', 4: 'col-span-2', 5: 'col-span-2', 6: 'col-span-2' };
+        span = sbColMap[w.cols || 2];
+      }
+      return { span, height };
+    }
+
+    function currentBodyWidget() {
+      return (homepageDoc && homepageDoc.widgets || []).find(w => w && !w.hidden && w.html && w.html.includes('ada-doc-body'));
+    }
+
     // --- PRECISE DRAG TO RESIZE ---
+    // The drag only swaps the resized card's size classes in place; it used to
+    // call renderHomepage() on every grid step, rebuilding every card and
+    // re-mounting every web component mid-drag. Saved once, on release.
     let resizingWidget = null;
     let resizeStartX = 0;
     let resizeStartY = 0;
     let initialCols = 2;
     let initialRows = 1;
     let colWidth = 100;
+    const RESIZE_ROW_PITCH = 136;   // min-h steps: 120, 256, 392… = 120px + 16px gap
+    let resizeGuide = null;
+
+    function applyWidgetSizeInPlace(w, before) {
+      const c = document.getElementById(w.id + '-container');
+      const m = c && c.querySelector('.widget-measurer');
+      if (!c || !m) { renderHomepage(); return; }
+      const after = widgetSizeClasses(w, currentBodyWidget());
+      const toks = (str) => str.split(/\s+/).filter(t => t && t !== 'w-full');
+      c.classList.remove(...toks(before.span)); c.classList.add(...toks(after.span));
+      m.classList.remove(...toks(before.height)); m.classList.add(...toks(after.height));
+    }
+
+    // Faint column + row guide over the grid while dragging, so snapping is
+    // visible instead of guessed. Row lines mark where the card's bottom edge
+    // snaps to.
+    function showResizeGuide(container) {
+      hideResizeGuide();
+      const grid = container.parentElement;
+      if (!grid) return;
+      const cs = getComputedStyle(grid);
+      const guide = document.createElement('div');
+      guide.id = 'resize-grid-guide';
+      guide.className = 'pointer-events-none absolute inset-0 z-30';
+      let restorePos = false;
+      if (cs.position === 'static') { grid.style.position = 'relative'; restorePos = true; }
+      let html = '';
+      if (cs.display === 'grid') {
+        const tracks = cs.gridTemplateColumns.split(' ').map(parseFloat).filter(n => !isNaN(n));
+        const gap = parseFloat(cs.columnGap) || 0;
+        let x = 0;
+        tracks.forEach(t => {
+          html += `<div class="absolute top-0 bottom-0 rounded-lg border border-dashed border-indigo-400/40 bg-indigo-500/5" style="left:${x}px;width:${t}px"></div>`;
+          x += t + gap;
+        });
+      }
+      const top = container.getBoundingClientRect().top - grid.getBoundingClientRect().top;
+      for (let k = 0; k < 8; k++) {
+        html += `<div class="absolute left-0 right-0 border-t border-dashed border-indigo-400/50" style="top:${top + 120 + RESIZE_ROW_PITCH * k}px"></div>`;
+      }
+      guide.innerHTML = html;
+      grid.appendChild(guide);
+      container.classList.add('ring-2', 'ring-indigo-400', 'rounded-xl');
+      resizeGuide = { el: guide, grid, container, restorePos };
+    }
+
+    function hideResizeGuide() {
+      if (!resizeGuide) return;
+      resizeGuide.el.remove();
+      if (resizeGuide.restorePos) resizeGuide.grid.style.position = '';
+      resizeGuide.container.classList.remove('ring-2', 'ring-indigo-400', 'rounded-xl');
+      resizeGuide = null;
+    }
 
     function startWidgetResize(e, id) {
       e.preventDefault();
@@ -4856,24 +4946,21 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       resizeStartX = e.clientX;
       resizeStartY = e.clientY;
       
-      const el = document.getElementById('home-widgets').children[homepageDoc.widgets.filter(x => !x.hidden).indexOf(w)];
-      if (el) {
-         const gridEl = document.getElementById('home-widgets');
-         const style = window.getComputedStyle(gridEl);
-         let cols = 6;
-         if (style.gridTemplateColumns && style.gridTemplateColumns !== 'none') {
-             cols = style.gridTemplateColumns.split(' ').length;
-         }
-         colWidth = Math.max(50, gridEl.clientWidth / cols);
-         
-         const mCol = el.className.match(/col-span-(\d+)/);
-         const mRow = el.className.match(/row-span-(\d+)/);
-         initialCols = mCol ? parseInt(mCol[1]) : (w.cols || 2);
-         initialRows = mRow ? parseInt(mRow[1]) : (w.rows || 1);
-      } else {
-         initialCols = w.cols || 2;
-         initialRows = w.rows || 1;
-         colWidth = 100;
+      // Start from the widget's own cols/rows. Reading them off the first
+      // col-span-N class gave the phone-width value, so a 6-wide widget
+      // "started" at 2.
+      initialCols = w.cols || 2;
+      initialRows = w.rows || 1;
+      colWidth = 100;
+      const el = document.getElementById(id + '-container');
+      const gridEl = el && el.parentElement;
+      if (gridEl) {
+        // Snap to the real grid (the inner grid-cols-2/4/6 element), one
+        // column track + gap per step.
+        const style = window.getComputedStyle(gridEl);
+        const tracks = style.display === 'grid' ? style.gridTemplateColumns.split(' ').map(parseFloat).filter(n => !isNaN(n)) : [];
+        if (tracks.length) colWidth = Math.max(50, tracks[0] + (parseFloat(style.columnGap) || 0));
+        showResizeGuide(el);
       }
       
       // Pointer events cover mouse, pen and touch (fb-1788986893122); the
@@ -4891,16 +4978,17 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const dy = e.clientY - resizeStartY;
       
       let colShift = Math.round(dx / colWidth);
-      let rowShift = Math.round(dy / 120);
+      let rowShift = Math.round(dy / RESIZE_ROW_PITCH);
       
       let newCols = Math.max(1, Math.min(6, initialCols + colShift));
-      let newRows = Math.max(1, initialRows + rowShift);
+      let newRows = Math.max(1, Math.min(6, initialRows + rowShift));
       
       if (resizingWidget.cols !== newCols || resizingWidget.rows !== newRows) {
+        const before = widgetSizeClasses(resizingWidget, currentBodyWidget());
         resizingWidget.cols = newCols;
         resizingWidget.rows = newRows;
         delete resizingWidget.size; 
-        renderHomepage();
+        applyWidgetSizeInPlace(resizingWidget, before);
       }
     }
 
@@ -4911,9 +4999,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       
+      hideResizeGuide();
       if (resizingWidget) {
+        const changed = (resizingWidget.cols || 2) !== initialCols || (resizingWidget.rows || 1) !== initialRows;
         resizingWidget = null;
-        await saveHomepageDoc();
+        if (changed) await saveHomepageDoc();
       }
     }
 
@@ -5112,32 +5202,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           </div>
         ` : '';
 
-        let spanClass = "col-span-2"; // default auto is 2 cols
-        if (w.cols) {
-          const colMap = {
-            1: 'col-span-1 sm:col-span-1 lg:col-span-1',
-            2: 'col-span-2 sm:col-span-2 lg:col-span-2',
-            3: 'col-span-2 sm:col-span-2 lg:col-span-3',
-            4: 'col-span-2 sm:col-span-4 lg:col-span-4',
-            5: 'col-span-2 sm:col-span-4 lg:col-span-5',
-            6: 'col-span-2 sm:col-span-4 lg:col-span-6'
-          };
-          spanClass = colMap[w.cols] || 'col-span-2';
-        }
-
-        let heightClass = "";
-        if (!w.html.includes('ada-photo-frame') && !w.html.includes('ada-scratchpad') && !w.html.includes('ada-doc-body')) {
-           const rows = w.rows || 1;
-           const heights = { 1: 'min-h-[120px]', 2: 'min-h-[256px]', 3: 'min-h-[392px]', 4: 'min-h-[528px]', 5: 'min-h-[664px]', 6: 'min-h-[800px]' };
-           heightClass = heights[rows] || 'h-[120px]';
-        }
-
-        if (bodyWidget && w.id === bodyWidget.id) {
-           spanClass = "w-full";
-        } else if (bodyWidget) {
-           const sbColMap = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-2', 4: 'col-span-2', 5: 'col-span-2', 6: 'col-span-2' };
-           spanClass = sbColMap[w.cols || 2];
-        }
+        const { span: spanClass, height: heightClass } = widgetSizeClasses(w, bodyWidget);
 
         const dragAttrs = (window.isEditingLayout && !isBody) ? `draggable="true" ondragstart="handleWidgetDragStart(event, '${w.id}')" ondragover="handleWidgetDragOver(event)" ondrop="handleWidgetDrop(event, '${w.id}')" ondragenter="handleWidgetDragEnter(event)" ondragleave="handleWidgetDragLeave(event)" ondragend="handleWidgetDragEnd(event)"` : '';
         
