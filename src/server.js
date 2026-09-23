@@ -1268,6 +1268,8 @@ app.post('/api/pages/:id/publish', async (req, res) => {
     html = html.replace(/<meta name="generator"[^>]*>\n?/i, '')
                .replace('<meta name="viewport"', '<meta name="robots" content="noindex, nofollow">\n<meta name="viewport"');
     fs.writeFileSync(path.join(dir, 'index.html'), html);
+    // Unknown paths get a plain 404 instead of Cloudflare's fall-back-to-index.
+    fs.writeFileSync(path.join(dir, '404.html'), '<!DOCTYPE html><meta charset="utf-8"><meta name="robots" content="noindex"><title>Not found</title><p style="font-family:system-ui;padding:2rem">Not found.</p>');
     fs.writeFileSync(path.join(dir, '_headers'), '/*\n  X-Robots-Tag: noindex, nofollow\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n');
     // Project: create on first publish (unguessable name = unlisted link).
     if (!(pg.published && pg.published.project)) {
