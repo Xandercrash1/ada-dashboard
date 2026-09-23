@@ -631,6 +631,12 @@ function sanitizeHomepageWidget(w, index) {
     html: typeof w.html === 'string' ? w.html.slice(0, 20000) : '',
     hidden: w.hidden === true
   };
+  // Per-widget settings a component persists itself (e.g. <ada-todo> section
+  // toggles). Was silently dropped here, so they never survived a homepage
+  // save or an import. Plain object, size-capped.
+  if (w.config && typeof w.config === 'object' && !Array.isArray(w.config)) {
+    try { if (JSON.stringify(w.config).length <= 4000) clean.config = JSON.parse(JSON.stringify(w.config)); } catch (e) { /* unserializable -> drop */ }
+  }
   if (w.link && typeof w.link === 'object') {
     const link = {};
     if (typeof w.link.label === 'string') link.label = w.link.label.slice(0, 80);
@@ -866,19 +872,28 @@ app.get('/api/pages', (req, res) => {
 });
 
 app.post('/api/pages', (req, res) => {
-  const { id, title, icon } = req.body;
+  const { id, title, icon, templateId } = req.body;
   if (!id || !title) return res.status(400).json({ error: 'Missing id or title' });
   if (id === 'home' || id === 'server' || id === 'todo') return res.status(400).json({ error: 'Reserved id' });
   
   const pages = readPagesRegistry();
   if (pages.some(p => p.id === id)) return res.status(400).json({ error: 'Page ID already exists' });
+
+  // Optional starting content (fb-1789015021674). Resolved BEFORE the page is
+  // registered so a bad template id cannot leave a half-created page behind.
+  let startDoc = { widgets: [] };
+  if (templateId) {
+    const tpl = readTemplate(templateId);
+    if (!tpl) return res.status(400).json({ error: 'Template not found' });
+    startDoc = { ...tpl.doc, updatedAt: new Date().toISOString() };
+  }
   
   pages.push({ id, title, icon: icon || 'fa-file' });
   writePagesRegistry(pages);
   
   const docPath = getPageDocPath(id);
-  if (!fs.existsSync(docPath)) {
-    fs.writeFileSync(docPath, JSON.stringify({ widgets: [] }, null, 2));
+  if (!fs.existsSync(docPath) || templateId) {
+    fs.writeFileSync(docPath, JSON.stringify(startDoc, null, 2));
   }
   
   res.json({ success: true, page: { id, title, icon } });
@@ -931,6 +946,95 @@ app.post('/api/pages/:id/content', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+
+// --- WIDGET IMPORT & PAGE TEMPLATES (fb-1789015021674) ---
+// A pasted widget goes through the SAME whitelist as a saved homepage widget
+// (sanitizeHomepageWidget: theme/accent whitelisted, html length-capped), then
+// gets a fresh id so it can never collide with one already on the page.
+app.post('/api/widgets/sanitize', (req, res) => {
+  const w = req.body && req.body.widget;
+  const clean = sanitizeHomepageWidget(w, 0);
+  if (!clean) return res.status(400).json({ error: 'Not a widget — it needs at least a title or html.' });
+  clean.id = 'widget-' + Date.now() + Math.floor(Math.random() * 1000);
+  res.json({ widget: JSON.parse(JSON.stringify(clean)) }); // drops undefined keys
+});
+
+// Templates: data/templates/<tpl-epoch-ms>.json = { id, name, createdAt,
+// sourcePage, doc: { widgets, pageTheme?, glanceTheme? } }. Widget ids are
+// kept as-is: only one page renders at a time, and DocBody [widget: id]
+// shortcodes point at them.
+const TEMPLATES_DIR = path.join(DATA_DIR, 'templates');
+const TEMPLATE_ID_RE = /^tpl-\d{10,16}$/;
+const TEMPLATE_MAX_WIDGETS = 100;
+
+function sanitizeTemplateDoc(raw) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const widgets = (Array.isArray(src.widgets) ? src.widgets : [])
+    .slice(0, TEMPLATE_MAX_WIDGETS).map(sanitizeHomepageWidget).filter(Boolean)
+    .map(w => JSON.parse(JSON.stringify(w)));
+  const themed = sanitizeHomepage({ pageTheme: src.pageTheme, glanceTheme: src.glanceTheme });
+  const doc = { widgets };
+  if (themed.pageTheme) doc.pageTheme = themed.pageTheme;
+  if (src.glanceTheme && themed.glanceTheme) doc.glanceTheme = themed.glanceTheme;
+  return doc;
+}
+
+function readTemplate(id) {
+  if (typeof id !== 'string' || !TEMPLATE_ID_RE.test(id)) return null;
+  const file = path.join(TEMPLATES_DIR, `${id}.json`);
+  if (!fs.existsSync(file)) return null;
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return null; }
+}
+
+app.get('/api/templates', (req, res) => {
+  try {
+    if (!fs.existsSync(TEMPLATES_DIR)) return res.json([]);
+    const list = fs.readdirSync(TEMPLATES_DIR)
+      .filter(f => TEMPLATE_ID_RE.test(f.replace(/\.json$/, '')))
+      .map(f => readTemplate(f.replace(/\.json$/, '')))
+      .filter(Boolean)
+      .map(t => ({ id: t.id, name: t.name, createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: (t.doc.widgets || []).length }))
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/templates/:id', (req, res) => {
+  const t = readTemplate(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Template not found' });
+  res.json(t);
+});
+
+app.post('/api/templates', (req, res) => {
+  const { name, doc, sourcePage } = req.body || {};
+  const cleanName = typeof name === 'string' ? name.trim().slice(0, 80) : '';
+  if (!cleanName) return res.status(400).json({ error: 'Template name required' });
+  const cleanDoc = sanitizeTemplateDoc(doc);
+  if (!cleanDoc.widgets.length) return res.status(400).json({ error: 'This page has no widgets to save' });
+  const t = {
+    id: 'tpl-' + Date.now(),
+    name: cleanName,
+    createdAt: new Date().toISOString(),
+    sourcePage: typeof sourcePage === 'string' ? sourcePage.slice(0, 64) : null,
+    doc: cleanDoc
+  };
+  try {
+    if (!fs.existsSync(TEMPLATES_DIR)) fs.mkdirSync(TEMPLATES_DIR);
+    fs.writeFileSync(path.join(TEMPLATES_DIR, `${t.id}.json`), JSON.stringify(t, null, 2));
+    res.status(201).json({ id: t.id, name: t.name, createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: cleanDoc.widgets.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/templates/:id', (req, res) => {
+  if (!readTemplate(req.params.id)) return res.status(404).json({ error: 'Template not found' });
+  fs.unlinkSync(path.join(TEMPLATES_DIR, `${req.params.id}.json`));
+  res.json({ success: true });
 });
 
 

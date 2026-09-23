@@ -248,6 +248,7 @@
           <!-- LAYOUT UNDO / REDO (fb-1789015021616) — edit mode only; Cmd/Ctrl-Z and Shift-Cmd-Z also work -->
           <button onclick="undoLayout()" id="undo-layout-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Undo layout change (Cmd-Z)"><i class="fa-solid fa-rotate-left"></i></button>
           <button onclick="redoLayout()" id="redo-layout-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Redo layout change (Shift-Cmd-Z)"><i class="fa-solid fa-rotate-right"></i></button>
+          <button onclick="savePageAsTemplate()" id="save-template-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Save this page as a template"><i class="fa-solid fa-clone"></i></button>
           <!-- PAGE THEME PRESET (fb-1788928004000) — edit mode only; applies one cohesive theme/accent to every widget on this page -->
           <select id="page-theme-select" onchange="applyPageTheme(this.value)" title="Page theme preset" class="hidden px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-300 hover:text-white hover:border-gray-500 text-xs font-medium focus:outline-none focus:border-indigo-500 transition-all">
             <option value="custom">Theme: Custom</option>
@@ -2309,15 +2310,138 @@
        }
     }
 
+    // ---- Page templates + widget import (fb-1789015021674) ----
+    let pageTemplates = [];
+
+    async function loadPageTemplates() {
+      try {
+        const res = await fetch('/api/templates');
+        const list = await res.json();
+        pageTemplates = Array.isArray(list) ? list : [];
+      } catch (e) { pageTemplates = []; }
+      const sel = document.getElementById('new-page-template');
+      if (!sel) return;
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">Blank page</option>' + pageTemplates.map(t =>
+        `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)} (${t.widgetCount} widget${t.widgetCount === 1 ? '' : 's'})</option>`).join('');
+      sel.value = pageTemplates.some(t => t.id === cur) ? cur : '';
+      onNewPageTemplateChange();
+    }
+
+    function onNewPageTemplateChange() {
+      const sel = document.getElementById('new-page-template');
+      const t = pageTemplates.find(t => t.id === sel.value);
+      document.getElementById('new-page-template-delete').classList.toggle('hidden', !t);
+      document.getElementById('new-page-template-hint').textContent = t
+        ? `Saved ${new Date(t.createdAt).toLocaleDateString()}${t.sourcePage ? ' from ' + t.sourcePage : ''}.`
+        : (pageTemplates.length ? '' : 'No templates yet — use the clone button in Edit Layout to save one.');
+    }
+
+    async function deleteSelectedTemplate() {
+      const sel = document.getElementById('new-page-template');
+      const t = pageTemplates.find(t => t.id === sel.value);
+      if (!t) return;
+      if (!await adaConfirm({ title: 'Delete template', message: `Delete the template "${t.name}"? Pages already made from it are not affected.`, confirmLabel: 'Delete', danger: true })) return;
+      const res = await fetch(`/api/templates/${encodeURIComponent(t.id)}`, { method: 'DELETE' });
+      if (!res.ok) showAppToast('Could not delete that template', 'error');
+      sel.value = '';
+      await loadPageTemplates();
+    }
+
+    // Resolves { title, templateId } or null on Cancel / Escape / backdrop.
+    function askNewPage() {
+      return new Promise((resolve) => {
+        const m = document.getElementById('new-page-modal');
+        const input = document.getElementById('new-page-title');
+        const ok = document.getElementById('new-page-ok');
+        const cancel = document.getElementById('new-page-cancel');
+        input.value = '';
+        document.getElementById('new-page-template').value = '';
+        m.classList.remove('hidden');
+        loadPageTemplates();
+        setTimeout(() => input.focus(), 30);
+        const done = (val) => { cleanup(); m.classList.add('hidden'); resolve(val); };
+        const submit = () => done({ title: input.value.trim(), templateId: document.getElementById('new-page-template').value || null });
+        const onKey = (e) => {
+          if (m.classList.contains('hidden')) return;
+          if (!document.getElementById('ada-prompt-modal').classList.contains('hidden')) return; // a confirm is on top
+          if (e.key === 'Escape') done(null);
+          else if (e.key === 'Enter' && e.target === input) submit();
+        };
+        const onCancel = () => done(null);
+        const onBackdrop = (e) => { if (e.target === m) done(null); };
+        function cleanup() {
+          document.removeEventListener('keydown', onKey);
+          ok.removeEventListener('click', submit);
+          cancel.removeEventListener('click', onCancel);
+          m.removeEventListener('click', onBackdrop);
+        }
+        document.addEventListener('keydown', onKey);
+        ok.addEventListener('click', submit);
+        cancel.addEventListener('click', onCancel);
+        m.addEventListener('click', onBackdrop);
+      });
+    }
+
+    async function savePageAsTemplate() {
+      if (!homepageDoc) return;
+      if (!(homepageDoc.widgets || []).length) { showAppToast('This page has no widgets to save as a template.', 'warn'); return; }
+      const page = currentCanvasPage === 'home' ? { title: 'Home' } : (customPages.find(p => p.id === currentCanvasPage) || { title: currentCanvasPage });
+      const name = (await adaPrompt({ title: 'Save page as template', message: 'Template name', defaultValue: page.title, confirmLabel: 'Save template' }) || '').trim();
+      if (!name) return;
+      try {
+        const res = await fetch('/api/templates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, sourcePage: currentCanvasPage, doc: { widgets: homepageDoc.widgets, pageTheme: homepageDoc.pageTheme, glanceTheme: homepageDoc.glanceTheme } })
+        });
+        const data = await res.json();
+        if (!res.ok) { showAppToast(data.error || 'Could not save the template', 'error'); return; }
+        showAppToast(`Saved template "${data.name}" (${data.widgetCount} widget${data.widgetCount === 1 ? '' : 's'})`, 'success');
+      } catch (e) {
+        showAppToast('Could not save the template', 'error');
+      }
+    }
+
+    async function importWidgetJson() {
+      if (!homepageDoc) return;
+      const text = await adaPrompt({ title: 'Paste widget JSON', message: "Paste the JSON a widget's Export button copied.", placeholder: '{ "html": "<ada-clock></ada-clock>", ... }', confirmLabel: 'Import' });
+      if (text === null || !text.trim()) return;
+      let parsed;
+      try { parsed = JSON.parse(text); } catch (e) { showAppToast("That isn't valid JSON — copy it again with Export.", 'error'); return; }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { showAppToast('Expected one widget object.', 'error'); return; }
+      let data;
+      try {
+        const res = await fetch('/api/widgets/sanitize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ widget: parsed }) });
+        data = await res.json();
+        if (!res.ok) { showAppToast(data.error || 'Not a valid widget', 'error'); return; }
+      } catch (e) { showAppToast('Import failed — server unreachable', 'error'); return; }
+      const w = data.widget;
+      if ((w.html || '').includes('ada-doc-body') && homepageDoc.widgets.some(x => (x.html || '').includes('ada-doc-body'))) {
+        showBuilderToast('A page can only have one document body.');
+        return;
+      }
+      if (currentCanvasPage === 'home' && homepageDoc.widgets.length >= 24) {
+        showAppToast('Home holds at most 24 widgets — remove one first.', 'warn');
+        return;
+      }
+      homepageDoc.widgets.push(w);
+      closeWidgetLibrary();
+      renderHomepage();
+      await saveHomepageDoc();
+      showBuilderToast('Widget imported');
+    }
+
     async function createNewPage() {
-       const title = (await adaPrompt({ title: 'New page', message: 'Page title', placeholder: 'e.g. Roadmap', confirmLabel: 'Create' }) || '').trim();
+       const choice = await askNewPage();
+       const title = choice ? choice.title : '';
        if (!title) return;
        const id = title.toLowerCase().replace(/[^a-z0-9]/g, '-');
        try {
          const res = await fetch('/api/pages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, title, icon: 'fa-file' })
+            body: JSON.stringify({ id, title, icon: 'fa-file', templateId: choice.templateId || undefined })
          });
          if (res.ok) {
            await loadCustomPages();
@@ -4865,6 +4989,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const u = document.getElementById('undo-layout-btn'), r = document.getElementById('redo-layout-btn');
       if (u) { u.classList.toggle('hidden', !window.isEditingLayout); u.disabled = layoutHistory.past.length === 0; u.classList.toggle('opacity-40', u.disabled); }
       if (r) { r.classList.toggle('hidden', !window.isEditingLayout); r.disabled = layoutHistory.future.length === 0; r.classList.toggle('opacity-40', r.disabled); }
+      const t = document.getElementById('save-template-btn');
+      if (t) t.classList.toggle('hidden', !window.isEditingLayout);
     }
     async function restoreLayoutSnapshot(snap) {
       // Keep the live version stamp so the optimistic save is not refused.
@@ -5786,6 +5912,29 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
   <!-- Widget Edit Modal -->
   <!-- IN-APP PROMPT — replaces window.prompt() (fb-1789015021644) -->
+  <!-- New page: title + optional template (fb-1789015021674) -->
+  <div id="new-page-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4">
+    <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-3">
+      <h3 class="text-white font-bold text-sm">New page</h3>
+      <div>
+        <label for="new-page-title" class="block text-xs text-gray-400 mb-1">Page title</label>
+        <input id="new-page-title" type="text" autocomplete="off" placeholder="e.g. Roadmap" class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+      </div>
+      <div>
+        <label for="new-page-template" class="block text-xs text-gray-400 mb-1">Start from</label>
+        <div class="flex gap-2">
+          <select id="new-page-template" onchange="onNewPageTemplateChange()" class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"><option value="">Blank page</option></select>
+          <button id="new-page-template-delete" onclick="deleteSelectedTemplate()" title="Delete this template" class="hidden px-3 rounded-lg text-gray-400 hover:text-rose-400 border border-white/10"><i class="fa-solid fa-trash"></i></button>
+        </div>
+        <p id="new-page-template-hint" class="text-[11px] text-gray-500 mt-1"></p>
+      </div>
+      <div class="flex justify-end gap-2 pt-1">
+        <button id="new-page-cancel" class="px-4 py-2 rounded-lg text-xs font-medium text-gray-400 hover:text-white">Cancel</button>
+        <button id="new-page-ok" class="px-4 py-2 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500">Create</button>
+      </div>
+    </div>
+  </div>
+
   <div id="ada-prompt-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4">
     <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-3">
       <h3 id="ada-prompt-title" class="text-white font-bold text-sm"></h3>
@@ -5899,6 +6048,10 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       <div class="p-5 flex-1 overflow-y-auto custom-scrollbar">
         <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
           <!-- Library Items -->
+          <button onclick="importWidgetJson()" class="col-span-full text-left bg-black/20 border border-dashed border-white/10 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-colors p-3 rounded-xl flex items-center gap-3">
+            <div class="text-emerald-400 text-lg flex-shrink-0 w-8 text-center"><i class="fa-solid fa-paste"></i></div>
+            <div><div class="text-white font-semibold text-sm">Paste widget JSON</div><div class="text-gray-400 text-xs">Import a widget copied with Export</div></div>
+          </button>
           <button onclick="spawnWidget('doc-body')" class="col-span-full text-left bg-gradient-to-r from-indigo-900/30 to-purple-900/30 border border-indigo-500/30 hover:border-indigo-400 hover:from-indigo-900/50 hover:to-purple-900/50 transition-all p-4 rounded-xl flex items-center gap-4">
             <div class="text-indigo-400 text-2xl flex-shrink-0 w-10 text-center"><i class="fa-solid fa-file-lines"></i></div>
             <div>
