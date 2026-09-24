@@ -737,6 +737,19 @@ function sanitizeTokens(raw) {
   return Object.keys(out).length ? out : undefined;
 }
 
+// Page SEO settings (fb-1790206467753): plain text, safe image URLs, a flag.
+function sanitizePageMeta(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const txt = (v, n) => typeof v === 'string' ? v.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, n) : '';
+  const out = {};
+  if (txt(raw.title, 70)) out.title = txt(raw.title, 70);
+  if (txt(raw.description, 170)) out.description = txt(raw.description, 170);
+  if (typeof raw.image === 'string' && SAFE_IMAGE_URL_RE.test(raw.image.trim())) out.image = raw.image.trim();
+  if (typeof raw.favicon === 'string' && SAFE_IMAGE_URL_RE.test(raw.favicon.trim())) out.favicon = raw.favicon.trim();
+  if (raw.index === true) out.index = true;
+  return Object.keys(out).length ? out : undefined;
+}
+
 // Custom-page docs keep their free-form widgets, but the Page Builder fields
 // go through the same sanitizers as the homepage (fb-1790201502182). Returns
 // what was dropped so the Designer can be told.
@@ -762,6 +775,7 @@ function sanitizePageDocFields(doc) {
     if (lost.length) report.push(`tokens: dropped invalid ${lost.join(', ')}`);
     if (tk) doc.tokens = tk; else delete doc.tokens;
   }
+  if ('meta' in doc) { const mt = sanitizePageMeta(doc.meta); if (mt) doc.meta = mt; else delete doc.meta; }
   if (!Array.isArray(doc.widgets)) doc.widgets = [];
   doc.widgets.forEach(w => { if (w && w.section !== undefined && !(typeof w.section === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(w.section))) { delete w.section; report.push(`widget ${w.id}: invalid section id removed`); } });
   return { doc, report };
@@ -1148,10 +1162,11 @@ function restrictWidget(w, i) {
 }
 function restrictPageDoc(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  const { doc, report } = sanitizePageDocFields({ pageSections: src.pageSections, tokens: src.tokens, widgets: [] });
+  const { doc, report } = sanitizePageDocFields({ pageSections: src.pageSections, tokens: src.tokens, meta: src.meta, widgets: [] });
   const out = { widgets: (Array.isArray(src.widgets) ? src.widgets : []).slice(0, 60).map(restrictWidget).filter(Boolean) };
   if (doc.pageSections) out.pageSections = doc.pageSections;
   if (doc.tokens) out.tokens = doc.tokens;
+  if (doc.meta) out.meta = doc.meta;
   const themed = sanitizeHomepage({ pageTheme: src.pageTheme, glanceTheme: src.glanceTheme });
   if (themed.pageTheme) out.pageTheme = themed.pageTheme;
   if (src.glanceTheme && themed.glanceTheme) out.glanceTheme = themed.glanceTheme;
@@ -1292,12 +1307,17 @@ function validatePublishHtml(html) {
   // Inside tags only: escaped text such as "&lt;img onerror=…&gt;" is harmless words.
   if (/<[a-z][^>]*\son[a-z]+\s*=/i.test(html)) return 'Published pages may not contain event handlers.';
   if (/(href|src)\s*=\s*["']?\s*(javascript|data|vbscript):/i.test(html)) return 'Published pages may not contain script links.';
+  // Accessibility (fb-1790206467753): every image needs a description.
+  const imgs = html.match(/<img\b[^>]*>/gi) || [];
+  const noAlt = imgs.filter(t => !/\salt="[^"]*\S[^"]*"/i.test(t));
+  if (noAlt.length) return `${noAlt.length} image${noAlt.length === 1 ? ' needs' : 's need'} a description before publishing (gallery captions, image descriptions, team names, logo names).`;
   return null;
 }
 
 // Bundle a set of pages into dir: /media images copied to assets/, page:<id>
 // links rewritten to the site's file names (or '#'), noindex + headers + 404.
-function bundlePublishDir(dir, filesByName, pageLinkMap, warnings) {
+function bundlePublishDir(dir, filesByName, pageLinkMap, warnings, opts) {
+  const o = opts || {};
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
   for (const [fileName, raw] of Object.entries(filesByName)) {
@@ -1318,12 +1338,14 @@ function bundlePublishDir(dir, filesByName, pageLinkMap, warnings) {
     });
     const dashLinks = [...new Set((html.match(/href="\/(?!\/)[^"]*"/g) || []).map(x => x.slice(6, -1)))];
     if (dashLinks.length) warnings.push(`${fileName}: links that point at the dashboard (visitors cannot open them): ${dashLinks.slice(0, 8).join(', ')}`);
-    html = html.replace(/<meta name="generator"[^>]*>\n?/i, '')
-               .replace('<meta name="viewport"', '<meta name="robots" content="noindex, nofollow">\n<meta name="viewport"');
+    // Social previews need absolute image URLs.
+    if (o.siteUrl) html = html.replace(/(<meta (?:property="og:image"|name="twitter:image") content=")assets\//g, `$1${o.siteUrl}/assets/`);
+    html = html.replace(/<meta name="generator"[^>]*>\n?/i, '');
+    if (!o.allowIndex) html = html.replace('<meta name="viewport"', '<meta name="robots" content="noindex, nofollow">\n<meta name="viewport"');
     fs.writeFileSync(path.join(dir, fileName), html);
   }
   fs.writeFileSync(path.join(dir, '404.html'), '<!DOCTYPE html><meta charset="utf-8"><meta name="robots" content="noindex"><title>Not found</title><p style="font-family:system-ui;padding:2rem">Not found.</p>');
-  fs.writeFileSync(path.join(dir, '_headers'), '/*\n  X-Robots-Tag: noindex, nofollow\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n');
+  fs.writeFileSync(path.join(dir, '_headers'), `/*\n${o.allowIndex ? '' : '  X-Robots-Tag: noindex, nofollow\n'}  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n`);
 }
 async function deployToPages(c, project, dir, isNew) {
   if (isNew) {
@@ -1403,7 +1425,7 @@ app.post('/api/sites/:id/publish', async (req, res) => {
   const project = (site.published && site.published.project) || projectNameFor(site.name);
   const dir = path.join(PUBLISH_TMP, project);
   try {
-    bundlePublishDir(dir, byName, linkMap, warnings);
+    bundlePublishDir(dir, byName, linkMap, warnings, { siteUrl: `https://${project}.pages.dev`, allowIndex: req.body.index === true });
     const url = await deployToPages(c, project, dir, !(site.published && site.published.project));
     site.published = { project, url, publishedAt: new Date().toISOString(), by: ownerName(req) };
     writeSites(all);
@@ -1435,7 +1457,7 @@ app.post('/api/pages/:id/publish', async (req, res) => {
   const project = (pg.published && pg.published.project) || projectNameFor(pg.title || id);
   const dir = path.join(PUBLISH_TMP, project);
   try {
-    bundlePublishDir(dir, { 'index.html': req.body.html }, null, warnings);
+    bundlePublishDir(dir, { 'index.html': req.body.html }, null, warnings, { siteUrl: `https://${project}.pages.dev`, allowIndex: req.body.index === true });
     await deployToPages(c, project, dir, !(pg.published && pg.published.project));
     const url = `https://${project}.pages.dev`;
     pg.published = { project, url, publishedAt: new Date().toISOString(), by: ownerName(req) };

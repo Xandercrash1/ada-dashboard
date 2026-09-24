@@ -289,6 +289,7 @@
           <!-- PAGE THEME PRESET (fb-1788928004000) — edit mode only; applies one cohesive theme/accent to every widget on this page -->
           <button onclick="openPublishDialog()" id="publish-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Publish this page as a public (unlisted) website"><i class="fa-solid fa-globe"></i> <span>Publish</span></button>
           <button onclick="togglePageShared()" id="share-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Share this page with everyone"><i class="fa-solid fa-lock"></i> <span>Private</span></button>
+          <button onclick="openPageSettings()" id="page-settings-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Page settings — title, description, share image"><i class="fa-solid fa-magnifying-glass"></i></button>
           <button onclick="openHistory()" id="history-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Version history"><i class="fa-solid fa-clock-rotate-left"></i></button>
           <button onclick="openDevicePreview()" id="export-preview-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Preview this page as a standalone website"><i class="fa-solid fa-eye"></i></button>
           <button onclick="exportPage('download')" id="export-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Export this page as one HTML file"><i class="fa-solid fa-file-export"></i></button>
@@ -5265,7 +5266,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (t) t.classList.toggle('hidden', !window.isEditingLayout);
       const ps = document.getElementById('page-style-btn');
       if (ps) ps.classList.toggle('hidden', !window.isEditingLayout);
-      ['export-page-btn', 'export-preview-btn', 'history-btn'].forEach(id => { const b = document.getElementById(id); if (b) b.classList.toggle('hidden', !window.isEditingLayout); });
+      ['export-page-btn', 'export-preview-btn', 'history-btn', 'page-settings-btn'].forEach(id => { const b = document.getElementById(id); if (b) b.classList.toggle('hidden', !window.isEditingLayout); });
       if (typeof updatePageAccessUI === 'function') updatePageAccessUI();
     }
     async function restoreLayoutSnapshot(snap) {
@@ -5724,8 +5725,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const pg = currentPageEntry();
       const out = await buildPageExport();
       if (!out) { showAppToast('Add sections first — only sections are published.', 'warn'); return; }
+      if (!await confirmAccessibility(accessibilityReport(out.html, homepageDoc))) return;
       publishModal(`<div class="flex items-center gap-3 text-sm text-gray-300"><i class="fa-solid fa-spinner fa-spin text-emerald-400"></i> Publishing to Cloudflare… (about 10–30 seconds)</div>`);
-      const res = await fetch(`/api/pages/${encodeURIComponent(pg.id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html: out.html }) });
+      const res = await fetch(`/api/pages/${encodeURIComponent(pg.id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html: out.html, index: out.index }) });
       const data = await res.json().catch(() => ({}));
       await loadCustomPages();
       const warn = (data.warnings || []).length ? `<div class="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2">${data.warnings.map(escapeHtml).join('<br>')}</div>` : '';
@@ -5733,6 +5735,74 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       openPublishDialog(`<div class="text-xs text-emerald-300">Live. It can take a minute before the link answers the first time.</div>${warn}`);
       updatePageAccessUI();
     }
+    // ---- Page settings / SEO (fb-1790206467753) ----
+    function openPageSettings() {
+      if (!homepageDoc) return;
+      const mt = homepageDoc.meta || {};
+      const imgField = (id, label, val) => `<div><label for="${id}" class="block text-xs text-gray-400 mb-1">${label}</label><div class="flex gap-2"><input id="${id}" class="${CONFIG_INPUT_CLS}" value="${escapeHtml(val || '')}" placeholder="Upload or choose an image">
+          <button type="button" onclick="pickImageFor('${id}')" class="px-3 rounded-lg text-xs text-gray-200 border border-white/10"><i class="fa-solid fa-images"></i></button>
+          <button type="button" onclick="uploadImageFor('${id}')" class="px-3 rounded-lg text-xs text-white bg-indigo-600"><i class="fa-solid fa-upload"></i></button></div></div>`;
+      const m = publishModal(`
+        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-magnifying-glass text-indigo-400 mr-2"></i>Page settings</h3>
+        <p class="text-xs text-gray-400">How the page looks in browser tabs, search results and link previews (WhatsApp, iMessage, social media).</p>
+        <div><label for="meta-title" class="block text-xs text-gray-400 mb-1">Title <span id="meta-title-n" class="text-gray-500"></span></label><input id="meta-title" maxlength="70" class="${CONFIG_INPUT_CLS}" value="${escapeHtml(mt.title || '')}" placeholder="Defaults to the hero heading"></div>
+        <div><label for="meta-desc" class="block text-xs text-gray-400 mb-1">Description <span id="meta-desc-n" class="text-gray-500"></span></label><textarea id="meta-desc" maxlength="170" rows="3" class="${CONFIG_INPUT_CLS}" placeholder="One or two sentences. Defaults to the hero subheading">${escapeHtml(mt.description || '')}</textarea></div>
+        ${imgField('meta-image', 'Share image (link previews — landscape works best)', mt.image)}
+        ${imgField('meta-favicon', 'Tab icon (favicon — a small square image)', mt.favicon)}
+        <label class="flex items-start gap-2 text-xs text-gray-300"><input type="checkbox" id="meta-index" class="accent-emerald-500 mt-0.5" ${mt.index ? 'checked' : ''}> <span>Let search engines find this page when published. Leave off for pages only meant for people you send the link to.</span></label>
+        <div class="flex justify-end gap-2 pt-1"><button id="meta-cancel" class="px-4 py-2 text-xs text-gray-400 hover:text-white">Cancel</button><button id="meta-save" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">Save</button></div>`);
+      const count = () => { m.querySelector('#meta-title-n').textContent = `${m.querySelector('#meta-title').value.length}/70`; m.querySelector('#meta-desc-n').textContent = `${m.querySelector('#meta-desc').value.length}/170`; };
+      m.querySelector('#meta-title').oninput = count; m.querySelector('#meta-desc').oninput = count; count();
+      m.querySelector('#meta-cancel').onclick = () => m.remove();
+      m.querySelector('#meta-save').onclick = async () => {
+        const v = (id) => m.querySelector(id).value.trim();
+        const meta = { title: v('#meta-title'), description: v('#meta-desc'), image: v('#meta-image'), favicon: v('#meta-favicon'), index: m.querySelector('#meta-index').checked };
+        Object.keys(meta).forEach(k => { if (!meta[k]) delete meta[k]; });
+        if (Object.keys(meta).length) homepageDoc.meta = meta; else delete homepageDoc.meta;
+        m.remove();
+        await saveHomepageDoc();
+        showAppToast('Page settings saved', 'success');
+      };
+    }
+
+    // ---- Accessibility check before publishing (fb-1790206467753) ----
+    function contrastRatio(a, b) {
+      const lum = (hex) => { const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(hex || ''); if (!m) return null; const h = m[1].length === 3 ? m[1].split('').map(c => c + c).join('') : m[1]; const [r, g, bl] = [0, 2, 4].map(i => { const c = parseInt(h.slice(i, i + 2), 16) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * bl; };
+      const la = lum(a), lb = lum(b);
+      if (la === null || lb === null) return null;
+      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    }
+    function accessibilityReport(html, doc, label) {
+      const errors = [], warnings = [];
+      const d = new DOMParser().parseFromString(html, 'text/html');
+      const pre = label ? `${label}: ` : '';
+      const noAlt = [...d.querySelectorAll('img')].filter(i => !(i.getAttribute('alt') || '').trim());
+      if (noAlt.length) errors.push(`${pre}${noAlt.length} image${noAlt.length === 1 ? ' has' : 's have'} no description — add gallery captions, an image description, team names or logo names.`);
+      const h1 = d.querySelectorAll('h1').length;
+      if (h1 === 0) warnings.push(`${pre}no main heading — a Hero section gives the page one (search engines and screen readers use it).`);
+      if (h1 > 1) warnings.push(`${pre}${h1} main headings — keep one Hero per page.`);
+      const emptyLinks = [...d.querySelectorAll('a')].filter(a => !a.textContent.trim() && !a.querySelector('img[alt]')).length;
+      if (emptyLinks) warnings.push(`${pre}${emptyLinks} link${emptyLinks === 1 ? ' has' : 's have'} no text.`);
+      const t = resolvePageTokens(doc || homepageDoc);
+      const c1 = contrastRatio(t.text, t.surface), c2 = contrastRatio(t.muted, t.surface);
+      if (c1 !== null && c1 < 4.5) warnings.push(`${pre}text on the background is hard to read (contrast ${c1.toFixed(1)}:1, aim for 4.5:1) — adjust colours in Page style.`);
+      if (c2 !== null && c2 < 3) warnings.push(`${pre}secondary text is faint (contrast ${c2.toFixed(1)}:1, aim for 3:1).`);
+      return { errors, warnings };
+    }
+    // Resolves true to go ahead; errors block, warnings can be accepted.
+    function confirmAccessibility(report, again) {
+      return new Promise((resolve) => {
+        if (!report.errors.length && !report.warnings.length) return resolve(true);
+        const m = publishModal(`
+          <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-universal-access text-amber-300 mr-2"></i>Before publishing</h3>
+          ${report.errors.length ? `<div class="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg p-2 space-y-1">${report.errors.map(e => `<div><i class="fa-solid fa-circle-xmark mr-1"></i>${escapeHtml(e)}</div>`).join('')}</div>` : ''}
+          ${report.warnings.length ? `<div class="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 space-y-1">${report.warnings.map(e => `<div><i class="fa-solid fa-triangle-exclamation mr-1"></i>${escapeHtml(e)}</div>`).join('')}</div>` : ''}
+          <div class="flex justify-end gap-2 pt-1"><button id="a11y-back" class="px-4 py-2 text-xs text-gray-400 hover:text-white">Go back and fix</button>${report.errors.length ? '' : '<button id="a11y-go" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold">Publish anyway</button>'}</div>`);
+        m.querySelector('#a11y-back').onclick = () => { m.remove(); resolve(false); };
+        const go = m.querySelector('#a11y-go'); if (go) go.onclick = () => resolve(true);
+      });
+    }
+
     // ---- Sites (fb-1790206467703) ----
     let siteDraft = null;
     async function openSiteDialog(note) {
@@ -5816,8 +5886,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           if (!d.tokens && home.tokens) d.tokens = home.tokens;
         }
         const built = await buildPageExport(d, pid);
-        if (!built) throw new Error(`"${(customPages.find(pg => pg.id === pid) || {}).title || pid}" has no sections to publish`);
+        const pgTitle = (customPages.find(pg => pg.id === pid) || {}).title || pid;
+        if (!built) throw new Error(`"${pgTitle}" has no sections to publish`);
         out[pid] = built.html;
+        const rep = accessibilityReport(built.html, d, pgTitle);
+        (out.__report = out.__report || { errors: [], warnings: [] }).errors.push(...rep.errors);
+        out.__report.warnings.push(...rep.warnings);
+        if (pid === site.home) out.__index = built.index;
       }
       return out;
     }
@@ -5825,7 +5900,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       publishModal(`<div class="flex items-center gap-3 text-sm text-gray-300"><i class="fa-solid fa-spinner fa-spin text-emerald-400"></i> Publishing ${site.pages.length} page${site.pages.length === 1 ? '' : 's'} to Cloudflare…</div>`);
       let pages;
       try { pages = await buildSiteExports(site); } catch (e) { openSiteDialog(`<div class="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg p-2">${escapeHtml(e.message)}</div>`); return; }
-      const res = await fetch(`/api/sites/${encodeURIComponent(site.id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pages }) });
+      const report = pages.__report, index = pages.__index === true;
+      delete pages.__report; delete pages.__index;
+      if (!await confirmAccessibility(report)) { siteDraft = null; openSiteDialog(); return; }
+      publishModal(`<div class="flex items-center gap-3 text-sm text-gray-300"><i class="fa-solid fa-spinner fa-spin text-emerald-400"></i> Publishing ${site.pages.length} page${site.pages.length === 1 ? '' : 's'} to Cloudflare…</div>`);
+      const res = await fetch(`/api/sites/${encodeURIComponent(site.id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pages, index }) });
       const data = await res.json().catch(() => ({}));
       const warn = (data.warnings || []).length ? `<div class="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2">${data.warnings.map(escapeHtml).join('<br>')}</div>` : '';
       siteDraft = null;
@@ -6045,8 +6124,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const fontLink = fonts.length ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?${[...new Set(fonts)].map(f => 'family=' + f).join('&')}&display=swap">` : '';
         const pageInfo = customPages.find(pg => pg.id === pageId);
         const hero = secs.find(x => x.type === 'hero');
-        const title = (hero && hero.props && hero.props.heading) || (pageInfo ? pageInfo.title : 'Page');
-        const desc = (hero && hero.props && hero.props.subheading) || '';
+        const meta = (doc && doc.meta) || {};
+        const title = meta.title || (hero && hero.props && hero.props.heading) || (pageInfo ? pageInfo.title : 'Page');
+        const desc = meta.description || (hero && hero.props && hero.props.subheading) || '';
+        const imgOk = (u) => typeof u === 'string' && SAFE_IMG_URL.test(u);
+        const social = `<meta property="og:type" content="website">\n<meta property="og:title" content="${escapeHtml(title)}">${desc ? `\n<meta property="og:description" content="${escapeHtml(desc)}">` : ''}${imgOk(meta.image) ? `\n<meta property="og:image" content="${escapeHtml(meta.image)}">\n<meta name="twitter:card" content="summary_large_image">\n<meta name="twitter:image" content="${escapeHtml(meta.image)}">` : ''}${imgOk(meta.favicon) ? `\n<link rel="icon" href="${escapeHtml(meta.favicon)}">` : ''}`;
         const pageBg = /^#/.test(t.surface || '') ? t.surface : '#ffffff';
         const html = `<!DOCTYPE html>
 <html lang="en">
@@ -6055,6 +6137,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 ${desc ? `<meta name="description" content="${escapeHtml(desc)}">` : ''}
+${social}
 <meta name="generator" content="Ada Operations Hub — Page Builder">
 ${fontLink}
 <link rel="stylesheet" href="${EXPORT_FA}">
@@ -6079,7 +6162,7 @@ ${body}
 </body>
 </html>
 `;
-        return { html, title, sections: secs.length };
+        return { html, title, sections: secs.length, index: meta.index === true };
       } finally {
         host.remove();
       }
