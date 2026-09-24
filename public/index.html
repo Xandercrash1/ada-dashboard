@@ -5750,10 +5750,10 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         <p class="text-[11px] text-gray-500">From contact forms on your published pages. New ones are fetched every 2 minutes.</p>
         <div class="space-y-2 max-h-[60vh] overflow-y-auto custom-scrollbar">${list.length ? list.map(x => `
           <div class="rounded-xl border ${x.read ? 'border-white/10' : 'border-emerald-500/40 bg-emerald-500/5'} p-3">
-            <div class="flex items-center gap-2 text-xs"><span class="text-white font-semibold">${escapeHtml(x.name)}</span><a href="mailto:${escapeHtml(x.email)}" class="text-emerald-400 truncate">${escapeHtml(x.email)}</a><span class="ml-auto text-gray-500 flex-shrink-0">${escapeHtml(new Date(x.at).toLocaleString())}</span></div>
+            <div class="flex items-center gap-2 text-xs"><span class="text-white font-semibold">${escapeHtml(x.name)}</span>${x.email ? `<a href="mailto:${escapeHtml(x.email)}" class="text-emerald-400 truncate">${escapeHtml(x.email)}</a>` : ''}<span class="ml-auto text-gray-500 flex-shrink-0">${escapeHtml(new Date(x.at).toLocaleString())}</span></div>
             <div class="text-[11px] text-gray-500 mt-0.5">via ${escapeHtml(x.page)}${x.path && x.path !== '/' ? ' · ' + escapeHtml(x.path) : ''}</div>
             <p class="text-sm text-gray-200 mt-2 whitespace-pre-wrap break-words">${escapeHtml(x.message)}</p>
-            <div class="flex gap-2 mt-2"><a href="mailto:${escapeHtml(x.email)}?subject=${encodeURIComponent('Re: your message')}" class="px-2.5 py-1 rounded-lg text-xs text-white bg-emerald-600">Reply by email</a>
+            <div class="flex gap-2 mt-2">${x.email ? `<a href="mailto:${escapeHtml(x.email)}?subject=${encodeURIComponent('Re: your message')}" class="px-2.5 py-1 rounded-lg text-xs text-white bg-emerald-600">Reply by email</a>` : ''}
               <button data-mdel="${escapeHtml(x.id)}" class="px-2.5 py-1 rounded-lg text-xs text-rose-400 border border-white/10">Delete</button></div>
           </div>`).join('') : '<p class="text-xs text-gray-400 py-6 text-center">No messages yet. Add a Contact form section to a page and publish it.</p>'}</div>
         <div class="flex justify-end"><button id="msg-close" class="px-4 py-2 text-xs text-gray-400 hover:text-white">Close</button></div>`);

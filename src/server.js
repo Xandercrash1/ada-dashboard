@@ -673,7 +673,8 @@ const LIST_ITEM_FORMAT = {
   items: (o) => { const icon = (pick(o, ['icon']).match(/fa-[a-z0-9-]+/g) || []).filter(c => !/^fa-(solid|regular|brands|light)$/.test(c))[0] || ''; return [icon, pick(o, ['title', 'name', 'heading']), pick(o, ['text', 'description', 'body', 'subtitle'])].filter((v, i) => v || i === 1).join(' | '); },
   plans: (o) => { const feats = Array.isArray(o.features) ? o.features.map(String).join('; ') : pick(o, ['features', 'description']); return [(o.featured || o.highlight || o.popular ? '*' : '') + pick(o, ['name', 'title']), pick(o, ['price', 'cost']), feats, pick(o, ['button', 'cta', 'buttonLabel', 'label']), pick(o, ['link', 'href', 'url'])].join(' | '); },
   images: (o) => [pick(o, ['src', 'url', 'image', 'href']), pick(o, ['caption', 'alt', 'title'])].join(' | '),
-  links: (o) => [pick(o, ['label', 'text', 'title', 'name']), pick(o, ['url', 'href', 'link'])].join(' | ')
+  links: (o) => [pick(o, ['label', 'text', 'title', 'name']), pick(o, ['url', 'href', 'link'])].join(' | '),
+  fields: (o) => { const opts = Array.isArray(o.options) ? o.options.map(String).join(', ') : pick(o, ['options', 'choices']); return [pick(o, ['label', 'question', 'name', 'title']) + (o.required ? '*' : ''), pick(o, ['type']) || (opts ? 'choice' : 'short'), opts].filter((v, i) => v || i < 2).join(' | '); }
 };
 function coercePropValue(key, v) {
   if (typeof v === 'string') return v;
@@ -1420,13 +1421,24 @@ export async function onRequestPost({ request, env }) {
   if ((f.get('website') || '').toString()) return page(true, back);            // honeypot: bots see success
   const name = (f.get('name') || '').toString().trim().slice(0, 100);
   const email = (f.get('email') || '').toString().trim().slice(0, 200);
-  const message = (f.get('message') || '').toString().trim().slice(0, 4000);
+  const note = (f.get('message') || '').toString().trim().slice(0, 4000);
+  // Custom questions arrive as "q:<question>" fields, in page order (fb-1790220062389).
+  const answers = [];
+  for (const [k, v] of f.entries()) {
+    if (typeof k !== 'string' || !k.startsWith('q:') || answers.length >= 12) continue;
+    const val = (v || '').toString().trim().slice(0, 2000);
+    if (val) answers.push(k.slice(2, 82).replace(/\\s+/g, ' ').trim() + ': ' + val);
+  }
+  // The classic contact form (no questions of its own) needs a name, an email and a message.
+  const classic = ![...f.keys()].some(k => typeof k === 'string' && k.startsWith('q:'));
+  if (classic && (!name || !note)) return page(false, back, 'Please fill in your name and a message, then send again.');
+  if (!classic && !answers.length && !note) return page(false, back, 'Please answer at least one question, then send again.');
   // Same rule as the browser's own email check (so a@b passes); the address is only for replying.
-  if (!name || !message) return page(false, back, 'Please fill in your name and a message, then send again.');
-  if (!/^[^\\s@]+@[^\\s@]+$/.test(email)) return page(false, back, 'That email address does not look right. Please go back and check it.');
+  if ((classic || email) && !/^[^\\s@]+@[^\\s@]+$/.test(email)) return page(false, back, 'That email address does not look right. Please go back and check it.');
+  const message = (answers.join('\\n') + (answers.length && note ? '\\n\\n' : '') + note).slice(0, 4000);
   const v = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: new URLSearchParams({ secret: env.TURNSTILE_SECRET || '', response: (f.get('cf-turnstile-response') || '').toString(), remoteip: request.headers.get('CF-Connecting-IP') || '' }) }).then(r => r.json()).catch(() => ({ success: false }));
   if (!v.success) return page(false, back, 'The spam check did not finish. Please go back, reload the page, wait for the green tick, and send again.');
-  await env.CONTACT.put(env.PROJECT + '.' + Date.now() + '-' + crypto.randomUUID().slice(0, 8), JSON.stringify({ project: env.PROJECT, path: back, name, email, message, at: new Date().toISOString(), country: (request.cf && request.cf.country) || null }), { expirationTtl: 60 * 60 * 24 * 90 });
+  await env.CONTACT.put(env.PROJECT + '.' + Date.now() + '-' + crypto.randomUUID().slice(0, 8), JSON.stringify({ project: env.PROJECT, path: back, name: name || '(no name)', email, message, at: new Date().toISOString(), country: (request.cf && request.cf.country) || null }), { expirationTtl: 60 * 60 * 24 * 90 });
   return page(true, back);
 }
 export const onRequest = () => new Response('Method not allowed', { status: 405 });
