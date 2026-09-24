@@ -1476,7 +1476,7 @@ async function prepareContactForms(c, project, dir, filesByName, pre) {
   return fnRoot;
 }
 
-// Inbox: pull messages from KV every 2 minutes (list → get → delete).
+// Inbox: pull messages from KV every 10 minutes (list → get → delete), only while a form is published.
 function projectOwner(project) {
   const pg = readPagesRegistry().find(x => x.published && x.published.project === project);
   if (pg) return { owner: pg.owner || 'alex', title: pg.title };
@@ -1488,8 +1488,13 @@ let inboxBusy = false;
 async function pullContactMessages() {
   if (inboxBusy) return; inboxBusy = true;
   try {
-    const c = readPublishCreds(); const ns = readJsonSafe(PUBLISH_SECRETS_FILE, {}).__kv;
+    const c = readPublishCreds(); const secrets = readJsonSafe(PUBLISH_SECRETS_FILE, {}); const ns = secrets.__kv;
     if (!c || !ns) return;
+    // Free plan: 1,000 KV list operations a day, shared by live + staging. Only
+    // look when this instance has a published page with a form (each has a
+    // Turnstile secret keyed by project).
+    const formProjects = [...readPagesRegistry(), ...readSites()].filter(x => x.published && secrets[x.published.project]);
+    if (!formProjects.length) return;
     const keys = await cfApi(c, 'GET', `/accounts/${c.accountId}/storage/kv/namespaces/${ns}/keys?limit=100`);
     if (!keys.ok) return;
     const msgs = readJsonSafe(MESSAGES_FILE, []);
@@ -1515,7 +1520,7 @@ async function pullContactMessages() {
   } catch (e) { console.error('[inbox]', e.message); }
   finally { inboxBusy = false; }
 }
-setInterval(pullContactMessages, 2 * 60 * 1000);
+setInterval(pullContactMessages, 10 * 60 * 1000);   // ~144 lists/day at most; "Check now" pulls on demand
 setTimeout(pullContactMessages, 15000);
 const canSeeMessage = (req, msg) => isAdminReq(req) ? isAdminUserName(msg.owner) || req.query.all === '1' : msg.owner === req.user.username;
 app.get('/api/messages', async (req, res) => {

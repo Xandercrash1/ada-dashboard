@@ -5747,7 +5747,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const m = publishModal(`
         <div class="flex items-center justify-between"><h3 class="text-white font-bold text-sm"><i class="fa-solid fa-inbox text-emerald-400 mr-2"></i>Messages</h3>
           <button id="msg-refresh" class="px-3 py-1.5 rounded-lg text-xs text-gray-300 border border-white/10 hover:text-white"><i class="fa-solid fa-rotate mr-1"></i>Check now</button></div>
-        <p class="text-[11px] text-gray-500">From contact forms on your published pages. New ones are fetched every 2 minutes.</p>
+        <p class="text-[11px] text-gray-500">From contact forms on your published pages. New ones are fetched every 10 minutes, or press Check now.</p>
         <div class="space-y-2 max-h-[60vh] overflow-y-auto custom-scrollbar">${list.length ? list.map(x => `
           <div class="rounded-xl border ${x.read ? 'border-white/10' : 'border-emerald-500/40 bg-emerald-500/5'} p-3">
             <div class="flex items-center gap-2 text-xs"><span class="text-white font-semibold">${escapeHtml(x.name)}</span>${x.email ? `<a href="mailto:${escapeHtml(x.email)}" class="text-emerald-400 truncate">${escapeHtml(x.email)}</a>` : ''}<span class="ml-auto text-gray-500 flex-shrink-0">${escapeHtml(new Date(x.at).toLocaleString())}</span></div>
