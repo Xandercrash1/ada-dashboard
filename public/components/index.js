@@ -37,3 +37,4 @@ import "./StepsSection.js";
 import "./VideoSection.js";
 import "./MapSection.js";
 import "./ContactSection.js";
+import "./FormSection.js";

@@ -654,7 +654,7 @@ const DEFAULT_HOMEPAGE = {
 // `grid` section holds widgets (w.section = its id; unassigned widgets go to
 // the first grid). A page without pageSections renders exactly as before.
 const PAGE_SECTION_TYPES = ['hero', 'features', 'grid', 'gallery', 'pricing', 'cta', 'text', 'footer', 'header',
-  'split', 'testimonials', 'faq', 'team', 'stats', 'logos', 'steps', 'video', 'map', 'contact'];
+  'split', 'testimonials', 'faq', 'team', 'stats', 'logos', 'steps', 'video', 'map', 'contact', 'form'];
 // Props that end up inside CSS url(...) or <img src>: http(s) or /media only,
 // no quotes/parens/whitespace (fb-1790206467677).
 const SAFE_IMAGE_URL_RE = /^(https?:\/\/[^\s"'()<>\\]{1,400}|\/media\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9._-]{1,120})$/;
@@ -1194,6 +1194,8 @@ function authorizeRole(req, res, next) {
     if (m === 'GET' && !mm[3]) return pageOwnedBy(u, mm[1]) ? next() : deny();
     if (m === 'POST' && mm[3]) return pageOwnedBy(u, mm[1]) ? next() : deny();
   }
+  if (p === '/api/messages' && m === 'GET') return next();
+  if (/^\/api\/messages\/[^/]+$/.test(p) && (m === 'PATCH' || m === 'DELETE')) return next();   // owner checked in the handler
   if (p === '/api/sites' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/sites\/([^/]+)(?:\/publish)?$/.exec(p)) && ['PATCH', 'DELETE', 'POST'].includes(m)) {
     const site = readSites().find(x => x.id === mm[1]);
@@ -1289,7 +1291,9 @@ app.post('/api/publish/test', async (req, res) => {
     if (!v.ok) return res.json({ ok: false, error: 'Cloudflare rejected the token: ' + cfErr(v) });
     const pr = await cfApi(c, 'GET', `/accounts/${c.accountId}/pages/projects`);
     if (!pr.ok) return res.json({ ok: false, error: 'Token works but cannot use Pages on that account: ' + cfErr(pr) });
-    res.json({ ok: true, projects: (pr.json.result || []).length });
+    const kv = await cfApi(c, 'GET', `/accounts/${c.accountId}/storage/kv/namespaces?per_page=5`);
+    const ts = await cfApi(c, 'GET', `/accounts/${c.accountId}/challenges/widgets?per_page=5`);
+    res.json({ ok: true, projects: (pr.json.result || []).length, contactForms: kv.ok && ts.ok, kv: kv.ok, turnstile: ts.ok });
   } catch (e) { res.json({ ok: false, error: 'Could not reach Cloudflare: ' + e.message }); }
 });
 
@@ -1302,7 +1306,7 @@ function validatePublishHtml(html) {
   // The only frames allowed are the ones the video/map sections build from a
   // parsed id: YouTube (privacy mode), Vimeo and Google Maps (fb-1790206467703).
   const ALLOWED_IFRAME = /<iframe src="(?:https:\/\/www\.youtube-nocookie\.com\/embed\/[A-Za-z0-9_-]{6,20}|https:\/\/player\.vimeo\.com\/video\/\d{4,12}|https:\/\/www\.google\.com\/maps\?q=[^"<>]{1,600}&amp;output=embed)"(?: (?:title="[^"<>]{0,120}"|loading="lazy"|allow="[a-z; -]{0,160}"|allowfullscreen(?:="")?|referrerpolicy="[a-z-]{0,40}"|style="[a-z0-9:;%. -]{0,80}"))*><\/iframe>/gi;
-  const withoutAllowed = html.replace(ALLOWED_IFRAME, '');
+  const withoutAllowed = html.replace(ALLOWED_IFRAME, '').replace(/<form data-contact-form="" method="post" action="\/api\/contact"/g, '<div');
   if (/<(iframe|object|embed|form|base)\b/i.test(withoutAllowed)) return 'Published pages may only embed YouTube, Vimeo or Google Maps (from the video and map sections) — no other frames, embeds or forms.';
   // Inside tags only: escaped text such as "&lt;img onerror=…&gt;" is harmless words.
   if (/<[a-z][^>]*\son[a-z]+\s*=/i.test(html)) return 'Published pages may not contain event handlers.';
@@ -1347,11 +1351,13 @@ function bundlePublishDir(dir, filesByName, pageLinkMap, warnings, opts) {
   fs.writeFileSync(path.join(dir, '404.html'), '<!DOCTYPE html><meta charset="utf-8"><meta name="robots" content="noindex"><title>Not found</title><p style="font-family:system-ui;padding:2rem">Not found.</p>');
   fs.writeFileSync(path.join(dir, '_headers'), `/*\n${o.allowIndex ? '' : '  X-Robots-Tag: noindex, nofollow\n'}  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n`);
 }
-async function deployToPages(c, project, dir, isNew) {
+async function deployToPages(c, project, dir, isNew, filesByName) {
+  const pre = await contactFormPrereqs(c, project, filesByName);
   if (isNew) {
     const cr = await cfApi(c, 'POST', `/accounts/${c.accountId}/pages/projects`, { name: project, production_branch: 'main' });
     if (!cr.ok) throw new Error('Could not create the Cloudflare project: ' + cfErr(cr));
   }
+  await prepareContactForms(c, project, dir, filesByName, pre);
   const out = await new Promise((resolve) => {
     execFile(WRANGLER_BIN, ['pages', 'deploy', dir, '--project-name', project, '--branch', 'main', '--commit-dirty=true'], {
       cwd: PUBLISH_TMP, timeout: 180000, maxBuffer: 4 * 1024 * 1024,
@@ -1362,6 +1368,141 @@ async function deployToPages(c, project, dir, isNew) {
   return `https://${project}.pages.dev`;
 }
 const projectNameFor = (title) => `${String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'page'}-${crypto.randomBytes(4).toString('hex')}`;
+
+// --- CONTACT FORMS on published pages (fb-1790206467753) ---------------------
+// A published page's form posts to its own /api/contact — a Pages Function in
+// the bundle — which checks Turnstile and stores the message in Cloudflare KV.
+// The dashboard pulls them into data/messages.json. Cloudflare cannot reach
+// this server's bare IP, which is why messages are pulled, not pushed.
+// Turnstile secrets live in a server-only file, never in a registry a browser reads.
+const PUBLISH_SECRETS_FILE = path.join(DATA_DIR, 'publish-secrets.json');
+const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
+const CONTACT_KV_TITLE = 'ada-contact-messages';
+function readJsonSafe(f, dflt) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return dflt; } }
+function writeSecret(key, val) { const all = readJsonSafe(PUBLISH_SECRETS_FILE, {}); if (val === undefined) delete all[key]; else all[key] = val; writeFileAtomic(PUBLISH_SECRETS_FILE, JSON.stringify(all, null, 2)); fs.chmodSync(PUBLISH_SECRETS_FILE, 0o600); }
+async function ensureContactKv(c) {
+  const all = readJsonSafe(PUBLISH_SECRETS_FILE, {});
+  if (all.__kv) return all.__kv;
+  const list = await cfApi(c, 'GET', `/accounts/${c.accountId}/storage/kv/namespaces?per_page=100`);
+  if (!list.ok) throw new Error('Contact forms need two more Cloudflare permissions (Workers KV Storage and Turnstile) — see "Steps — Contact Form Token Permissions" in the vault.');
+  let ns = (list.json.result || []).find(x => x.title === CONTACT_KV_TITLE);
+  if (!ns) { const cr = await cfApi(c, 'POST', `/accounts/${c.accountId}/storage/kv/namespaces`, { title: CONTACT_KV_TITLE }); if (!cr.ok) throw new Error('Could not create the message store: ' + cfErr(cr)); ns = cr.json.result; }
+  writeSecret('__kv', ns.id);
+  return ns.id;
+}
+async function ensureTurnstile(c, project) {
+  const all = readJsonSafe(PUBLISH_SECRETS_FILE, {});
+  if (all[project] && all[project].sitekey && all[project].secret) return all[project];
+  const cr = await cfApi(c, 'POST', `/accounts/${c.accountId}/challenges/widgets`, { name: project.slice(0, 60), domains: [`${project}.pages.dev`], mode: 'managed' });
+  if (!cr.ok) throw new Error('Contact forms need two more Cloudflare permissions (Workers KV Storage and Turnstile) — see "Steps — Contact Form Token Permissions" in the vault. (' + cfErr(cr) + ')');
+  const w = { sitekey: cr.json.result.sitekey, secret: cr.json.result.secret };
+  writeSecret(project, w);
+  return w;
+}
+async function removeTurnstile(c, project) {
+  const w = readJsonSafe(PUBLISH_SECRETS_FILE, {})[project];
+  if (!w) return;
+  await cfApi(c, 'DELETE', `/accounts/${c.accountId}/challenges/widgets/${w.sitekey}`).catch(() => {});
+  writeSecret(project, undefined);
+}
+const CONTACT_FUNCTION = `// Generated by the Ada dashboard (fb-1790206467753). Turnstile check, then store in KV.
+const page = (ok, back) => new Response('<!DOCTYPE html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>' + (ok ? 'Message sent' : 'Not sent') + '</title><div style="font-family:system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:1rem;text-align:center"><h1 style="font-size:1.6rem">' + (ok ? 'Thanks — your message was sent.' : 'Sorry, that did not go through.') + '</h1><p style="color:#555">' + (ok ? 'We will get back to you soon.' : 'Please go back and try again.') + '</p><p><a href="' + back + '">Back to the page</a></p></div>', { status: ok ? 200 : 400, headers: { 'content-type': 'text/html; charset=utf-8', 'x-robots-tag': 'noindex' } });
+export async function onRequestPost({ request, env }) {
+  let back = '/';
+  try { const r = new URL(request.headers.get('Referer') || '/', request.url); if (r.host === new URL(request.url).host) back = r.pathname; } catch (e) {}
+  let f;
+  try { f = await request.formData(); } catch (e) { return page(false, back); }
+  if ((f.get('website') || '').toString()) return page(true, back);            // honeypot: bots see success
+  const name = (f.get('name') || '').toString().trim().slice(0, 100);
+  const email = (f.get('email') || '').toString().trim().slice(0, 200);
+  const message = (f.get('message') || '').toString().trim().slice(0, 4000);
+  if (!name || !message || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return page(false, back);
+  const v = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: new URLSearchParams({ secret: env.TURNSTILE_SECRET || '', response: (f.get('cf-turnstile-response') || '').toString(), remoteip: request.headers.get('CF-Connecting-IP') || '' }) }).then(r => r.json()).catch(() => ({ success: false }));
+  if (!v.success) return page(false, back);
+  await env.CONTACT.put(Date.now() + '-' + crypto.randomUUID().slice(0, 8), JSON.stringify({ project: env.PROJECT, path: back, name, email, message, at: new Date().toISOString(), country: (request.cf && request.cf.country) || null }), { expirationTtl: 60 * 60 * 24 * 90 });
+  return page(true, back);
+}
+export const onRequest = () => new Response('Method not allowed', { status: 405 });
+`;
+// Called for any publish whose pages contain a contact form: binds KV + the
+// Turnstile secret to the project, adds the Function, fills in the site key.
+// Permission-dependent setup runs BEFORE the Pages project is created, so a
+// missing permission can't leave an orphaned empty project behind.
+async function contactFormPrereqs(c, project, filesByName) {
+  if (!filesByName || !Object.values(filesByName).some(h => /data-contact-form/.test(h))) return null;
+  return { nsId: await ensureContactKv(c), w: await ensureTurnstile(c, project) };
+}
+async function prepareContactForms(c, project, dir, filesByName, pre) {
+  if (!pre) return false;
+  const { nsId, w } = pre;
+  const cfg = await cfApi(c, 'PATCH', `/accounts/${c.accountId}/pages/projects/${project}`, { deployment_configs: { production: {
+    kv_namespaces: { CONTACT: { namespace_id: nsId } },
+    env_vars: { TURNSTILE_SECRET: { type: 'secret_text', value: w.secret }, PROJECT: { type: 'plain_text', value: project } } } } });
+  if (!cfg.ok) throw new Error('Could not connect the form to its message store: ' + cfErr(cfg));
+  fs.mkdirSync(path.join(dir, 'functions', 'api'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'functions', 'api', 'contact.js'), CONTACT_FUNCTION);
+  for (const name of Object.keys(filesByName)) {
+    const f = path.join(dir, name);
+    let html = fs.readFileSync(f, 'utf8');
+    if (!/data-contact-form/.test(html)) continue;
+    html = html.replace(/__ADA_TURNSTILE_SITEKEY__/g, w.sitekey)
+               .replace('</head>', '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>\n</head>');
+    fs.writeFileSync(f, html);
+  }
+  return true;
+}
+
+// Inbox: pull messages from KV every 2 minutes (list → get → delete).
+function projectOwner(project) {
+  const pg = readPagesRegistry().find(x => x.published && x.published.project === project);
+  if (pg) return { owner: pg.owner || 'alex', title: pg.title };
+  const st = readSites().find(x => x.published && x.published.project === project);
+  if (st) return { owner: st.owner || 'alex', title: st.name };
+  return { owner: 'alex', title: project };
+}
+let inboxBusy = false;
+async function pullContactMessages() {
+  if (inboxBusy) return; inboxBusy = true;
+  try {
+    const c = readPublishCreds(); const ns = readJsonSafe(PUBLISH_SECRETS_FILE, {}).__kv;
+    if (!c || !ns) return;
+    const keys = await cfApi(c, 'GET', `/accounts/${c.accountId}/storage/kv/namespaces/${ns}/keys?limit=100`);
+    if (!keys.ok) return;
+    const msgs = readJsonSafe(MESSAGES_FILE, []);
+    for (const k of (keys.json.result || [])) {
+      const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${c.accountId}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(k.name)}`, { headers: { Authorization: `Bearer ${c.token}` }, signal: AbortSignal.timeout(20000) });
+      if (!res.ok) continue;
+      let m; try { m = JSON.parse(await res.text()); } catch (e) { m = null; }
+      if (m && !msgs.some(x => x.key === k.name)) {
+        const o = projectOwner(m.project);
+        const clean = (v, n) => String(v || '').slice(0, n);
+        msgs.push({ id: 'msg-' + k.name, key: k.name, owner: o.owner, page: clean(o.title, 80), project: clean(m.project, 80), path: clean(m.path, 120), name: clean(m.name, 100), email: clean(m.email, 200), message: clean(m.message, 4000), at: clean(m.at, 40), country: clean(m.country, 4), read: false });
+        if (isAdminUserName(o.owner)) pushNotification({ level: 'info', source: 'contact', title: `New message via ${clean(o.title, 60)}`, body: `${clean(m.name, 60)}: ${clean(m.message, 140)}`, link: { tab: 'home' } });
+      }
+      await cfApi(c, 'DELETE', `/accounts/${c.accountId}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(k.name)}`);
+    }
+    writeFileAtomic(MESSAGES_FILE, JSON.stringify(msgs.slice(-2000), null, 2));
+  } catch (e) { console.error('[inbox]', e.message); }
+  finally { inboxBusy = false; }
+}
+setInterval(pullContactMessages, 2 * 60 * 1000);
+setTimeout(pullContactMessages, 15000);
+const canSeeMessage = (req, msg) => isAdminReq(req) ? isAdminUserName(msg.owner) || req.query.all === '1' : msg.owner === req.user.username;
+app.get('/api/messages', async (req, res) => {
+  if (req.query.refresh === '1') await pullContactMessages();
+  res.json(readJsonSafe(MESSAGES_FILE, []).filter(m => canSeeMessage(req, m)).reverse());
+});
+app.patch('/api/messages/:id', (req, res) => {
+  const msgs = readJsonSafe(MESSAGES_FILE, []); const m = msgs.find(x => x.id === req.params.id);
+  if (!m || !(isAdminReq(req) ? true : m.owner === req.user.username)) return res.status(404).json({ error: 'Not found' });
+  if (typeof req.body.read === 'boolean') m.read = req.body.read;
+  writeFileAtomic(MESSAGES_FILE, JSON.stringify(msgs, null, 2)); res.json(m);
+});
+app.delete('/api/messages/:id', (req, res) => {
+  const msgs = readJsonSafe(MESSAGES_FILE, []); const m = msgs.find(x => x.id === req.params.id);
+  if (!m || !(isAdminReq(req) ? true : m.owner === req.user.username)) return res.status(404).json({ error: 'Not found' });
+  writeFileAtomic(MESSAGES_FILE, JSON.stringify(msgs.filter(x => x !== m), null, 2)); res.json({ ok: true });
+});
 
 // --- SITES: several pages published together (fb-1790206467703) -------------
 const SITES_FILE = path.join(DATA_DIR, 'sites.json');
@@ -1401,7 +1542,7 @@ app.delete('/api/sites/:id', async (req, res) => {
   const all = readSites(); const site = all.find(x => x.id === req.params.id);
   if (!site) return res.status(404).json({ error: 'No such site' });
   const c = readPublishCreds();
-  if (site.published && c) { const r = await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${site.published.project}`); if (!r.ok && r.status !== 404) return res.status(502).json({ error: 'Cloudflare refused: ' + cfErr(r) }); }
+  if (site.published && c) { const r = await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${site.published.project}`); if (!r.ok && r.status !== 404) return res.status(502).json({ error: 'Cloudflare refused: ' + cfErr(r) }); await removeTurnstile(c, site.published.project); }
   writeSites(all.filter(x => x.id !== site.id));
   res.json({ ok: true });
 });
@@ -1426,7 +1567,7 @@ app.post('/api/sites/:id/publish', async (req, res) => {
   const dir = path.join(PUBLISH_TMP, project);
   try {
     bundlePublishDir(dir, byName, linkMap, warnings, { siteUrl: `https://${project}.pages.dev`, allowIndex: req.body.index === true });
-    const url = await deployToPages(c, project, dir, !(site.published && site.published.project));
+    const url = await deployToPages(c, project, dir, !(site.published && site.published.project), byName);
     site.published = { project, url, publishedAt: new Date().toISOString(), by: ownerName(req) };
     writeSites(all);
     res.json({ ok: true, url, project, warnings: [...new Set(warnings)] });
@@ -1439,6 +1580,7 @@ app.delete('/api/sites/:id/publish', async (req, res) => {
   const c = readPublishCreds();
   if (!c) return res.status(400).json({ error: 'Publishing is not set up.' });
   const r = await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${site.published.project}`);
+  await removeTurnstile(c, site.published.project);
   if (!r.ok && r.status !== 404) return res.status(502).json({ error: 'Cloudflare refused: ' + cfErr(r) });
   delete site.published; writeSites(all);
   res.json({ ok: true });
@@ -1458,7 +1600,7 @@ app.post('/api/pages/:id/publish', async (req, res) => {
   const dir = path.join(PUBLISH_TMP, project);
   try {
     bundlePublishDir(dir, { 'index.html': req.body.html }, null, warnings, { siteUrl: `https://${project}.pages.dev`, allowIndex: req.body.index === true });
-    await deployToPages(c, project, dir, !(pg.published && pg.published.project));
+    await deployToPages(c, project, dir, !(pg.published && pg.published.project), { 'index.html': req.body.html });
     const url = `https://${project}.pages.dev`;
     pg.published = { project, url, publishedAt: new Date().toISOString(), by: ownerName(req) };
     writePagesRegistry(pages);
@@ -1477,6 +1619,7 @@ app.delete('/api/pages/:id/publish', async (req, res) => {
   const c = readPublishCreds();
   if (!c) return res.status(400).json({ error: 'Publishing is not set up.' });
   const r = await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${pg.published.project}`);
+  await removeTurnstile(c, pg.published.project);
   if (!r.ok && r.status !== 404) return res.status(502).json({ error: 'Cloudflare refused: ' + cfErr(r) });
   delete pg.published;
   writePagesRegistry(pages);

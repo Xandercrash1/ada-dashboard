@@ -5417,7 +5417,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       steps:    { label: 'Steps',       icon: 'fa-list-ol',   tag: 'ada-section-steps' },
       video:    { label: 'Video',       icon: 'fa-circle-play', tag: 'ada-section-video' },
       map:      { label: 'Map',         icon: 'fa-map-location-dot', tag: 'ada-section-map' },
-      contact:  { label: 'Contact',     icon: 'fa-address-card', tag: 'ada-section-contact' }
+      contact:  { label: 'Contact',     icon: 'fa-address-card', tag: 'ada-section-contact' },
+      form:     { label: 'Contact form', icon: 'fa-envelope-open-text', tag: 'ada-section-form' }
     };
 
     // Typography presets (fb-1790201502171). Web fonts load on demand, only
@@ -5590,6 +5591,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
             <i class="fa-solid fa-circle-user text-3xl text-indigo-400"></i>
             <div><div class="text-white font-bold">${escapeHtml(me ? me.username : '?')}</div><div class="text-xs text-gray-400">${me && me.role === 'admin' ? 'Admin' : 'Pages account'}</div></div>
           </div>
+          ${btn('acct-messages', 'fa-inbox', 'Messages <span id="acct-unread" class="ml-1 text-[11px] text-emerald-400"></span>')}
           ${btn('acct-password', 'fa-key', 'Change password')}
           ${me && me.role === 'admin' ? btn('acct-users', 'fa-users', 'Manage people') : ''}
           ${btn('acct-logout', 'fa-right-from-bracket', 'Sign out', 'text-rose-400')}
@@ -5598,6 +5600,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const close = () => m.remove();
       m.querySelector('#acct-close').onclick = close;
       m.querySelector('#acct-password').onclick = () => { close(); changeMyPassword(); };
+      m.querySelector('#acct-messages').onclick = () => { close(); openMessages(); };
+      fetch('/api/messages').then(r => r.json()).then(list => { const n = (Array.isArray(list) ? list : []).filter(x => !x.read).length; const el = document.getElementById('acct-unread'); if (el) el.textContent = n ? `${n} new` : ''; }).catch(() => {});
       const users = m.querySelector('#acct-users');
       if (users) users.onclick = () => { close(); switchTab('server'); switchServerSubTab('users'); };
       m.querySelector('#acct-logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login'; };
@@ -5682,7 +5686,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const st = document.getElementById('pub-status');
       st.textContent = 'Testing…';
       const data = await (await fetch('/api/publish/test', { method: 'POST' })).json().catch(() => ({ ok: false, error: 'No response' }));
-      st.innerHTML = data.ok ? `<span class="text-emerald-400 font-semibold">Connected</span> — ${data.projects} Pages project(s) on the account.` : `<span class="text-rose-400">${escapeHtml(data.error || 'Failed')}</span>`;
+      st.innerHTML = data.ok ? `<span class="text-emerald-400 font-semibold">Connected</span> — ${data.projects} Pages project(s) on the account. Contact forms: ${data.contactForms ? '<span class="text-emerald-400">ready</span>' : '<span class="text-amber-300">need the KV + Turnstile permissions (see the steps file)</span>'}.` : `<span class="text-rose-400">${escapeHtml(data.error || 'Failed')}</span>`;
     }
     function publishModal(inner) {
       let m = document.getElementById('publish-modal');
@@ -5735,6 +5739,34 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       openPublishDialog(`<div class="text-xs text-emerald-300">Live. It can take a minute before the link answers the first time.</div>${warn}`);
       updatePageAccessUI();
     }
+    // ---- Messages from published contact forms (fb-1790206467753) ----
+    async function openMessages(refresh) {
+      let list = [];
+      try { list = await (await fetch('/api/messages' + (refresh ? '?refresh=1' : ''))).json(); } catch (e) {}
+      list = Array.isArray(list) ? list : [];
+      const m = publishModal(`
+        <div class="flex items-center justify-between"><h3 class="text-white font-bold text-sm"><i class="fa-solid fa-inbox text-emerald-400 mr-2"></i>Messages</h3>
+          <button id="msg-refresh" class="px-3 py-1.5 rounded-lg text-xs text-gray-300 border border-white/10 hover:text-white"><i class="fa-solid fa-rotate mr-1"></i>Check now</button></div>
+        <p class="text-[11px] text-gray-500">From contact forms on your published pages. New ones are fetched every 2 minutes.</p>
+        <div class="space-y-2 max-h-[60vh] overflow-y-auto custom-scrollbar">${list.length ? list.map(x => `
+          <div class="rounded-xl border ${x.read ? 'border-white/10' : 'border-emerald-500/40 bg-emerald-500/5'} p-3">
+            <div class="flex items-center gap-2 text-xs"><span class="text-white font-semibold">${escapeHtml(x.name)}</span><a href="mailto:${escapeHtml(x.email)}" class="text-emerald-400 truncate">${escapeHtml(x.email)}</a><span class="ml-auto text-gray-500 flex-shrink-0">${escapeHtml(new Date(x.at).toLocaleString())}</span></div>
+            <div class="text-[11px] text-gray-500 mt-0.5">via ${escapeHtml(x.page)}${x.path && x.path !== '/' ? ' · ' + escapeHtml(x.path) : ''}</div>
+            <p class="text-sm text-gray-200 mt-2 whitespace-pre-wrap break-words">${escapeHtml(x.message)}</p>
+            <div class="flex gap-2 mt-2"><a href="mailto:${escapeHtml(x.email)}?subject=${encodeURIComponent('Re: your message')}" class="px-2.5 py-1 rounded-lg text-xs text-white bg-emerald-600">Reply by email</a>
+              <button data-mdel="${escapeHtml(x.id)}" class="px-2.5 py-1 rounded-lg text-xs text-rose-400 border border-white/10">Delete</button></div>
+          </div>`).join('') : '<p class="text-xs text-gray-400 py-6 text-center">No messages yet. Add a Contact form section to a page and publish it.</p>'}</div>
+        <div class="flex justify-end"><button id="msg-close" class="px-4 py-2 text-xs text-gray-400 hover:text-white">Close</button></div>`);
+      m.querySelector('#msg-close').onclick = () => m.remove();
+      m.querySelector('#msg-refresh').onclick = () => openMessages(true);
+      m.querySelectorAll('[data-mdel]').forEach(b => b.onclick = async () => {
+        if (!await adaConfirm({ title: 'Delete message?', message: 'It is removed from your inbox.', confirmLabel: 'Delete', danger: true })) return;
+        await fetch(`/api/messages/${encodeURIComponent(b.dataset.mdel)}`, { method: 'DELETE' });
+        openMessages();
+      });
+      list.filter(x => !x.read).forEach(x => fetch(`/api/messages/${encodeURIComponent(x.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ read: true }) }));
+    }
+
     // ---- Page settings / SEO (fb-1790206467753) ----
     function openPageSettings() {
       if (!homepageDoc) return;
@@ -6472,7 +6504,7 @@ ${body}
       grid.innerHTML = Object.entries(PAGE_SECTION_TYPES).map(([type, d]) => `
         <button onclick="addSection('${type}')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex items-center gap-3">
           <i class="fa-solid ${d.icon} text-indigo-400 text-lg w-6 text-center"></i>
-          <div><div class="text-white font-semibold text-sm">${d.label}</div><div class="text-gray-400 text-xs">${{ hero: 'Big headline, text and a button', features: 'Heading and a grid of cards', grid: 'A grid that holds widgets', gallery: 'A grid of photos with captions', pricing: 'Plans side by side', cta: 'A bold band with buttons', text: 'Paragraphs with bold, italics and links', footer: 'Name, small print and links', header: 'Logo, menu links and a button — put it first', split: 'A picture beside a block of text', testimonials: 'Quotes from happy customers', faq: 'Questions that open when tapped', team: 'People with photos and roles', stats: 'Big numbers with labels', logos: 'A row of partner or press logos', steps: 'Numbered how-it-works steps', video: 'A YouTube or Vimeo video', map: 'A Google map of your address', contact: 'Email, phone, address and hours' }[type] || ''}</div></div>
+          <div><div class="text-white font-semibold text-sm">${d.label}</div><div class="text-gray-400 text-xs">${{ hero: 'Big headline, text and a button', features: 'Heading and a grid of cards', grid: 'A grid that holds widgets', gallery: 'A grid of photos with captions', pricing: 'Plans side by side', cta: 'A bold band with buttons', text: 'Paragraphs with bold, italics and links', footer: 'Name, small print and links', header: 'Logo, menu links and a button — put it first', split: 'A picture beside a block of text', testimonials: 'Quotes from happy customers', faq: 'Questions that open when tapped', team: 'People with photos and roles', stats: 'Big numbers with labels', logos: 'A row of partner or press logos', steps: 'Numbered how-it-works steps', video: 'A YouTube or Vimeo video', map: 'A Google map of your address', contact: 'Email, phone, address and hours', form: 'Visitors send you a message — it arrives in your dashboard inbox' }[type] || ''}</div></div>
         </button>`).join('');
       document.getElementById('section-library-modal').classList.remove('hidden');
       const saved = document.getElementById('section-library-saved');
