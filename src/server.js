@@ -101,11 +101,20 @@ function writeScheduled(items) {
   fs.writeFileSync(SCHEDULED_FILE, JSON.stringify(items, null, 2));
 }
 
+// Atomic JSON writes: write a temp file, then rename over the target, so a
+// concurrent reader never sees a half-written file. (A partial read made
+// readHomepage fall back to DEFAULTS, which an editor could then save over the
+// real page.)
+function writeFileAtomic(file, data) {
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, data);
+  fs.renameSync(tmp, file);
+}
 function readPagesRegistry() {
   return readJsonStoreOrThrow(PAGES_REGISTRY_FILE);
 }
 function writePagesRegistry(pages) {
-  fs.writeFileSync(PAGES_REGISTRY_FILE, JSON.stringify(pages, null, 2));
+  writeFileAtomic(PAGES_REGISTRY_FILE, JSON.stringify(pages, null, 2));
 }
 function getPageDocPath(pageId) {
   if (pageId === 'home') return HOMEPAGE_FILE;
@@ -917,7 +926,7 @@ app.put('/api/homepage', (req, res) => {
     updatedAt: new Date().toISOString(),
     updatedBy: typeof updatedBy === 'string' && updatedBy ? updatedBy : 'dashboard'
   });
-  fs.writeFileSync(HOMEPAGE_FILE, JSON.stringify(merged, null, 2));
+  writeFileAtomic(HOMEPAGE_FILE, JSON.stringify(merged, null, 2));
   res.json({ ...merged, path: HOMEPAGE_FILE });
 });
 
@@ -1145,6 +1154,11 @@ function authorizeRole(req, res, next) {
   }
   if ((mm = /^\/api\/pages\/([^/]+)$/.exec(p)) && (m === 'DELETE' || m === 'PATCH')) return pageOwnedBy(u, mm[1]) ? next() : deny();
   if ((mm = /^\/api\/pages\/([^/]+)\/publish$/.exec(p)) && (m === 'POST' || m === 'DELETE')) return pageOwnedBy(u, mm[1]) ? next() : deny();
+  if (p === '/api/sites' && (m === 'GET' || m === 'POST')) return next();
+  if ((mm = /^\/api\/sites\/([^/]+)(?:\/publish)?$/.exec(p)) && ['PATCH', 'DELETE', 'POST'].includes(m)) {
+    const site = readSites().find(x => x.id === mm[1]);
+    return (site && site.owner === u.username) ? next() : deny();
+  }
   if ((mm = /^\/api\/pages\/([^/]+)\/images(?:\/[^/]+)?$/.exec(p))) {
     if (m === 'GET') return pageVisibleTo(u, mm[1]) ? next() : deny();
     if (m === 'POST' || m === 'DELETE') return pageOwnedBy(u, mm[1]) ? next() : deny();
@@ -1256,6 +1270,133 @@ function validatePublishHtml(html) {
   return null;
 }
 
+// Bundle a set of pages into dir: /media images copied to assets/, page:<id>
+// links rewritten to the site's file names (or '#'), noindex + headers + 404.
+function bundlePublishDir(dir, filesByName, pageLinkMap, warnings) {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
+  for (const [fileName, raw] of Object.entries(filesByName)) {
+    let html = raw;
+    html = html.replace(/(["'(;])\/media\/([A-Za-z0-9_-]{1,64})\/([^"')&\s?#]{1,200})/g, (m0, q, lib, file) => {
+      const clean = path.basename(decodeURIComponent(file));
+      const src = path.join(MEDIA_DIR, lib, clean);
+      if (!src.startsWith(MEDIA_DIR + path.sep) || !fs.existsSync(src)) { warnings.push(`image not found: /media/${lib}/${clean}`); return m0; }
+      const dest = `${lib}-${clean}`.replace(/[^A-Za-z0-9._-]/g, '_');
+      fs.copyFileSync(src, path.join(dir, 'assets', dest));
+      return `${q}assets/${dest}`;
+    });
+    if (/\/media\//.test(html)) warnings.push(`${fileName}: some images could not be bundled`);
+    html = html.replace(/href="page:([a-z0-9-]{1,64})"/g, (m0, pid) => {
+      if (pageLinkMap && pageLinkMap[pid]) return `href="${pageLinkMap[pid]}"`;
+      warnings.push(`${fileName}: link to page "${pid}" is not part of what was published`);
+      return 'href="#"';
+    });
+    const dashLinks = [...new Set((html.match(/href="\/(?!\/)[^"]*"/g) || []).map(x => x.slice(6, -1)))];
+    if (dashLinks.length) warnings.push(`${fileName}: links that point at the dashboard (visitors cannot open them): ${dashLinks.slice(0, 8).join(', ')}`);
+    html = html.replace(/<meta name="generator"[^>]*>\n?/i, '')
+               .replace('<meta name="viewport"', '<meta name="robots" content="noindex, nofollow">\n<meta name="viewport"');
+    fs.writeFileSync(path.join(dir, fileName), html);
+  }
+  fs.writeFileSync(path.join(dir, '404.html'), '<!DOCTYPE html><meta charset="utf-8"><meta name="robots" content="noindex"><title>Not found</title><p style="font-family:system-ui;padding:2rem">Not found.</p>');
+  fs.writeFileSync(path.join(dir, '_headers'), '/*\n  X-Robots-Tag: noindex, nofollow\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n');
+}
+async function deployToPages(c, project, dir, isNew) {
+  if (isNew) {
+    const cr = await cfApi(c, 'POST', `/accounts/${c.accountId}/pages/projects`, { name: project, production_branch: 'main' });
+    if (!cr.ok) throw new Error('Could not create the Cloudflare project: ' + cfErr(cr));
+  }
+  const out = await new Promise((resolve) => {
+    execFile(WRANGLER_BIN, ['pages', 'deploy', dir, '--project-name', project, '--branch', 'main', '--commit-dirty=true'], {
+      cwd: PUBLISH_TMP, timeout: 180000, maxBuffer: 4 * 1024 * 1024,
+      env: { PATH: process.env.PATH, HOME: '/home/ubuntu', CLOUDFLARE_API_TOKEN: c.token, CLOUDFLARE_ACCOUNT_ID: c.accountId, WRANGLER_SEND_METRICS: 'false', CI: '1' }
+    }, (err, stdout, stderr) => resolve({ err, text: `${stdout || ''}\n${stderr || ''}` }));
+  });
+  if (out.err) throw new Error('Deploy failed: ' + out.text.replace(new RegExp(c.token, 'g'), '***').trim().split('\n').slice(-4).join(' '));
+  return `https://${project}.pages.dev`;
+}
+const projectNameFor = (title) => `${String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'page'}-${crypto.randomBytes(4).toString('hex')}`;
+
+// --- SITES: several pages published together (fb-1790206467703) -------------
+const SITES_FILE = path.join(DATA_DIR, 'sites.json');
+function readSites() { try { const x = JSON.parse(fs.readFileSync(SITES_FILE, 'utf8')); return Array.isArray(x) ? x : []; } catch (e) { return []; } }
+function writeSites(list) { writeFileAtomic(SITES_FILE, JSON.stringify(list, null, 2)); }
+function cleanSiteInput(req, body, prev) {
+  const pagesAll = readPagesRegistry();
+  const mine = (id) => { const pg = pagesAll.find(x => x.id === id); return pg && (isAdminReq(req) || (pg.owner || 'alex') === req.user.username); };
+  const out = { ...(prev || {}) };
+  if (typeof body.name === 'string') out.name = body.name.replace(/[<>]/g, '').trim().slice(0, 60);
+  if (Array.isArray(body.pages)) out.pages = [...new Set(body.pages.filter(x => typeof x === 'string' && PAGE_ID_RE.test(x) && mine(x)))].slice(0, 20);
+  if (typeof body.home === 'string') out.home = body.home;
+  if (typeof body.sharedChrome === 'boolean') out.sharedChrome = body.sharedChrome;
+  if (!out.pages || !out.pages.length) throw new Error('Pick at least one of your pages.');
+  if (!out.pages.includes(out.home)) out.home = out.pages[0];
+  if (!out.name) throw new Error('Give the site a name.');
+  return out;
+}
+app.get('/api/sites', (req, res) => {
+  const all = readSites();
+  res.json(isAdminReq(req) ? all : all.filter(x => x.owner === req.user.username));
+});
+app.post('/api/sites', (req, res) => {
+  try {
+    const site = cleanSiteInput(req, req.body || {}, { id: 'site-' + Date.now(), owner: ownerName(req), sharedChrome: true, createdAt: new Date().toISOString() });
+    const all = readSites(); all.push(site); writeSites(all);
+    res.status(201).json(site);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/sites/:id', (req, res) => {
+  const all = readSites(); const i = all.findIndex(x => x.id === req.params.id);
+  if (i < 0) return res.status(404).json({ error: 'No such site' });
+  try { all[i] = cleanSiteInput(req, req.body || {}, all[i]); writeSites(all); res.json(all[i]); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/sites/:id', async (req, res) => {
+  const all = readSites(); const site = all.find(x => x.id === req.params.id);
+  if (!site) return res.status(404).json({ error: 'No such site' });
+  const c = readPublishCreds();
+  if (site.published && c) { const r = await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${site.published.project}`); if (!r.ok && r.status !== 404) return res.status(502).json({ error: 'Cloudflare refused: ' + cfErr(r) }); }
+  writeSites(all.filter(x => x.id !== site.id));
+  res.json({ ok: true });
+});
+app.post('/api/sites/:id/publish', async (req, res) => {
+  const all = readSites(); const site = all.find(x => x.id === req.params.id);
+  if (!site) return res.status(404).json({ error: 'No such site' });
+  const c = readPublishCreds();
+  if (!c) return res.status(400).json({ error: 'Publishing is not set up yet — Alex adds the Cloudflare details under Server → Publishing.' });
+  const files = (req.body && req.body.pages) || {};
+  const linkMap = {}; const byName = {};
+  for (const pid of site.pages) {
+    const name = pid === site.home ? 'index.html' : `${pid}.html`;
+    // Cloudflare serves /about from about.html and 308-redirects about.html, so link to the clean URL.
+    linkMap[pid] = pid === site.home ? './' : pid;
+    if (typeof files[pid] !== 'string') return res.status(400).json({ error: `Missing the export of page "${pid}".` });
+    const bad = validatePublishHtml(files[pid]);
+    if (bad) return res.status(400).json({ error: `${pid}: ${bad}` });
+    byName[name] = files[pid];
+  }
+  const warnings = [];
+  const project = (site.published && site.published.project) || projectNameFor(site.name);
+  const dir = path.join(PUBLISH_TMP, project);
+  try {
+    bundlePublishDir(dir, byName, linkMap, warnings);
+    const url = await deployToPages(c, project, dir, !(site.published && site.published.project));
+    site.published = { project, url, publishedAt: new Date().toISOString(), by: ownerName(req) };
+    writeSites(all);
+    res.json({ ok: true, url, project, warnings: [...new Set(warnings)] });
+  } catch (e) { res.status(502).json({ error: e.message, warnings: [...new Set(warnings)] }); }
+  finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+app.delete('/api/sites/:id/publish', async (req, res) => {
+  const all = readSites(); const site = all.find(x => x.id === req.params.id);
+  if (!site || !site.published) return res.status(404).json({ error: 'This site is not published.' });
+  const c = readPublishCreds();
+  if (!c) return res.status(400).json({ error: 'Publishing is not set up.' });
+  const r = await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${site.published.project}`);
+  if (!r.ok && r.status !== 404) return res.status(502).json({ error: 'Cloudflare refused: ' + cfErr(r) });
+  delete site.published; writeSites(all);
+  res.json({ ok: true });
+});
+
 app.post('/api/pages/:id/publish', async (req, res) => {
   const id = req.params.id;
   const c = readPublishCreds();
@@ -1265,53 +1406,18 @@ app.post('/api/pages/:id/publish', async (req, res) => {
   if (!pg) return res.status(404).json({ error: 'Only custom pages can be published.' });
   const bad = validatePublishHtml(req.body && req.body.html);
   if (bad) return res.status(400).json({ error: bad });
-  let html = req.body.html;
   const warnings = [];
-  const project = (pg.published && pg.published.project) ||
-    `${(pg.title || id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'page'}-${crypto.randomBytes(4).toString('hex')}`;
+  const project = (pg.published && pg.published.project) || projectNameFor(pg.title || id);
   const dir = path.join(PUBLISH_TMP, project);
   try {
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
-    // Images under /media need the dashboard login — copy them in.
-    // Also after ";" — inside an HTML-escaped style attribute the quote is
-    // &#39;, which ends in ";" (a section background image, fb-1790206467677).
-    html = html.replace(/(["'(;])\/media\/([A-Za-z0-9_-]{1,64})\/([^"')&\s?#]{1,200})/g, (m0, q, lib, file) => {
-      const clean = path.basename(decodeURIComponent(file));
-      const src = path.join(MEDIA_DIR, lib, clean);
-      if (!src.startsWith(MEDIA_DIR + path.sep) || !fs.existsSync(src)) { warnings.push(`image not found: /media/${lib}/${clean}`); return m0; }
-      const dest = `${lib}-${clean}`.replace(/[^A-Za-z0-9._-]/g, '_');
-      fs.copyFileSync(src, path.join(dir, 'assets', dest));
-      return `${q}assets/${dest}`;
-    });
-    if (/\/media\//.test(html)) warnings.push('some images could not be bundled and will not show on the public page');
-    // Anything still pointing at this server's paths would lead visitors back to it.
-    const dashLinks = [...new Set((html.match(/href="\/(?!\/)[^"]*"/g) || []).map(x => x.slice(6, -1)))];
-    if (dashLinks.length) warnings.push(`links that point at the dashboard (visitors cannot open them): ${dashLinks.slice(0, 8).join(', ')}`);
-    html = html.replace(/<meta name="generator"[^>]*>\n?/i, '')
-               .replace('<meta name="viewport"', '<meta name="robots" content="noindex, nofollow">\n<meta name="viewport"');
-    fs.writeFileSync(path.join(dir, 'index.html'), html);
-    // Unknown paths get a plain 404 instead of Cloudflare's fall-back-to-index.
-    fs.writeFileSync(path.join(dir, '404.html'), '<!DOCTYPE html><meta charset="utf-8"><meta name="robots" content="noindex"><title>Not found</title><p style="font-family:system-ui;padding:2rem">Not found.</p>');
-    fs.writeFileSync(path.join(dir, '_headers'), '/*\n  X-Robots-Tag: noindex, nofollow\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n');
-    // Project: create on first publish (unguessable name = unlisted link).
-    if (!(pg.published && pg.published.project)) {
-      const cr = await cfApi(c, 'POST', `/accounts/${c.accountId}/pages/projects`, { name: project, production_branch: 'main' });
-      if (!cr.ok) throw new Error('Could not create the Cloudflare project: ' + cfErr(cr));
-    }
-    const out = await new Promise((resolve) => {
-      execFile(WRANGLER_BIN, ['pages', 'deploy', dir, '--project-name', project, '--branch', 'main', '--commit-dirty=true'], {
-        cwd: PUBLISH_TMP, timeout: 180000, maxBuffer: 4 * 1024 * 1024,
-        env: { PATH: process.env.PATH, HOME: '/home/ubuntu', CLOUDFLARE_API_TOKEN: c.token, CLOUDFLARE_ACCOUNT_ID: c.accountId, WRANGLER_SEND_METRICS: 'false', CI: '1' }
-      }, (err, stdout, stderr) => resolve({ err, text: `${stdout || ''}\n${stderr || ''}` }));
-    });
-    if (out.err) throw new Error('Deploy failed: ' + out.text.replace(new RegExp(c.token, 'g'), '***').trim().split('\n').slice(-4).join(' '));
+    bundlePublishDir(dir, { 'index.html': req.body.html }, null, warnings);
+    await deployToPages(c, project, dir, !(pg.published && pg.published.project));
     const url = `https://${project}.pages.dev`;
     pg.published = { project, url, publishedAt: new Date().toISOString(), by: ownerName(req) };
     writePagesRegistry(pages);
-    res.json({ ok: true, url, project, warnings });
+    res.json({ ok: true, url, project, warnings: [...new Set(warnings)] });
   } catch (e) {
-    res.status(502).json({ error: e.message, warnings });
+    res.status(502).json({ error: e.message, warnings: [...new Set(warnings)] });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1420,7 +1526,7 @@ app.post('/api/pages', (req, res) => {
   
   const docPath = getPageDocPath(id);
   if (!fs.existsSync(docPath) || templateId) {
-    fs.writeFileSync(docPath, JSON.stringify(startDoc, null, 2));
+    writeFileAtomic(docPath, JSON.stringify(startDoc, null, 2));
   }
   
   res.json({ success: true, page: { id, title, icon, owner: ownerName(req), shared: false } });
@@ -1474,7 +1580,7 @@ app.post('/api/pages/:id/content', (req, res) => {
     if (!isAdminReq(req)) saveDoc = restrictPageDoc(doc).doc;   // pages users never store raw HTML
     else sanitizePageDocFields(saveDoc);
     saveDoc.updatedAt = new Date().toISOString();
-    fs.writeFileSync(docPath, JSON.stringify(saveDoc, null, 2));
+    writeFileAtomic(docPath, JSON.stringify(saveDoc, null, 2));
     res.json({ success: true, updatedAt: saveDoc.updatedAt });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1571,7 +1677,7 @@ app.post('/api/templates', (req, res) => {
   };
   try {
     if (!fs.existsSync(TEMPLATES_DIR)) fs.mkdirSync(TEMPLATES_DIR);
-    fs.writeFileSync(path.join(TEMPLATES_DIR, `${t.id}.json`), JSON.stringify(t, null, 2));
+    writeFileAtomic(path.join(TEMPLATES_DIR, `${t.id}.json`), JSON.stringify(t, null, 2));
     res.status(201).json({ id: t.id, name: t.name, kind, createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: cleanDoc.widgets.length });
   } catch (err) {
     res.status(500).json({ error: err.message });

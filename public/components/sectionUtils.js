@@ -7,6 +7,9 @@ export function esc(s) {
 export function safeHref(v) {
   const s = String(v || '').trim();
   if (/^(https?:\/\/|\/(?!\/)|#|mailto:)/i.test(s)) return s;
+  // page:<id> = another page of the same site (fb-1790206467703): the builder
+  // switches tab, a published site rewrites it to that page's file.
+  if (/^page:[a-z0-9-]{1,64}$/.test(s)) return s;
   return '#';
 }
 // Images: http(s) or site-relative only.

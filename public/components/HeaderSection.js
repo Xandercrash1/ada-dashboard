@@ -6,7 +6,7 @@ class HeaderSection extends HTMLElement {
   static configSchema = [
     { attr: 'brand', label: 'Name / brand', type: 'text', default: 'Your name' },
     { attr: 'logo', label: 'Logo image', type: 'image', default: '' },
-    { attr: 'links', label: 'Menu — one per line: Label | #section-anchor or URL', type: 'textarea', default: 'About | #about\nServices | #services\nContact | #contact' },
+    { attr: 'links', label: 'Menu — one per line: Label | #anchor, page:page-id (another page of your site) or URL', type: 'textarea', default: 'About | #about\nServices | #services\nContact | #contact' },
     { attr: 'cta-label', label: 'Button label', type: 'text', default: '' },
     { attr: 'cta-href', label: 'Button link', type: 'text', default: '#contact' },
     { attr: 'sticky', label: 'Stay at the top when scrolling', type: 'select', options: [['no', 'No'], ['yes', 'Yes']], default: 'no' },

@@ -5697,6 +5697,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
              <p class="text-xs text-gray-400">Anyone with this link can see the page. It is not listed anywhere and search engines are told to ignore it. Changes appear after you Republish.</p>`
           : `<p class="text-xs text-gray-400">Makes a static copy of this page's sections on Cloudflare with a private, unguessable https link you can send to friends. Visitors see only this page — nothing of your dashboard or server. Widget grids are left out.</p>`}
         ${note || ''}
+        <button id="pub-site" class="w-full text-left px-3 py-2 rounded-lg border border-white/10 hover:border-emerald-500/60 text-xs text-gray-300"><i class="fa-solid fa-sitemap text-emerald-400 mr-2"></i>Publish several pages together as a site (shared menu, one link)…</button>
         <div class="flex flex-wrap gap-2 pt-1">
           ${p ? '<button id="pub-unpublish" class="px-3 py-2 rounded-lg text-xs text-rose-400 border border-white/10">Unpublish</button>' : ''}
           <div class="flex-1"></div>
@@ -5705,6 +5706,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         </div>`);
       m.querySelector('#pub-cancel').onclick = () => m.remove();
       m.querySelector('#pub-go').onclick = () => publishCurrentPage();
+      m.querySelector('#pub-site').onclick = () => openSiteDialog();
       const cp = m.querySelector('#pub-copy');
       if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(p.url); showAppToast('Link copied', 'success'); } catch (e) { showAppToast(p.url, 'info'); } };
       const un = m.querySelector('#pub-unpublish');
@@ -5723,6 +5725,105 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       openPublishDialog(`<div class="text-xs text-emerald-300">Live. It can take a minute before the link answers the first time.</div>${warn}`);
       updatePageAccessUI();
     }
+    // ---- Sites (fb-1790206467703) ----
+    let siteDraft = null;
+    async function openSiteDialog(note) {
+      let sites = [];
+      try { sites = await (await fetch('/api/sites')).json(); } catch (e) {}
+      await loadCustomPages();
+      const me = window.ME || {};
+      const mine = customPages.filter(pg => me.role === 'admin' || pg.owner === me.username);
+      const existing = (Array.isArray(sites) ? sites : []).find(x => x.pages.includes(currentCanvasPage));
+      siteDraft = existing ? JSON.parse(JSON.stringify(existing)) : (siteDraft && !siteDraft.id ? siteDraft : { name: (currentPageEntry() || {}).title || 'My site', pages: [currentCanvasPage], home: currentCanvasPage, sharedChrome: true });
+      const s = siteDraft;
+      const m = publishModal(`
+        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-sitemap text-emerald-400 mr-2"></i>${s.id ? 'Site' : 'New site'}</h3>
+        <div><label class="block text-xs text-gray-400 mb-1" for="site-name">Site name</label><input id="site-name" class="${CONFIG_INPUT_CLS}" value="${escapeHtml(s.name)}"></div>
+        <div><div class="text-xs text-gray-400 mb-1">Pages in the site — the home page becomes the front page</div>
+          <div class="space-y-1 max-h-52 overflow-y-auto custom-scrollbar">${mine.map(pg => `
+            <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 text-sm text-white">
+              <input type="checkbox" class="site-page accent-emerald-500" value="${escapeHtml(pg.id)}" ${s.pages.includes(pg.id) ? 'checked' : ''}>
+              <span class="flex-1 truncate">${escapeHtml(pg.title)}</span>
+              <span class="text-[10px] text-gray-500 font-mono">page:${escapeHtml(pg.id)}</span>
+              <input type="radio" name="site-home" class="accent-emerald-500" value="${escapeHtml(pg.id)}" ${s.home === pg.id ? 'checked' : ''} title="Home page">
+            </label>`).join('')}</div>
+          <p class="text-[11px] text-gray-500 mt-1">Tick pages to include · the round button marks the home page · link between them in menus with <span class="font-mono">page:page-id</span>.</p></div>
+        <label class="flex items-center gap-2 text-xs text-gray-300"><input type="checkbox" id="site-chrome" class="accent-emerald-500" ${s.sharedChrome ? 'checked' : ''}> Use the home page's header and footer on pages that have none</label>
+        ${s.published ? `<div class="flex items-center gap-2 bg-black/20 border border-white/10 rounded-lg px-3 py-2"><a href="${escapeHtml(s.published.url)}" target="_blank" rel="noopener noreferrer" class="text-emerald-400 text-sm break-all flex-1">${escapeHtml(s.published.url)}</a></div>` : ''}
+        ${note || ''}
+        <div class="flex flex-wrap gap-2 pt-1">
+          ${s.id ? '<button id="site-delete" class="px-3 py-2 rounded-lg text-xs text-rose-400 border border-white/10">Delete site</button>' : ''}
+          ${s.published ? '<button id="site-unpublish" class="px-3 py-2 rounded-lg text-xs text-rose-400 border border-white/10">Unpublish</button>' : ''}
+          <div class="flex-1"></div>
+          <button id="site-close" class="px-3 py-2 text-xs text-gray-400 hover:text-white">Close</button>
+          <button id="site-save" class="px-3 py-2 rounded-lg text-xs text-white border border-white/20">Save</button>
+          <button id="site-publish" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold">${s.published ? 'Republish site' : 'Publish site'}</button>
+        </div>`);
+      const read = () => ({
+        name: m.querySelector('#site-name').value.trim(),
+        pages: [...m.querySelectorAll('.site-page:checked')].map(x => x.value),
+        home: (m.querySelector('input[name="site-home"]:checked') || {}).value || currentCanvasPage,
+        sharedChrome: m.querySelector('#site-chrome').checked
+      });
+      const save = async () => {
+        Object.assign(siteDraft, read());
+        const res = await fetch(siteDraft.id ? `/api/sites/${encodeURIComponent(siteDraft.id)}` : '/api/sites', { method: siteDraft.id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(siteDraft) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { showAppToast(data.error || 'Could not save the site', 'error'); return null; }
+        siteDraft = data; return data;
+      };
+      m.querySelector('#site-close').onclick = () => m.remove();
+      m.querySelector('#site-save').onclick = async () => { if (await save()) { showAppToast('Site saved', 'success'); openSiteDialog(); } };
+      m.querySelector('#site-publish').onclick = async () => { const site = await save(); if (site) publishSite(site); };
+      const un = m.querySelector('#site-unpublish');
+      if (un) un.onclick = async () => {
+        if (!await adaConfirm({ title: 'Unpublish site?', message: 'The public link stops working for every page of the site.', confirmLabel: 'Unpublish', danger: true })) return;
+        const res = await fetch(`/api/sites/${encodeURIComponent(s.id)}/publish`, { method: 'DELETE' });
+        showAppToast(res.ok ? 'Site unpublished' : 'Could not unpublish', res.ok ? 'success' : 'error');
+        siteDraft = null; openSiteDialog();
+      };
+      const del = m.querySelector('#site-delete');
+      if (del) del.onclick = async () => {
+        if (!await adaConfirm({ title: 'Delete site?', message: 'The pages themselves are kept. If the site is published, its public link stops working.', confirmLabel: 'Delete site', danger: true })) return;
+        const res = await fetch(`/api/sites/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+        showAppToast(res.ok ? 'Site deleted' : 'Could not delete', res.ok ? 'success' : 'error');
+        siteDraft = null; m.remove();
+      };
+    }
+    // Every page of the site is exported from its saved document; with shared
+    // chrome, pages without a header/footer borrow the home page's.
+    async function buildSiteExports(site) {
+      const docs = {};
+      for (const pid of site.pages) docs[pid] = await (await fetch(`/api/pages/${encodeURIComponent(pid)}/content`)).json();
+      const home = docs[site.home] || {};
+      const homeSecs = Array.isArray(home.pageSections) ? home.pageSections : [];
+      const hHeader = homeSecs.find(x => x.type === 'header' && !x.hidden), hFooter = homeSecs.find(x => x.type === 'footer' && !x.hidden);
+      const out = {};
+      for (const pid of site.pages) {
+        const d = JSON.parse(JSON.stringify(docs[pid] || {}));
+        d.pageSections = Array.isArray(d.pageSections) ? d.pageSections : [];
+        if (site.sharedChrome && pid !== site.home) {
+          if (hHeader && !d.pageSections.some(x => x.type === 'header')) d.pageSections.unshift(JSON.parse(JSON.stringify(hHeader)));
+          if (hFooter && !d.pageSections.some(x => x.type === 'footer')) d.pageSections.push(JSON.parse(JSON.stringify(hFooter)));
+          if (!d.tokens && home.tokens) d.tokens = home.tokens;
+        }
+        const built = await buildPageExport(d, pid);
+        if (!built) throw new Error(`"${(customPages.find(pg => pg.id === pid) || {}).title || pid}" has no sections to publish`);
+        out[pid] = built.html;
+      }
+      return out;
+    }
+    async function publishSite(site) {
+      publishModal(`<div class="flex items-center gap-3 text-sm text-gray-300"><i class="fa-solid fa-spinner fa-spin text-emerald-400"></i> Publishing ${site.pages.length} page${site.pages.length === 1 ? '' : 's'} to Cloudflare…</div>`);
+      let pages;
+      try { pages = await buildSiteExports(site); } catch (e) { openSiteDialog(`<div class="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg p-2">${escapeHtml(e.message)}</div>`); return; }
+      const res = await fetch(`/api/sites/${encodeURIComponent(site.id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pages }) });
+      const data = await res.json().catch(() => ({}));
+      const warn = (data.warnings || []).length ? `<div class="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2">${data.warnings.map(escapeHtml).join('<br>')}</div>` : '';
+      siteDraft = null;
+      openSiteDialog(res.ok ? `<div class="text-xs text-emerald-300">Live — ${site.pages.length} page(s). It can take a minute before the link answers the first time.</div>${warn}` : `<div class="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg p-2">${escapeHtml(data.error || 'Publishing failed')}</div>${warn}`);
+    }
+
     async function unpublishPage(id, fromPanel) {
       if (!await adaConfirm({ title: 'Unpublish?', message: 'The public link stops working. You can publish again later (it gets a new link).', confirmLabel: 'Unpublish', danger: true })) return;
       const res = await fetch(`/api/pages/${encodeURIComponent(id)}/publish`, { method: 'DELETE' });
@@ -5903,17 +6004,21 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       return [...tw.sheet.cssRules].map(keepRule).filter(Boolean).join('\n');
     }
 
-    async function buildPageExport() {
-      const secs = visiblePageSections(homepageDoc).filter(x => x.type !== 'grid');
+    async function buildPageExport(docIn, pageIdIn) {
+      const doc = docIn || homepageDoc;
+      const pageId = pageIdIn || currentCanvasPage;
+      const secs = visiblePageSections(doc).filter(x => x.type !== 'grid');
       if (!secs.length) return null;
       const host = document.createElement('div');
       host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1280px;';
       document.body.appendChild(host);
       try {
-        applyPageTokens(host, homepageDoc);
+        applyPageTokens(host, doc);
         host.innerHTML = secs.map(x => renderPageSection(x, '', { plain: true })).join('');
         await Promise.all([...new Set(secs.map(x => PAGE_SECTION_TYPES[x.type].tag))].map(t => customElements.whenDefined(t)));
-        await new Promise(r => requestAnimationFrame(() => setTimeout(r, 60)));   // let Tailwind see the classes
+        // A timer, not requestAnimationFrame: rAF never fires in a background tab,
+        // which stalled exports started from one.
+        await new Promise(r => setTimeout(r, 120));   // let Tailwind see the classes
         const body = [...host.querySelectorAll('.page-section')].map((el, i) => {
           const comp = el.firstElementChild;
           if (!comp) return '';
@@ -5926,10 +6031,10 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const vars = ['--ada-font-heading', '--ada-font-body', '--ada-h1', '--ada-h2', '--ada-body', '--ada-space', '--ada-radius', '--ada-brand', '--ada-surface', '--ada-text', '--ada-muted', '--ada-on-brand',
           '--ada-brand-base', '--ada-on-brand-base', '--ada-on-brand-muted', '--ada-surface-alt', '--ada-surface-gradient']
           .map(v => `${v}: ${host.style.getPropertyValue(v)};`).join(' ');
-        const t = resolvePageTokens(homepageDoc);
+        const t = resolvePageTokens(doc);
         const fonts = [t.fontHeading, t.fontBody].map(st => { const m = /^['"]?([^'",]+)['"]?/.exec(st || ''); return m && WEB_FONTS[(FONT_ALIASES[m[1].trim()] || m[1].trim())] ? WEB_FONTS[FONT_ALIASES[m[1].trim()] || m[1].trim()] : null; }).filter(Boolean);
         const fontLink = fonts.length ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?${[...new Set(fonts)].map(f => 'family=' + f).join('&')}&display=swap">` : '';
-        const pageInfo = customPages.find(pg => pg.id === currentCanvasPage);
+        const pageInfo = customPages.find(pg => pg.id === pageId);
         const hero = secs.find(x => x.type === 'hero');
         const title = (hero && hero.props && hero.props.heading) || (pageInfo ? pageInfo.title : 'Page');
         const desc = (hero && hero.props && hero.props.subheading) || '';
@@ -6084,6 +6189,14 @@ ${body}
       m.querySelector('#ip-upload').onclick = () => { m.remove(); uploadImageFor(inputId); };
       m.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { setFieldValue(inputId, b.dataset.pick); m.remove(); });
     }
+    // page:<id> links switch to that page in the builder (fb-1790206467703).
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest && e.target.closest('#home-widgets a[href^="page:"]');
+      if (!a) return;
+      e.preventDefault();
+      const id = a.getAttribute('href').slice(5);
+      if (customPages.some(pg => pg.id === id)) switchTab(id); else showAppToast(`No page called "${id}"`, 'warn');
+    });
     // In-builder menu links: #anchor scrolls to the section with that anchor.
     document.addEventListener('click', (e) => {
       const a = e.target.closest && e.target.closest('#home-widgets a[href^="#"]');
