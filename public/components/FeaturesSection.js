@@ -31,8 +31,8 @@ class FeaturesSection extends HTMLElement {
       <section class="w-full" style="background: var(--ada-surface); color: var(--ada-text); border-radius: var(--ada-sec-radius, var(--ada-radius)); padding: var(--ada-space) 1.5rem; font-family: var(--ada-font-body);">
         <div class="max-w-6xl mx-auto">
           <div class="text-center" style="margin-bottom: 2.5rem;">
-            <h2 style="font-family: var(--ada-font-heading); font-size: clamp(1.5rem, 4.5vw, var(--ada-h2)); line-height: 1.15; font-weight: 750;">${esc(a('heading', 'Features'))}</h2>
-            ${sub ? `<p style="color: var(--ada-muted); margin-top: .75rem; font-size: var(--ada-body);">${esc(sub)}</p>` : ''}
+            <h2 data-edit="heading" style="font-family: var(--ada-font-heading); font-size: clamp(1.5rem, 4.5vw, var(--ada-h2)); line-height: 1.15; font-weight: 750;">${esc(a('heading', 'Features'))}</h2>
+            ${sub ? `<p data-edit="subheading" style="color: var(--ada-muted); margin-top: .75rem; font-size: var(--ada-body);">${esc(sub)}</p>` : ''}
           </div>
           <div data-feature-grid class="grid grid-cols-1 sm:grid-cols-2 ${cols} gap-5">
             ${items.map(it => `

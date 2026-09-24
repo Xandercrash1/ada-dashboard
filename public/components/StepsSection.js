@@ -11,7 +11,7 @@ class StepsSection extends HTMLElement {
   render() {
     const a = (k, d = '') => this.getAttribute(k) ?? d;
     const def = (k) => (StepsSection.configSchema.find(f => f.attr === k) || {}).default || '';
-    const h = a('heading', def('heading')); const head = h ? `<h2 class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
+    const h = a('heading', def('heading')); const head = h ? `<h2 data-edit="heading" class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
     const items = lines(a('items', def('items')), 8).map(l => { const [t, ...rest] = l.split('|'); return { t: t.trim(), x: rest.join('|').trim() }; }).filter(i => i.t);
     this.innerHTML = shell(`<div class="max-w-6xl mx-auto">${head}<ol data-steps class="grid grid-cols-1 md:grid-cols-${Math.min(4, Math.max(2, items.length))} gap-8">${items.map((i, n) => `
       <li><div class="w-11 h-11 flex items-center justify-center font-bold" style="border-radius: 999px; background: var(--ada-brand); color: var(--ada-on-brand, #fff); font-family: var(--ada-font-heading);">${n + 1}</div>

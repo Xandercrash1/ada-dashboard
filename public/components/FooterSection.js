@@ -14,7 +14,7 @@ class FooterSection extends HTMLElement {
     const links = lines(a('links'), 12).map(l => { const [label, url = '#'] = l.split('|').map(s => s.trim()); return { label, href: safeHref(url) }; }).filter(l => l.label);
     const small = a('text') || `© ${new Date().getFullYear()}${a('brand') ? ' ' + a('brand') : ''}`;
     this.innerHTML = shell(`<div data-footer class="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4" style="font-size: calc(var(--ada-body) * .92);">
-      <div>${a('brand') ? `<div style="font-family: var(--ada-font-heading); font-weight: 700; font-size: calc(var(--ada-body) * 1.15);">${esc(a('brand'))}</div>` : ''}<div style="color: var(--ada-muted);">${esc(small)}</div></div>
+      <div>${a('brand') ? `<div data-edit="brand" style="font-family: var(--ada-font-heading); font-weight: 700; font-size: calc(var(--ada-body) * 1.15);">${esc(a('brand'))}</div>` : ''}<div style="color: var(--ada-muted);">${esc(small)}</div></div>
       ${links.length ? `<nav class="flex flex-wrap gap-x-5 gap-y-2">${links.map(l => `<a href="${esc(l.href)}" style="color: var(--ada-muted);" class="hover:underline">${esc(l.label)}</a>`).join('')}</nav>` : ''}
     </div>`).replace('padding: var(--ada-space) 1.5rem', 'padding: calc(var(--ada-space) * 0.5) 1.5rem');
   }

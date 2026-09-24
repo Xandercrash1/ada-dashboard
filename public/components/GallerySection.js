@@ -23,7 +23,7 @@ class GallerySection extends HTMLElement {
             ${i.caption ? `<figcaption style="color: var(--ada-muted); font-size: calc(var(--ada-body) * .9); margin-top: .5rem;">${esc(i.caption)}</figcaption>` : ''}
           </figure>`).join('')}</div>`
       : `<div data-gallery class="text-center py-10" style="color: var(--ada-muted);"><i class="fa-regular fa-images text-3xl"></i><p class="mt-2 text-sm">Add image URLs in the section editor.</p></div>`;
-    this.innerHTML = shell(`<div class="max-w-6xl mx-auto">${h ? `<h2 class="text-center" style="${headingStyle()} margin-bottom: 2rem;">${esc(h)}</h2>` : ''}${body}</div>`);
+    this.innerHTML = shell(`<div class="max-w-6xl mx-auto">${h ? `<h2 data-edit="heading" class="text-center" style="${headingStyle()} margin-bottom: 2rem;">${esc(h)}</h2>` : ''}${body}</div>`);
   }
 }
 customElements.define('ada-section-gallery', GallerySection);

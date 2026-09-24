@@ -18,8 +18,8 @@ class CtaSection extends HTMLElement {
     const tone = a('tone', 'brand') === 'surface' ? 'surface' : 'brand';
     const text = a('text'), l1 = a('cta-label', 'Get started'), l2 = a('secondary-label');
     this.innerHTML = shell(`<div class="max-w-3xl mx-auto text-center">
-      <h2 style="${headingStyle()}">${esc(a('heading', 'Ready to get started?'))}</h2>
-      ${text ? `<p style="opacity: .85; margin-top: .75rem; font-size: calc(var(--ada-body) * 1.1);">${esc(text)}</p>` : ''}
+      <h2 data-edit="heading" style="${headingStyle()}">${esc(a('heading', 'Ready to get started?'))}</h2>
+      ${text ? `<p data-edit="text" style="opacity: .85; margin-top: .75rem; font-size: calc(var(--ada-body) * 1.1);">${esc(text)}</p>` : ''}
       <div class="flex flex-wrap justify-center gap-3" style="margin-top: 1.75rem;">
         ${l1 ? `<a href="${esc(safeHref(a('cta-href', '#')))}" class="px-6 py-3 font-semibold" style="${buttonStyle(tone === 'brand' ? 'light' : 'brand')}">${esc(l1)}</a>` : ''}
         ${l2 ? `<a href="${esc(safeHref(a('secondary-href', '#')))}" class="px-6 py-3 font-semibold" style="${buttonStyle('ghost')}">${esc(l2)}</a>` : ''}

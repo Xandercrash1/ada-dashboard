@@ -19,7 +19,7 @@ class PricingSection extends HTMLElement {
     const cols = plans.length >= 3 ? 'lg:grid-cols-3' : plans.length === 2 ? 'lg:grid-cols-2' : '';
     const sub = a('subheading');
     this.innerHTML = shell(`<div class="max-w-6xl mx-auto">
-      <div class="text-center" style="margin-bottom: 2.5rem;"><h2 style="${headingStyle()}">${esc(a('heading', 'Pricing'))}</h2>${sub ? `<p style="color: var(--ada-muted); margin-top: .75rem;">${esc(sub)}</p>` : ''}</div>
+      <div class="text-center" style="margin-bottom: 2.5rem;"><h2 data-edit="heading" style="${headingStyle()}">${esc(a('heading', 'Pricing'))}</h2>${sub ? `<p data-edit="subheading" style="color: var(--ada-muted); margin-top: .75rem;">${esc(sub)}</p>` : ''}</div>
       <div data-pricing class="grid grid-cols-1 sm:grid-cols-2 ${cols} gap-5 items-stretch">${plans.map(p => `
         <div class="flex flex-col p-6" style="border-radius: calc(var(--ada-radius) * 0.75); ${p.featured ? 'border: 2px solid var(--ada-brand); background: color-mix(in srgb, var(--ada-brand) 10%, transparent);' : 'border: 1px solid color-mix(in srgb, var(--ada-text) 12%, transparent); background: color-mix(in srgb, var(--ada-text) 4%, transparent);'}">
           ${p.featured ? `<span class="self-start text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 mb-3" style="background: var(--ada-brand); color: var(--ada-on-brand, #fff); border-radius: 999px;">Popular</span>` : ''}

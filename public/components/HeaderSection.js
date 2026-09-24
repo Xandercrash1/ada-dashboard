@@ -27,7 +27,7 @@ class HeaderSection extends HTMLElement {
         <div class="max-w-6xl mx-auto flex items-center justify-between gap-4">
           <a href="#" class="flex items-center gap-3 min-w-0" style="color: var(--ada-text);">
             ${logo ? `<img src="${esc(logo)}" alt="${esc(a('brand', ''))}" class="h-9 w-auto" style="max-width: 140px; object-fit: contain;">` : ''}
-            <span class="truncate" style="font-family: var(--ada-font-heading); font-weight: 800; font-size: calc(var(--ada-body) * 1.2);">${esc(a('brand', 'Your name'))}</span>
+            <span data-edit="brand" class="truncate" style="font-family: var(--ada-font-heading); font-weight: 800; font-size: calc(var(--ada-body) * 1.2);">${esc(a('brand', 'Your name'))}</span>
           </a>
           <nav class="hidden md:flex items-center gap-7" style="font-size: calc(var(--ada-body) * .95);">
             ${linkHtml('hover:opacity-70')}

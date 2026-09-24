@@ -30,8 +30,8 @@ class HeroSection extends HTMLElement {
     this.innerHTML = `
       <section class="w-full overflow-hidden" style="${bg} color: var(--ada-text); border-radius: var(--ada-sec-radius, var(--ada-radius)); padding: var(--ada-space) 1.5rem; font-family: var(--ada-font-body);">
         <div class="max-w-4xl ${align === 'center' ? 'mx-auto text-center' : 'text-left'}">
-          <h1 data-hero-heading style="font-family: var(--ada-font-heading); font-size: clamp(1.75rem, 6vw, var(--ada-h1)); line-height: 1.1; font-weight: 800; letter-spacing: -0.02em;">${esc(heading)}</h1>
-          ${sub ? `<p style="color: var(--ada-muted); font-size: calc(var(--ada-body) * 1.15); line-height: 1.6; margin-top: 1rem;">${esc(sub)}</p>` : ''}
+          <h1 data-hero-heading data-edit="heading" style="font-family: var(--ada-font-heading); font-size: clamp(1.75rem, 6vw, var(--ada-h1)); line-height: 1.1; font-weight: 800; letter-spacing: -0.02em;">${esc(heading)}</h1>
+          ${sub ? `<p data-edit="subheading" style="color: var(--ada-muted); font-size: calc(var(--ada-body) * 1.15); line-height: 1.6; margin-top: 1rem;">${esc(sub)}</p>` : ''}
           ${label ? `<a href="${esc(safeHref(a('cta-href', '#')))}" class="inline-block px-6 py-3 font-semibold" style="margin-top: 1.75rem; background: var(--ada-brand); color: var(--ada-on-brand, #ffffff); border-radius: calc(var(--ada-radius) * 0.6);">${esc(label)}</a>` : ''}
         </div>
       </section>`;

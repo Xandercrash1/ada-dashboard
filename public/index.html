@@ -50,6 +50,11 @@
     })();
   </script>
   <style>
+    .ada-inline-edit { outline: 1px dashed transparent; outline-offset: 3px; border-radius: 4px; cursor: text; transition: outline-color .15s; }
+    .ada-inline-edit:hover { outline-color: rgba(129, 140, 248, .7); }
+    .ada-inline-edit:focus { outline: 2px solid rgb(129, 140, 248); }
+    .page-section.sec-drop-before { box-shadow: 0 -4px 0 0 rgb(129, 140, 248); }
+    .page-section.sec-drop-after { box-shadow: 0 4px 0 0 rgb(129, 140, 248); }
     .role-pages #tab-btn-todo, .role-pages #tab-btn-tools, .role-pages #tab-btn-server,
     .role-pages #mob-btn-todo, .role-pages #mob-btn-tools, .role-pages #mob-btn-server,
     .role-pages .ntf-bell, .role-pages #edit-widget-advanced, .role-pages .admin-only { display: none !important; }
@@ -284,7 +289,8 @@
           <!-- PAGE THEME PRESET (fb-1788928004000) — edit mode only; applies one cohesive theme/accent to every widget on this page -->
           <button onclick="openPublishDialog()" id="publish-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Publish this page as a public (unlisted) website"><i class="fa-solid fa-globe"></i> <span>Publish</span></button>
           <button onclick="togglePageShared()" id="share-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Share this page with everyone"><i class="fa-solid fa-lock"></i> <span>Private</span></button>
-          <button onclick="exportPage('preview')" id="export-preview-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Preview this page as a standalone website"><i class="fa-solid fa-eye"></i></button>
+          <button onclick="openHistory()" id="history-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Version history"><i class="fa-solid fa-clock-rotate-left"></i></button>
+          <button onclick="openDevicePreview()" id="export-preview-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Preview this page as a standalone website"><i class="fa-solid fa-eye"></i></button>
           <button onclick="exportPage('download')" id="export-page-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Export this page as one HTML file"><i class="fa-solid fa-file-export"></i></button>
           <button onclick="openPageStyle()" id="page-style-btn" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs transition-all" title="Page style — fonts, colours, spacing"><i class="fa-solid fa-palette"></i></button>
           <select id="page-theme-select" onchange="applyPageTheme(this.value)" title="Page theme preset" class="hidden px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-300 hover:text-white hover:border-gray-500 text-xs font-medium focus:outline-none focus:border-indigo-500 transition-all">
@@ -5259,7 +5265,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (t) t.classList.toggle('hidden', !window.isEditingLayout);
       const ps = document.getElementById('page-style-btn');
       if (ps) ps.classList.toggle('hidden', !window.isEditingLayout);
-      ['export-page-btn', 'export-preview-btn'].forEach(id => { const b = document.getElementById(id); if (b) b.classList.toggle('hidden', !window.isEditingLayout); });
+      ['export-page-btn', 'export-preview-btn', 'history-btn'].forEach(id => { const b = document.getElementById(id); if (b) b.classList.toggle('hidden', !window.isEditingLayout); });
       if (typeof updatePageAccessUI === 'function') updatePageAccessUI();
     }
     async function restoreLayoutSnapshot(snap) {
@@ -5500,9 +5506,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const btn = (icon, title, call) => `<button onclick="${call}" title="${title}" class="w-8 h-8 rounded-md hover:bg-white/15 flex items-center justify-center" style="color:#f3f4f6"><i class="fa-solid ${icon} text-xs"></i></button>`;
       const chrome = (window.isEditingLayout && !plain) ? `
         <div class="section-toolbar absolute top-0 right-0 z-30 flex items-center gap-0.5 backdrop-blur rounded-lg p-0.5 shadow-lg" style="background:rgba(17,24,39,.92)">
-          <span class="px-2 text-[10px] uppercase font-bold tracking-wider" style="color:#d1d5db"><i class="fa-solid ${def.icon} mr-1"></i>${def.label}</span>
+          <button onpointerdown="startSectionDrag(event, '${sid}')" title="Drag to move" class="w-8 h-8 rounded-md hover:bg-white/15 flex items-center justify-center cursor-grab" style="color:#f3f4f6; touch-action:none"><i class="fa-solid fa-grip-vertical text-xs"></i></button>
+          <span class="px-1 text-[10px] uppercase font-bold tracking-wider" style="color:#d1d5db"><i class="fa-solid ${def.icon} mr-1"></i>${def.label}</span>
           ${btn('fa-arrow-up', 'Move up', `moveSection('${sid}', -1)`)}${btn('fa-arrow-down', 'Move down', `moveSection('${sid}', 1)`)}
           ${btn('fa-sliders', 'Edit section', `editSection('${sid}')`)}
+          ${sec.type === 'grid' ? '' : btn('fa-copy', 'Duplicate section', `duplicateSection('${sid}')`)}
           ${btn('fa-trash', 'Remove section', `removeSection('${sid}')`)}
         </div>` : '';
       const editCls = (window.isEditingLayout && !plain) ? ' pt-10 outline-dashed outline-2 outline-offset-4 outline-indigo-400/40 rounded-xl' : '';
@@ -6023,7 +6031,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           const comp = el.firstElementChild;
           if (!comp) return '';
           const st = sectionStyle(secs[i]);
-          return `<div class="ada-sec${st.full ? ' ada-sec-full' : ''}"${st.anchor ? ` id="${st.anchor}"` : ''}${st.style ? ` style="${escapeHtml(st.style)}"` : ''}>${comp.innerHTML.trim()}</div>`;
+          const inner = comp.innerHTML.trim().replace(/ data-edit="[a-z-]+"/g, '').replace(/ contenteditable="[a-z-]+"/g, '').replace(/ spellcheck="(true|false)"/g, '');
+          return `<div class="ada-sec${st.full ? ' ada-sec-full' : ''}"${st.anchor ? ` id="${st.anchor}"` : ''}${st.style ? ` style="${escapeHtml(st.style)}"` : ''}>${inner}</div>`;
         }).join('\n');
         const used = new Set();
         const tmp = document.createElement('div'); tmp.innerHTML = body;
@@ -6139,6 +6148,173 @@ ${body}
     }
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pageStyleEdit) closePageStyle('cancel'); });
     document.addEventListener('click', (e) => { if (e.target && e.target.id === 'page-style-modal') closePageStyle('cancel'); });
+
+    // ===================== EDITING COMFORT (fb-1790206467728) =====================
+    // Click-to-edit text: components mark plain-text props with data-edit="<prop>".
+    function enableInlineEditing() {
+      if (!window.isEditingLayout || !homepageDoc) return;
+      document.querySelectorAll('#home-widgets .page-section').forEach(wrap => {
+        const sec = (homepageDoc.pageSections || []).find(x => x.id === wrap.dataset.sectionId);
+        const comp = wrap.querySelector(':scope > *:not(.section-toolbar)');
+        if (!sec || !comp || !comp.tagName.includes('-')) return;
+        comp.querySelectorAll('[data-edit]').forEach(el => {
+          if (el.getAttribute('contenteditable')) return;
+          el.setAttribute('contenteditable', 'plaintext-only');
+          el.setAttribute('spellcheck', 'true');
+          el.classList.add('ada-inline-edit');
+          el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+            if (e.key === 'Escape') { el.textContent = el.dataset.before || el.textContent; el.blur(); }
+          });
+          el.addEventListener('focus', () => { el.dataset.before = el.textContent; });
+          el.addEventListener('blur', () => commitInlineEdit(sec, comp, el));
+          // Links inside editable text (menu brand) must not navigate while editing.
+          el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+        });
+      });
+    }
+    async function commitInlineEdit(sec, comp, el) {
+      const attr = el.dataset.edit;
+      const value = el.textContent.replace(/\s+/g, ' ').trim().slice(0, 500);
+      if (value === (el.dataset.before || '').replace(/\s+/g, ' ').trim()) return;
+      sec.props = sec.props || {};
+      if (value) sec.props[attr] = value; else delete sec.props[attr];
+      if (value) comp.setAttribute(attr, value); else comp.removeAttribute(attr);   // re-renders the component
+      setTimeout(enableInlineEditing, 0);
+      await saveHomepageDoc();
+    }
+
+    async function duplicateSection(id) {
+      const list = homepageDoc && homepageDoc.pageSections;
+      const i = list ? list.findIndex(x => x.id === id) : -1;
+      if (i < 0) return;
+      const copy = JSON.parse(JSON.stringify(list[i]));
+      copy.id = newSectionId();
+      delete copy.props['sec-anchor'];            // anchors must stay unique
+      list.splice(i + 1, 0, copy);
+      renderHomepage();
+      await saveHomepageDoc();
+      showBuilderToast(`${PAGE_SECTION_TYPES[copy.type].label} duplicated`, { label: 'Undo', onClick: undoLayout });
+    }
+
+    // Drag a section by its grip (pointer events: mouse, pen and touch), with
+    // edge auto-scroll so a phone can move a section past the screen.
+    let secDrag = null;
+    function startSectionDrag(e, id) {
+      if (!window.isEditingLayout) return;
+      e.preventDefault(); e.stopPropagation();
+      const el = document.querySelector(`.page-section[data-section-id="${CSS.escape(id)}"]`);
+      if (!el) return;
+      secDrag = { id, el, y: e.clientY, target: null, timer: setInterval(secDragScroll, 16) };
+      el.style.opacity = '0.45';
+      document.addEventListener('pointermove', onSectionDragMove);
+      document.addEventListener('pointerup', endSectionDrag);
+      document.addEventListener('pointercancel', endSectionDrag);
+      document.body.style.userSelect = 'none';
+    }
+    function secDragScroll() {
+      if (!secDrag) return;
+      const edge = 70, y = secDrag.y, h = window.innerHeight;
+      const dy = y < edge ? -Math.ceil((edge - y) / 4) : y > h - edge ? Math.ceil((y - (h - edge)) / 4) : 0;
+      if (dy) { window.scrollBy(0, dy); onSectionDragMove({ clientX: secDrag.x || 0, clientY: secDrag.y, preventDefault() {} }); }
+    }
+    function onSectionDragMove(e) {
+      if (!secDrag) return;
+      e.preventDefault();
+      secDrag.x = e.clientX; secDrag.y = e.clientY;
+      const under = document.elementFromPoint(e.clientX || 10, e.clientY);
+      const t = under && under.closest && under.closest('#home-widgets .page-section');
+      document.querySelectorAll('.page-section.sec-drop-before, .page-section.sec-drop-after').forEach(x => x.classList.remove('sec-drop-before', 'sec-drop-after'));
+      secDrag.target = null;
+      if (t && t !== secDrag.el) {
+        const r = t.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        t.classList.add(after ? 'sec-drop-after' : 'sec-drop-before');
+        secDrag.target = { id: t.dataset.sectionId, after };
+      }
+    }
+    async function endSectionDrag() {
+      if (!secDrag) return;
+      const d = secDrag; secDrag = null;
+      clearInterval(d.timer);
+      document.removeEventListener('pointermove', onSectionDragMove);
+      document.removeEventListener('pointerup', endSectionDrag);
+      document.removeEventListener('pointercancel', endSectionDrag);
+      document.body.style.userSelect = '';
+      d.el.style.opacity = '';
+      document.querySelectorAll('.page-section.sec-drop-before, .page-section.sec-drop-after').forEach(x => x.classList.remove('sec-drop-before', 'sec-drop-after'));
+      if (!d.target) return;
+      const list = homepageDoc.pageSections;
+      const from = list.findIndex(x => x.id === d.id);
+      const [moved] = list.splice(from, 1);
+      let to = list.findIndex(x => x.id === d.target.id);
+      if (d.target.after) to += 1;
+      list.splice(to, 0, moved);
+      renderHomepage();
+      await saveHomepageDoc();
+    }
+
+    // Device preview: the real export in a frame of the device's width, so
+    // phone/tablet breakpoints actually apply (the builder canvas can't).
+    async function openDevicePreview(docOverride, label) {
+      const out = await buildPageExport(docOverride);
+      if (!out) { showAppToast('Add sections first — the preview shows a page\'s sections.', 'warn'); return; }
+      let m = document.getElementById('device-preview-modal');
+      if (!m) { m = document.createElement('div'); m.id = 'device-preview-modal'; m.className = 'fixed inset-0 bg-black/85 backdrop-blur-sm z-[70] flex flex-col items-center p-3 gap-3'; document.body.appendChild(m); }
+      const sizes = { phone: [390, 780], tablet: [768, 1000], desktop: [1280, 800] };
+      m.innerHTML = `<div class="flex flex-wrap items-center gap-2 bg-dark-bg border border-dark-border rounded-xl p-1.5 shadow-xl">
+          ${label ? `<span class="text-xs text-amber-300 px-2">${escapeHtml(label)}</span>` : ''}
+          ${Object.keys(sizes).map(k => `<button data-dev="${k}" class="px-3 py-1.5 rounded-lg text-xs text-gray-300 hover:text-white"><i class="fa-solid ${{ phone: 'fa-mobile-screen', tablet: 'fa-tablet-screen-button', desktop: 'fa-desktop' }[k]} mr-1"></i>${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}
+          <button id="dev-newtab" class="px-3 py-1.5 rounded-lg text-xs text-gray-300 hover:text-white" title="Open in a new tab"><i class="fa-solid fa-up-right-from-square"></i></button>
+          <button id="dev-close" class="px-3 py-1.5 rounded-lg text-xs text-gray-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button></div>
+        <div id="dev-stage" class="flex-1 w-full overflow-auto flex justify-center items-start"><iframe id="dev-frame" title="Preview" class="bg-white shadow-2xl rounded-xl border border-white/10" style="border:0"></iframe></div>`;
+      const frame = m.querySelector('#dev-frame');
+      frame.srcdoc = out.html;
+      const setDev = (k) => {
+        const [w, h] = sizes[k];
+        const stage = m.querySelector('#dev-stage');
+        const scale = Math.min(1, (stage.clientWidth - 16) / w);
+        frame.style.width = w + 'px'; frame.style.height = h + 'px';
+        frame.style.transform = `scale(${scale})`; frame.style.transformOrigin = 'top center';
+        m.querySelectorAll('[data-dev]').forEach(b => b.classList.toggle('bg-indigo-600', b.dataset.dev === k));
+        m.dataset.device = k;
+      };
+      m.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => setDev(b.dataset.dev));
+      m.querySelector('#dev-close').onclick = () => m.remove();
+      m.querySelector('#dev-newtab').onclick = () => { const u = URL.createObjectURL(new Blob([out.html], { type: 'text/html' })); window.open(u, '_blank'); setTimeout(() => URL.revokeObjectURL(u), 60000); };
+      setDev(window.innerWidth < 700 ? 'phone' : 'desktop');
+    }
+
+    // Version history (server keeps a snapshot before saves, ≤1 per 5 min).
+    async function openHistory() {
+      const pid = currentCanvasPage || 'home';
+      let list = [];
+      try { list = await (await fetch(`/api/pages/${encodeURIComponent(pid)}/history`)).json(); } catch (e) {}
+      const m = publishModal(`
+        <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-clock-rotate-left text-indigo-400 mr-2"></i>Version history</h3>
+        <p class="text-xs text-gray-400">A copy is kept before changes are saved (at most one every 5 minutes, the latest 40). Restoring also keeps the current version, so it can be undone.</p>
+        <div class="space-y-1 max-h-80 overflow-y-auto custom-scrollbar">${Array.isArray(list) && list.length ? list.map(v => `
+          <div class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-white/5">
+            <div class="flex-1 min-w-0"><div class="text-sm text-white">${escapeHtml(new Date(v.at).toLocaleString())}</div>
+              <div class="text-[11px] text-gray-500">${v.sections || 0} sections · ${v.widgets || 0} widgets${v.by ? ' · ' + escapeHtml(v.by) : ''}</div></div>
+            <button data-hprev="${v.ver}" class="px-2.5 py-1 rounded-lg text-xs text-gray-300 border border-white/10 hover:text-white">Preview</button>
+            <button data-hrest="${v.ver}" class="px-2.5 py-1 rounded-lg text-xs text-amber-300 border border-white/10">Restore</button>
+          </div>`).join('') : '<p class="text-xs text-gray-400 py-4 text-center">No earlier versions yet.</p>'}</div>
+        <div class="flex justify-end"><button id="hist-close" class="px-4 py-2 text-xs text-gray-400 hover:text-white">Close</button></div>`);
+      m.querySelector('#hist-close').onclick = () => m.remove();
+      m.querySelectorAll('[data-hprev]').forEach(b => b.onclick = async () => {
+        const doc = await (await fetch(`/api/pages/${encodeURIComponent(pid)}/history/${b.dataset.hprev}`)).json();
+        openDevicePreview(doc, 'Version of ' + new Date(parseInt(b.dataset.hprev, 10)).toLocaleString());
+      });
+      m.querySelectorAll('[data-hrest]').forEach(b => b.onclick = async () => {
+        if (!await adaConfirm({ title: 'Restore this version?', message: 'The page goes back to how it was then. Your current version is kept in the history.', confirmLabel: 'Restore' })) return;
+        const res = await fetch(`/api/pages/${encodeURIComponent(pid)}/history/${b.dataset.hrest}/restore`, { method: 'POST' });
+        if (!res.ok) { showAppToast('Could not restore', 'error'); return; }
+        m.remove();
+        await loadPage(pid);
+        showAppToast('Version restored', 'success');
+      });
+    }
 
     // --- Images for sections (fb-1790206467677)
     function imagePageId() { return currentCanvasPage || 'home'; }
@@ -6408,6 +6584,7 @@ ${body}
          }
       });
       grid.querySelectorAll('.widget-measurer').forEach(w => window.widgetResizeObserver.observe(w));
+      if (window.isEditingLayout) setTimeout(enableInlineEditing, 0);
       
       syncHomeStatMirrors();
     }
@@ -7147,7 +7324,8 @@ ${body}
     </div>
   </div>
 
-  <div id="ada-prompt-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4">
+  <!-- z-[90]: confirms/prompts must sit above every other dialog (publish, site, history, device preview, image picker) or they open underneath and cannot be clicked -->
+  <div id="ada-prompt-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[90] hidden flex items-center justify-center p-4">
     <div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-3">
       <h3 id="ada-prompt-title" class="text-white font-bold text-sm"></h3>
       <p id="ada-prompt-message" class="text-xs text-gray-400"></p>

@@ -12,7 +12,7 @@ class VideoSection extends HTMLElement {
   render() {
     const a = (k, d = '') => this.getAttribute(k) ?? d;
     const def = (k) => (VideoSection.configSchema.find(f => f.attr === k) || {}).default || '';
-    const h = a('heading', def('heading')); const head = h ? `<h2 class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
+    const h = a('heading', def('heading')); const head = h ? `<h2 data-edit="heading" class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
     // Only an ID parsed from the link is used, never the link itself, and
     // only these two players — so nothing else can be framed.
     const u = a('url');

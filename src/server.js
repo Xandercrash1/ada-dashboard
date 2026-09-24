@@ -110,6 +110,26 @@ function writeFileAtomic(file, data) {
   fs.writeFileSync(tmp, data);
   fs.renameSync(tmp, file);
 }
+// Per-page version history (fb-1790206467728): before a page document is
+// overwritten, the previous version is kept in data/history/<page>/ — at most
+// one snapshot per 5 minutes per page, newest 40 kept.
+const HISTORY_DIR = path.join(__dirname, '../data/history');
+const HISTORY_EVERY_MS = 5 * 60 * 1000;
+const HISTORY_KEEP = 40;
+function snapshotBeforeWrite(pageId, file, by) {
+  try {
+    if (!fs.existsSync(file)) return;
+    const dir = path.join(HISTORY_DIR, pageId);
+    fs.mkdirSync(dir, { recursive: true });
+    const list = fs.readdirSync(dir).filter(f => /^\d+\.json$/.test(f)).sort();
+    const last = list.length ? parseInt(list[list.length - 1], 10) : 0;
+    if (Date.now() - last < HISTORY_EVERY_MS) return;
+    const raw = fs.readFileSync(file, 'utf8');
+    JSON.parse(raw);                                  // never keep a broken file as history
+    fs.writeFileSync(path.join(dir, `${Date.now()}.json`), JSON.stringify({ by: by || null, doc: JSON.parse(raw) }));
+    list.slice(0, Math.max(0, list.length + 1 - HISTORY_KEEP)).forEach(f => fs.rmSync(path.join(dir, f), { force: true }));
+  } catch (e) { console.error('[history] snapshot failed:', e.message); }
+}
 function readPagesRegistry() {
   return readJsonStoreOrThrow(PAGES_REGISTRY_FILE);
 }
@@ -926,6 +946,7 @@ app.put('/api/homepage', (req, res) => {
     updatedAt: new Date().toISOString(),
     updatedBy: typeof updatedBy === 'string' && updatedBy ? updatedBy : 'dashboard'
   });
+  snapshotBeforeWrite('home', HOMEPAGE_FILE, ownerName(req));
   writeFileAtomic(HOMEPAGE_FILE, JSON.stringify(merged, null, 2));
   res.json({ ...merged, path: HOMEPAGE_FILE });
 });
@@ -1154,6 +1175,10 @@ function authorizeRole(req, res, next) {
   }
   if ((mm = /^\/api\/pages\/([^/]+)$/.exec(p)) && (m === 'DELETE' || m === 'PATCH')) return pageOwnedBy(u, mm[1]) ? next() : deny();
   if ((mm = /^\/api\/pages\/([^/]+)\/publish$/.exec(p)) && (m === 'POST' || m === 'DELETE')) return pageOwnedBy(u, mm[1]) ? next() : deny();
+  if ((mm = /^\/api\/pages\/([^/]+)\/history(?:\/(\d+)(\/restore)?)?$/.exec(p))) {
+    if (m === 'GET' && !mm[3]) return pageOwnedBy(u, mm[1]) ? next() : deny();
+    if (m === 'POST' && mm[3]) return pageOwnedBy(u, mm[1]) ? next() : deny();
+  }
   if (p === '/api/sites' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/sites\/([^/]+)(?:\/publish)?$/.exec(p)) && ['PATCH', 'DELETE', 'POST'].includes(m)) {
     const site = readSites().find(x => x.id === mm[1]);
@@ -1436,6 +1461,47 @@ app.delete('/api/pages/:id/publish', async (req, res) => {
   res.json({ ok: true });
 });
 
+// --- PAGE HISTORY (fb-1790206467728) -----------------------------------------
+const historyPageOk = (id) => id === 'home' || PAGE_ID_RE.test(id);
+app.get('/api/pages/:id/history', (req, res) => {
+  const id = req.params.id;
+  if (!historyPageOk(id)) return res.status(400).json({ error: 'Invalid page' });
+  const dir = path.join(HISTORY_DIR, id);
+  if (!fs.existsSync(dir)) return res.json([]);
+  const list = fs.readdirSync(dir).filter(f => /^\d+\.json$/.test(f)).sort().reverse().map(f => {
+    let meta = {};
+    try { const v = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); meta = { by: v.by, sections: (v.doc.pageSections || []).length, widgets: (v.doc.widgets || []).length }; } catch (e) {}
+    return { ver: f.replace('.json', ''), at: new Date(parseInt(f, 10)).toISOString(), ...meta };
+  });
+  res.json(list);
+});
+app.get('/api/pages/:id/history/:ver', (req, res) => {
+  const { id, ver } = req.params;
+  if (!historyPageOk(id) || !/^\d{10,16}$/.test(ver)) return res.status(400).json({ error: 'Invalid' });
+  const f = path.join(HISTORY_DIR, id, `${ver}.json`);
+  if (!fs.existsSync(f)) return res.status(404).json({ error: 'Not found' });
+  res.json(JSON.parse(fs.readFileSync(f, 'utf8')).doc);
+});
+app.post('/api/pages/:id/history/:ver/restore', (req, res) => {
+  const { id, ver } = req.params;
+  if (!historyPageOk(id) || !/^\d{10,16}$/.test(ver)) return res.status(400).json({ error: 'Invalid' });
+  if (id === 'home' && !isAdminReq(req)) return res.status(403).json({ error: 'Not available for your account.' });
+  const f = path.join(HISTORY_DIR, id, `${ver}.json`);
+  if (!fs.existsSync(f)) return res.status(404).json({ error: 'Not found' });
+  const old = JSON.parse(fs.readFileSync(f, 'utf8')).doc;
+  const target = id === 'home' ? HOMEPAGE_FILE : getPageDocPath(id);
+  // The version being replaced is always kept, so a restore can be undone.
+  try {
+    const dir = path.join(HISTORY_DIR, id); fs.mkdirSync(dir, { recursive: true });
+    if (fs.existsSync(target)) fs.writeFileSync(path.join(dir, `${Date.now()}.json`), JSON.stringify({ by: ownerName(req) + ' (before restore)', doc: JSON.parse(fs.readFileSync(target, 'utf8')) }));
+  } catch (e) {}
+  let doc;
+  if (id === 'home') doc = sanitizeHomepage({ ...old, updatedAt: new Date().toISOString(), updatedBy: ownerName(req) });
+  else { doc = isAdminReq(req) ? sanitizePageDocFields(old).doc : restrictPageDoc(old).doc; doc.updatedAt = new Date().toISOString(); }
+  writeFileAtomic(target, JSON.stringify(doc, null, 2));
+  res.json({ ok: true, updatedAt: doc.updatedAt });
+});
+
 // --- PAGE IMAGES (fb-1790206467677) ------------------------------------------
 // Per-page uploads in media/page-<id>/, normalised with sharp (EXIF rotation,
 // max 2400px, WebP). Served from /media like other media (login required), and
@@ -1580,6 +1646,7 @@ app.post('/api/pages/:id/content', (req, res) => {
     if (!isAdminReq(req)) saveDoc = restrictPageDoc(doc).doc;   // pages users never store raw HTML
     else sanitizePageDocFields(saveDoc);
     saveDoc.updatedAt = new Date().toISOString();
+    snapshotBeforeWrite(id, docPath, ownerName(req));
     writeFileAtomic(docPath, JSON.stringify(saveDoc, null, 2));
     res.json({ success: true, updatedAt: saveDoc.updatedAt });
   } catch (err) {

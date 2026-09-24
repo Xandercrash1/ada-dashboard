@@ -15,7 +15,7 @@ class TextSection extends HTMLElement {
     const paras = String(a('body', 'Write something here.')).split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).slice(0, 40);
     const h = a('heading');
     this.innerHTML = shell(`<div data-text class="${a('width', 'narrow') === 'wide' ? 'max-w-5xl' : 'max-w-2xl'} mx-auto ${a('align', 'left') === 'center' ? 'text-center' : ''}">
-      ${h ? `<h2 style="${headingStyle()} margin-bottom: 1.25rem;">${esc(h)}</h2>` : ''}
+      ${h ? `<h2 data-edit="heading" style="${headingStyle()} margin-bottom: 1.25rem;">${esc(h)}</h2>` : ''}
       ${paras.map(p => `<p style="font-size: calc(var(--ada-body) * 1.05); line-height: 1.75; margin-top: .9rem; color: var(--ada-text);">${miniMarkdown(p).replace(/\n/g, '<br>')}</p>`).join('')}
     </div>`);
   }

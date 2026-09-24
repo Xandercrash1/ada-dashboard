@@ -15,7 +15,7 @@ class ContactSection extends HTMLElement {
   render() {
     const a = (k, d = '') => this.getAttribute(k) ?? d;
     const def = (k) => (ContactSection.configSchema.find(f => f.attr === k) || {}).default || '';
-    const h = a('heading', def('heading')); const head = h ? `<h2 class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
+    const h = a('heading', def('heading')); const head = h ? `<h2 data-edit="heading" class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
     const email = /^[^\s@<>"']{1,64}@[^\s@<>"']{1,190}$/.test(a('email').trim()) ? a('email').trim() : '';
     const phone = a('phone').trim().replace(/[^0-9+()\-. ]/g, '').slice(0, 30);
     const card = (icon, title, body) => `<div class="p-6" style="background: color-mix(in srgb, var(--ada-text) 5%, transparent); border: 1px solid color-mix(in srgb, var(--ada-text) 10%, transparent); border-radius: calc(var(--ada-radius) * .75);"><i class="fa-solid ${icon} text-xl" style="color: var(--ada-brand);"></i><div style="margin-top: .7rem; font-weight: 700;">${title}</div><div style="margin-top: .3rem; color: var(--ada-muted); line-height: 1.6;">${body}</div></div>`;

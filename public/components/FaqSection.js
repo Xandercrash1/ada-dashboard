@@ -11,7 +11,7 @@ class FaqSection extends HTMLElement {
   render() {
     const a = (k, d = '') => this.getAttribute(k) ?? d;
     const def = (k) => (FaqSection.configSchema.find(f => f.attr === k) || {}).default || '';
-    const h = a('heading', def('heading')); const head = h ? `<h2 class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
+    const h = a('heading', def('heading')); const head = h ? `<h2 data-edit="heading" class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
     const items = lines(a('items', def('items')), 20).map(l => { const [q, ...rest] = l.split('|'); return { q: q.trim(), ans: rest.join('|').trim() }; }).filter(i => i.q);
     // <details> = an accordion that needs no JavaScript (published pages have none).
     this.innerHTML = shell(`<div class="max-w-3xl mx-auto">${head}<div data-faq class="space-y-3">${items.map(i => `

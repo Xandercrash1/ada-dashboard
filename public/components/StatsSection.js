@@ -11,7 +11,7 @@ class StatsSection extends HTMLElement {
   render() {
     const a = (k, d = '') => this.getAttribute(k) ?? d;
     const def = (k) => (StatsSection.configSchema.find(f => f.attr === k) || {}).default || '';
-    const h = a('heading', def('heading')); const head = h ? `<h2 class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
+    const h = a('heading', def('heading')); const head = h ? `<h2 data-edit="heading" class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
     const items = lines(a('items', def('items')), 6).map(l => { const [n, ...rest] = l.split('|'); return { n: n.trim(), l: rest.join('|').trim() }; }).filter(i => i.n);
     this.innerHTML = shell(`<div class="max-w-6xl mx-auto">${head}<div data-stats class="grid grid-cols-2 md:grid-cols-${Math.min(4, Math.max(2, items.length))} gap-8 text-center">${items.map(i => `
       <div><div style="font-family: var(--ada-font-heading); font-weight: 800; font-size: clamp(2rem, 6vw, calc(var(--ada-h1) * .9)); color: var(--ada-brand); line-height: 1.05;">${esc(i.n)}</div><div style="margin-top: .4rem; color: var(--ada-muted);">${esc(i.l)}</div></div>`).join('')}</div></div>`);

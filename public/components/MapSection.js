@@ -11,7 +11,7 @@ class MapSection extends HTMLElement {
   render() {
     const a = (k, d = '') => this.getAttribute(k) ?? d;
     const def = (k) => (MapSection.configSchema.find(f => f.attr === k) || {}).default || '';
-    const h = a('heading', def('heading')); const head = h ? `<h2 class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
+    const h = a('heading', def('heading')); const head = h ? `<h2 data-edit="heading" class="text-center" style="${headingStyle()} margin-bottom: 2.25rem;">${esc(h)}</h2>` : '';
     const place = a('place').trim().slice(0, 200);
     const src = place ? `https://www.google.com/maps?q=${encodeURIComponent(place)}&output=embed` : '';
     this.innerHTML = shell(`<div class="max-w-5xl mx-auto">${head}${src ? `<div data-map class="w-full overflow-hidden" style="aspect-ratio: 16 / 9; border-radius: calc(var(--ada-radius) * .75);"><iframe src="${esc(src)}" title="Map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" style="width: 100%; height: 100%; border: 0;"></iframe></div>`

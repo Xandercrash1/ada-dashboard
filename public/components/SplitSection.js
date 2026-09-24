@@ -20,7 +20,7 @@ class SplitSection extends HTMLElement {
     const paras = String(a('body', def('body'))).split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).slice(0, 12);
     const media = img ? `<img src="${esc(img)}" alt="${esc(a('image-alt'))}" loading="lazy" class="w-full object-cover" style="aspect-ratio: 4 / 3; border-radius: calc(var(--ada-radius) * .75);">`
       : `<div class="w-full flex items-center justify-center" style="aspect-ratio: 4 / 3; border-radius: calc(var(--ada-radius) * .75); background: color-mix(in srgb, var(--ada-text) 8%, transparent); color: var(--ada-muted);"><i class="fa-regular fa-image text-3xl"></i></div>`;
-    const text = `<div><h2 style="${headingStyle()}">${esc(a('heading', def('heading')))}</h2>${paras.map(p => `<p style="margin-top: 1rem; line-height: 1.7; font-size: calc(var(--ada-body) * 1.05);">${miniMarkdown(p)}</p>`).join('')}
+    const text = `<div><h2 data-edit="heading" style="${headingStyle()}">${esc(a('heading', def('heading')))}</h2>${paras.map(p => `<p style="margin-top: 1rem; line-height: 1.7; font-size: calc(var(--ada-body) * 1.05);">${miniMarkdown(p)}</p>`).join('')}
       ${a('cta-label') ? `<a href="${esc(safeHref(a('cta-href', '#')))}" class="inline-block px-6 py-3 font-semibold" style="margin-top: 1.5rem; ${buttonStyle('brand')}">${esc(a('cta-label'))}</a>` : ''}</div>`;
     const right = a('side', 'left') === 'right';
     this.innerHTML = shell(`<div data-split class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-10 items-center">${right ? text + media : media + text}</div>`);
