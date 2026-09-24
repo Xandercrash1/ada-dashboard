@@ -1357,13 +1357,14 @@ async function deployToPages(c, project, dir, isNew, filesByName) {
     const cr = await cfApi(c, 'POST', `/accounts/${c.accountId}/pages/projects`, { name: project, production_branch: 'main' });
     if (!cr.ok) throw new Error('Could not create the Cloudflare project: ' + cfErr(cr));
   }
-  await prepareContactForms(c, project, dir, filesByName, pre);
+  const fnRoot = await prepareContactForms(c, project, dir, filesByName, pre);
   const out = await new Promise((resolve) => {
     execFile(WRANGLER_BIN, ['pages', 'deploy', dir, '--project-name', project, '--branch', 'main', '--commit-dirty=true'], {
-      cwd: PUBLISH_TMP, timeout: 180000, maxBuffer: 4 * 1024 * 1024,
+      cwd: fnRoot || PUBLISH_TMP, timeout: 180000, maxBuffer: 4 * 1024 * 1024,
       env: { PATH: process.env.PATH, HOME: '/home/ubuntu', CLOUDFLARE_API_TOKEN: c.token, CLOUDFLARE_ACCOUNT_ID: c.accountId, WRANGLER_SEND_METRICS: 'false', CI: '1' }
     }, (err, stdout, stderr) => resolve({ err, text: `${stdout || ''}\n${stderr || ''}` }));
   });
+  if (fnRoot) fs.rmSync(fnRoot, { recursive: true, force: true });
   if (out.err) {
     // A first deploy that fails would leave an empty project behind.
     if (isNew) await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${project}`).catch(() => {});
@@ -1423,7 +1424,7 @@ export async function onRequestPost({ request, env }) {
   if (!name || !message || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return page(false, back);
   const v = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: new URLSearchParams({ secret: env.TURNSTILE_SECRET || '', response: (f.get('cf-turnstile-response') || '').toString(), remoteip: request.headers.get('CF-Connecting-IP') || '' }) }).then(r => r.json()).catch(() => ({ success: false }));
   if (!v.success) return page(false, back);
-  await env.CONTACT.put(Date.now() + '-' + crypto.randomUUID().slice(0, 8), JSON.stringify({ project: env.PROJECT, path: back, name, email, message, at: new Date().toISOString(), country: (request.cf && request.cf.country) || null }), { expirationTtl: 60 * 60 * 24 * 90 });
+  await env.CONTACT.put(env.PROJECT + '.' + Date.now() + '-' + crypto.randomUUID().slice(0, 8), JSON.stringify({ project: env.PROJECT, path: back, name, email, message, at: new Date().toISOString(), country: (request.cf && request.cf.country) || null }), { expirationTtl: 60 * 60 * 24 * 90 });
   return page(true, back);
 }
 export const onRequest = () => new Response('Method not allowed', { status: 405 });
@@ -1443,8 +1444,13 @@ async function prepareContactForms(c, project, dir, filesByName, pre) {
     kv_namespaces: { CONTACT: { namespace_id: nsId } },
     env_vars: { TURNSTILE_SECRET: { type: 'secret_text', value: w.secret }, PROJECT: { type: 'plain_text', value: project } } } } });
   if (!cfg.ok) throw new Error('Could not connect the form to its message store: ' + cfErr(cfg));
-  fs.mkdirSync(path.join(dir, 'functions', 'api'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'functions', 'api', 'contact.js'), CONTACT_FUNCTION);
+  // Wrangler compiles ./functions from its WORKING directory, not from the
+  // upload folder — so the Function lives in a sibling root that becomes cwd
+  // (inside the upload folder it would ship as a public static file instead).
+  const fnRoot = dir + '.fn';
+  fs.rmSync(fnRoot, { recursive: true, force: true });
+  fs.mkdirSync(path.join(fnRoot, 'functions', 'api'), { recursive: true });
+  fs.writeFileSync(path.join(fnRoot, 'functions', 'api', 'contact.js'), CONTACT_FUNCTION);
   for (const name of Object.keys(filesByName)) {
     const f = path.join(dir, name);
     let html = fs.readFileSync(f, 'utf8');
@@ -1453,7 +1459,7 @@ async function prepareContactForms(c, project, dir, filesByName, pre) {
                .replace('</head>', '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>\n</head>');
     fs.writeFileSync(f, html);
   }
-  return true;
+  return fnRoot;
 }
 
 // Inbox: pull messages from KV every 2 minutes (list → get → delete).
@@ -1473,14 +1479,20 @@ async function pullContactMessages() {
     const keys = await cfApi(c, 'GET', `/accounts/${c.accountId}/storage/kv/namespaces/${ns}/keys?limit=100`);
     if (!keys.ok) return;
     const msgs = readJsonSafe(MESSAGES_FILE, []);
+    // Live and staging share one namespace: take only this instance's projects,
+    // leave the rest for their owner (unclaimed keys expire after 90 days).
+    const mine = new Set([...readPagesRegistry(), ...readSites()].filter(x => x.published && x.published.project).map(x => x.published.project));
     for (const k of (keys.json.result || [])) {
+      const dot = k.name.indexOf('.');
+      if (dot > 0 && !mine.has(k.name.slice(0, dot))) continue;
       const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${c.accountId}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(k.name)}`, { headers: { Authorization: `Bearer ${c.token}` }, signal: AbortSignal.timeout(20000) });
       if (!res.ok) continue;
       let m; try { m = JSON.parse(await res.text()); } catch (e) { m = null; }
+      if (m && dot < 0 && !mine.has(m.project)) continue;
       if (m && !msgs.some(x => x.key === k.name)) {
         const o = projectOwner(m.project);
         const clean = (v, n) => String(v || '').slice(0, n);
-        msgs.push({ id: 'msg-' + k.name, key: k.name, owner: o.owner, page: clean(o.title, 80), project: clean(m.project, 80), path: clean(m.path, 120), name: clean(m.name, 100), email: clean(m.email, 200), message: clean(m.message, 4000), at: clean(m.at, 40), country: clean(m.country, 4), read: false });
+        msgs.push({ id: 'msg-' + k.name.replace(/[^\w-]/g, '-'), key: k.name, owner: o.owner, page: clean(o.title, 80), project: clean(m.project, 80), path: clean(m.path, 120), name: clean(m.name, 100), email: clean(m.email, 200), message: clean(m.message, 4000), at: clean(m.at, 40), country: clean(m.country, 4), read: false });
         if (isAdminUserName(o.owner)) pushNotification({ level: 'info', source: 'contact', title: `New message via ${clean(o.title, 60)}`, body: `${clean(m.name, 60)}: ${clean(m.message, 140)}`, link: { tab: 'home' } });
       }
       await cfApi(c, 'DELETE', `/accounts/${c.accountId}/storage/kv/namespaces/${ns}/values/${encodeURIComponent(k.name)}`);
