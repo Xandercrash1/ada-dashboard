@@ -1364,7 +1364,11 @@ async function deployToPages(c, project, dir, isNew, filesByName) {
       env: { PATH: process.env.PATH, HOME: '/home/ubuntu', CLOUDFLARE_API_TOKEN: c.token, CLOUDFLARE_ACCOUNT_ID: c.accountId, WRANGLER_SEND_METRICS: 'false', CI: '1' }
     }, (err, stdout, stderr) => resolve({ err, text: `${stdout || ''}\n${stderr || ''}` }));
   });
-  if (out.err) throw new Error('Deploy failed: ' + out.text.replace(new RegExp(c.token, 'g'), '***').trim().split('\n').slice(-4).join(' '));
+  if (out.err) {
+    // A first deploy that fails would leave an empty project behind.
+    if (isNew) await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${project}`).catch(() => {});
+    throw new Error('Deploy failed: ' + out.text.replace(new RegExp(c.token, 'g'), '***').trim().split('\n').slice(-4).join(' '));
+  }
   return `https://${project}.pages.dev`;
 }
 const projectNameFor = (title) => `${String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'page'}-${crypto.randomBytes(4).toString('hex')}`;
