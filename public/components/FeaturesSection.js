@@ -28,7 +28,7 @@ class FeaturesSection extends HTMLElement {
     const cols = { '2': 'lg:grid-cols-2', '3': 'lg:grid-cols-3', '4': 'lg:grid-cols-4' }[a('columns', '3')] || 'lg:grid-cols-3';
     const sub = a('subheading');
     this.innerHTML = `
-      <section class="w-full" style="background: var(--ada-surface); color: var(--ada-text); border-radius: var(--ada-radius); padding: var(--ada-space) 1.5rem; font-family: var(--ada-font-body);">
+      <section class="w-full" style="background: var(--ada-surface); color: var(--ada-text); border-radius: var(--ada-sec-radius, var(--ada-radius)); padding: var(--ada-space) 1.5rem; font-family: var(--ada-font-body);">
         <div class="max-w-6xl mx-auto">
           <div class="text-center" style="margin-bottom: 2.5rem;">
             <h2 style="font-family: var(--ada-font-heading); font-size: clamp(1.5rem, 4.5vw, var(--ada-h2)); line-height: 1.15; font-weight: 750;">${esc(a('heading', 'Features'))}</h2>

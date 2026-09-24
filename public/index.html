@@ -4584,8 +4584,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       } else if (f.type === 'toggle') {
         input = `<label class="flex items-center gap-2 text-sm text-gray-300"><input id="${id}" ${DA}="${f.attr}" type="checkbox" ${on} class="accent-indigo-500"> ${escapeHtml(f.label)}</label>`;
         return `<div>${input}</div>`;
+      } else if (f.type === 'image') {
+        input = `<div class="flex gap-2"><input id="${id}" ${DA}="${f.attr}" type="text"${ph} ${on} class="${CONFIG_INPUT_CLS}" placeholder="Upload or choose an image">
+          <button type="button" onclick="pickImageFor('${id}')" class="px-3 rounded-lg text-xs text-gray-200 border border-white/10 hover:border-indigo-400 flex-shrink-0" title="Choose from this page's images"><i class="fa-solid fa-images"></i></button>
+          <button type="button" onclick="uploadImageFor('${id}')" class="px-3 rounded-lg text-xs text-white bg-indigo-600 hover:bg-indigo-500 flex-shrink-0" title="Upload an image"><i class="fa-solid fa-upload"></i></button></div>`;
       } else if (f.type === 'textarea') {
-        input = `<textarea id="${id}" ${DA}="${f.attr}" rows="4"${ph} ${on} class="${CONFIG_INPUT_CLS} font-mono text-xs"></textarea>`;
+        input = `<textarea id="${id}" ${DA}="${f.attr}" rows="4"${ph} ${on} class="${CONFIG_INPUT_CLS} font-mono text-xs"></textarea>`
+          + (f.upload === 'append' ? `<button type="button" onclick="uploadImageFor('${id}', true)" class="mt-2 px-3 py-1.5 rounded-lg text-xs text-white bg-indigo-600 hover:bg-indigo-500"><i class="fa-solid fa-upload mr-1"></i>Add images</button>` : '');
       } else {
         const type = f.type === 'number' ? 'number' : f.type === 'datetime' ? 'datetime-local' : 'text';
         const min = f.min !== undefined ? ` min="${f.min}"` : '';
@@ -5370,7 +5375,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         '--ada-brand': t.brand, '--ada-surface': t.surface, '--ada-text': t.text, '--ada-muted': t.muted,
         // Text on the brand colour: black or white by luminance, so a pale
         // brand never gets unreadable white buttons (fb-1790201502182).
-        '--ada-on-brand': brandIsLight(t.brand) ? '#111827' : '#ffffff'
+        '--ada-on-brand': brandIsLight(t.brand) ? '#111827' : '#ffffff',
+        // Base copies for per-section styles (fb-1790206467677): a section
+        // swaps --ada-surface/--ada-brand to these; a custom property can't
+        // reference itself, so the originals must live under other names.
+        '--ada-brand-base': t.brand,
+        '--ada-on-brand-base': brandIsLight(t.brand) ? '#111827' : '#ffffff',
+        '--ada-on-brand-muted': brandIsLight(t.brand) ? 'rgba(17,24,39,.72)' : 'rgba(255,255,255,.82)',
+        '--ada-surface-alt': `color-mix(in srgb, ${t.surface} 88%, ${t.text} 12%)`,
+        '--ada-surface-gradient': `linear-gradient(135deg, ${t.brand}, color-mix(in srgb, ${t.brand} 55%, #000))`
       };
       for (const [k, v] of Object.entries(vars)) el.style.setProperty(k, v);
     }
@@ -5386,7 +5399,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       pricing:  { label: 'Pricing',     icon: 'fa-tags',      tag: 'ada-section-pricing' },
       cta:      { label: 'Call to action', icon: 'fa-bullhorn', tag: 'ada-section-cta' },
       text:     { label: 'Text',        icon: 'fa-align-left', tag: 'ada-section-text' },
-      footer:   { label: 'Footer',      icon: 'fa-shoe-prints', tag: 'ada-section-footer' }
+      footer:   { label: 'Footer',      icon: 'fa-shoe-prints', tag: 'ada-section-footer' },
+      header:   { label: 'Header / menu', icon: 'fa-bars',     tag: 'ada-section-header' }
     };
 
     // Typography presets (fb-1790201502171). Web fonts load on demand, only
@@ -5427,6 +5441,35 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       return (Array.isArray(doc && doc.pageSections) ? doc.pageSections : []).filter(s => s && !s.hidden && PAGE_SECTION_TYPES[s.type]);
     }
 
+    // Per-section design controls (fb-1790206467677), stored as reserved props
+    // and applied as CSS-variable overrides on the section's wrapper — every
+    // section type reads the same variables, so they all obey.
+    const SAFE_IMG_URL = /^(https?:\/\/[^\s"'()<>\\]{1,400}|\/media\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9._-]{1,120})$/;
+    const SECTION_STYLE_SCHEMA = [
+      { attr: 'sec-bg', label: 'Background', type: 'select', options: [['alt', 'Alternate shade'], ['brand', 'Brand colour'], ['gradient', 'Brand gradient'], ['image', 'Image']], default: 'Page colour' },
+      { attr: 'sec-bg-image', label: 'Background image (when Background = Image)', type: 'image', default: '' },
+      { attr: 'sec-width', label: 'Width', type: 'select', options: [['contained', 'Contained (card)'], ['full', 'Full width (edge to edge)']], default: 'contained' },
+      { attr: 'sec-pad', label: 'Spacing', type: 'select', options: [['s', 'Small'], ['m', 'Medium'], ['l', 'Large'], ['xl', 'Extra large']], default: 'page setting' },
+      { attr: 'sec-anchor', label: 'Anchor name (menu links use #name)', type: 'text', default: '' }
+    ];
+    function sectionStyle(sec) {
+      const pr = sec.props || {}, v = [];
+      const onBrand = ['--ada-text: var(--ada-on-brand-base)', '--ada-muted: var(--ada-on-brand-muted)', '--ada-brand: var(--ada-on-brand-base)', '--ada-on-brand: var(--ada-brand-base)'];
+      const bg = pr['sec-bg'];
+      if (bg === 'alt') v.push('--ada-surface: var(--ada-surface-alt)');
+      else if (bg === 'brand') v.push('--ada-surface: var(--ada-brand-base)', ...onBrand);
+      else if (bg === 'gradient') v.push('--ada-surface: var(--ada-surface-gradient)', ...onBrand);
+      else if (bg === 'image' && SAFE_IMG_URL.test(pr['sec-bg-image'] || '')) v.push(`--ada-surface: linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,.55)), url('${pr['sec-bg-image']}') center / cover no-repeat`, '--ada-text: #ffffff', '--ada-muted: rgba(255,255,255,.85)');
+      const pad = { s: '2rem', m: '4rem', l: '6rem', xl: '8rem' }[pr['sec-pad']];
+      if (pad) v.push(`--ada-space: ${pad}`);
+      const full = pr['sec-width'] === 'full';
+      if (full) v.push('--ada-sec-radius: 0px');
+      const sticky = sec.type === 'header' && pr.sticky === 'yes';
+      if (sticky) v.push('position: sticky', 'top: 0', 'z-index: 40');
+      const anchor = /^[a-z][a-z0-9-]{0,39}$/.test(pr['sec-anchor'] || '') ? pr['sec-anchor'] : '';
+      return { style: v.join('; '), full, anchor, sticky };
+    }
+
     function renderPageSection(sec, innerHtml, opts) {
       const plain = !!(opts && opts.plain);   // export: no editor chrome
       const def = PAGE_SECTION_TYPES[sec.type];
@@ -5453,7 +5496,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
           ${btn('fa-trash', 'Remove section', `removeSection('${sid}')`)}
         </div>` : '';
       const editCls = (window.isEditingLayout && !plain) ? ' pt-10 outline-dashed outline-2 outline-offset-4 outline-indigo-400/40 rounded-xl' : '';
-      return `<div class="page-section relative w-full${editCls}" data-section-id="${sid}" data-section-type="${sec.type}">${chrome}${body}</div>`;
+      const st = sectionStyle(sec);
+      return `<div class="page-section ${st.sticky ? '' : 'relative '}w-full${editCls}" data-section-id="${sid}" data-section-type="${sec.type}"${st.anchor ? ` data-anchor="${st.anchor}"` : ''}${st.style ? ` style="${escapeHtml(st.style)}"` : ''}>${chrome}${body}</div>`;
     }
 
     // ===================== ACCOUNTS + ROLES (fb-1790201502191) =====================
@@ -5764,9 +5808,11 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       document.getElementById('section-edit-title').textContent = PAGE_SECTION_TYPES[sec.type].label + ' section';
       const box = document.getElementById('section-edit-fields');
       const o = { prefix: 'scfg-', dataAttr: 'data-scfg-attr', handler: 'onSectionFieldInput' };
-      box.innerHTML = schema.length ? schema.map(f => configFieldHtml(f, sec.props[f.attr] ?? null, o)).join('')
-        : '<p class="text-xs text-gray-400">This section has no settings.</p>';
-      schema.forEach(f => {
+      const styleSchema = sec.type === 'grid' ? SECTION_STYLE_SCHEMA.filter(f => f.attr === 'sec-anchor') : SECTION_STYLE_SCHEMA;
+      box.innerHTML = (schema.length ? schema.map(f => configFieldHtml(f, sec.props[f.attr] ?? null, o)).join('') : '<p class="text-xs text-gray-400">This section has no content settings.</p>')
+        + `<div class="pt-3 mt-1 border-t border-white/10 text-xs font-bold text-indigo-300 uppercase tracking-wider"><i class="fa-solid fa-swatchbook mr-1.5"></i>Section style</div>`
+        + styleSchema.map(f => configFieldHtml(f, sec.props[f.attr] ?? null, o)).join('');
+      [...schema, ...styleSchema].forEach(f => {
         const input = document.getElementById('scfg-' + f.attr);
         if (!input) return;
         if (f.type === 'select') input.value = sec.props[f.attr] || '';
@@ -5786,9 +5832,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       // Live preview straight onto the rendered component (it observes its
       // attributes); a grid heading needs a re-render.
       const def = PAGE_SECTION_TYPES[sec.type];
-      const el = def.tag && document.querySelector(`.page-section[data-section-id="${CSS.escape(sec.id)}"] > ${def.tag}`);
+      const el = def.tag && !attr.startsWith('sec-') && attr !== 'sticky' && document.querySelector(`.page-section[data-section-id="${CSS.escape(sec.id)}"] > ${def.tag}`);
       if (el) { if (value.trim() === '') el.removeAttribute(attr); else el.setAttribute(attr, value); }
-      else renderHomepage();
+      else renderHomepage();   // style props live on the wrapper
     }
 
     function closeSectionEdit(save) {
@@ -5858,14 +5904,17 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         host.innerHTML = secs.map(x => renderPageSection(x, '', { plain: true })).join('');
         await Promise.all([...new Set(secs.map(x => PAGE_SECTION_TYPES[x.type].tag))].map(t => customElements.whenDefined(t)));
         await new Promise(r => requestAnimationFrame(() => setTimeout(r, 60)));   // let Tailwind see the classes
-        const body = [...host.querySelectorAll('.page-section')].map(el => {
+        const body = [...host.querySelectorAll('.page-section')].map((el, i) => {
           const comp = el.firstElementChild;
-          return comp ? comp.innerHTML.trim() : '';
+          if (!comp) return '';
+          const st = sectionStyle(secs[i]);
+          return `<div class="ada-sec${st.full ? ' ada-sec-full' : ''}"${st.anchor ? ` id="${st.anchor}"` : ''}${st.style ? ` style="${escapeHtml(st.style)}"` : ''}>${comp.innerHTML.trim()}</div>`;
         }).join('\n');
         const used = new Set();
         const tmp = document.createElement('div'); tmp.innerHTML = body;
         tmp.querySelectorAll('[class]').forEach(e => e.classList.forEach(c => used.add(c)));
-        const vars = ['--ada-font-heading', '--ada-font-body', '--ada-h1', '--ada-h2', '--ada-body', '--ada-space', '--ada-radius', '--ada-brand', '--ada-surface', '--ada-text', '--ada-muted', '--ada-on-brand']
+        const vars = ['--ada-font-heading', '--ada-font-body', '--ada-h1', '--ada-h2', '--ada-body', '--ada-space', '--ada-radius', '--ada-brand', '--ada-surface', '--ada-text', '--ada-muted', '--ada-on-brand',
+          '--ada-brand-base', '--ada-on-brand-base', '--ada-on-brand-muted', '--ada-surface-alt', '--ada-surface-gradient']
           .map(v => `${v}: ${host.style.getPropertyValue(v)};`).join(' ');
         const t = resolvePageTokens(homepageDoc);
         const fonts = [t.fontHeading, t.fontBody].map(st => { const m = /^['"]?([^'",]+)['"]?/.exec(st || ''); return m && WEB_FONTS[(FONT_ALIASES[m[1].trim()] || m[1].trim())] ? WEB_FONTS[FONT_ALIASES[m[1].trim()] || m[1].trim()] : null; }).filter(Boolean);
@@ -5891,7 +5940,11 @@ ${fontLink}
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: ${pageBg}; font-family: var(--ada-font-body); line-height: 1.5; -webkit-font-smoothing: antialiased; }
 h1, h2, h3, p, figure, ul { margin: 0; } ul { list-style: none; padding: 0; } a { color: inherit; text-decoration: none; } img { display: block; max-width: 100%; }
+html, body { overflow-x: clip; }
 .ada-export { max-width: 1200px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 24px; }
+.ada-sec-full { margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw); }
+details > summary::-webkit-details-marker { display: none; }
+html { scroll-behavior: smooth; } .ada-sec[id] { scroll-margin-top: 80px; }
 ${exportCssFor(used)}
 </style>
 </head>
@@ -5972,13 +6025,72 @@ ${body}
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pageStyleEdit) closePageStyle('cancel'); });
     document.addEventListener('click', (e) => { if (e.target && e.target.id === 'page-style-modal') closePageStyle('cancel'); });
 
+    // --- Images for sections (fb-1790206467677)
+    function imagePageId() { return currentCanvasPage || 'home'; }
+    function readFileAsDataUrl(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+    async function uploadPageImage(file) {
+      const res = await fetch(`/api/pages/${encodeURIComponent(imagePageId())}/images`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: file.name, dataUrl: await readFileAsDataUrl(file) }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      return data;
+    }
+    function setFieldValue(inputId, value) {
+      const el = document.getElementById(inputId);
+      if (!el) return;
+      el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    function uploadImageFor(inputId, append) {
+      const fi = document.createElement('input');
+      fi.type = 'file'; fi.accept = 'image/png,image/jpeg,image/webp,image/gif'; fi.multiple = !!append;
+      fi.onchange = async () => {
+        const files = [...fi.files];
+        if (!files.length) return;
+        showAppToast(`Uploading ${files.length} image${files.length === 1 ? '' : 's'}…`, 'info');
+        const paths = [];
+        for (const f of files) {
+          try { paths.push((await uploadPageImage(f)).path); } catch (e) { showAppToast(`${f.name}: ${e.message}`, 'error'); }
+        }
+        if (!paths.length) return;
+        if (append) {
+          const cur = (document.getElementById(inputId).value || '').trim();
+          setFieldValue(inputId, [cur, ...paths.map(p => `${p} | `)].filter(Boolean).join('\n'));
+        } else setFieldValue(inputId, paths[0]);
+        showAppToast('Image uploaded', 'success');
+      };
+      fi.click();
+    }
+    async function pickImageFor(inputId) {
+      let list = [];
+      try { list = await (await fetch(`/api/pages/${encodeURIComponent(imagePageId())}/images`)).json(); } catch (e) {}
+      let m = document.getElementById('image-picker-modal');
+      if (!m) { m = document.createElement('div'); m.id = 'image-picker-modal'; m.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-[65] flex items-center justify-center p-4'; m.addEventListener('click', e => { if (e.target === m) m.remove(); }); document.body.appendChild(m); }
+      m.innerHTML = `<div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-2xl p-5 shadow-2xl space-y-3 max-h-[85vh] flex flex-col">
+          <div class="flex items-center justify-between"><h3 class="text-white font-bold text-sm"><i class="fa-solid fa-images text-indigo-400 mr-2"></i>This page's images</h3>
+            <div class="flex gap-2"><button id="ip-upload" class="px-3 py-1.5 rounded-lg text-xs text-white bg-indigo-600 hover:bg-indigo-500"><i class="fa-solid fa-upload mr-1"></i>Upload</button><button id="ip-close" class="text-gray-400 hover:text-white px-2"><i class="fa-solid fa-xmark"></i></button></div></div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 overflow-y-auto custom-scrollbar">${Array.isArray(list) && list.length ? list.map(im => `
+            <button data-pick="${escapeHtml(im.path)}" class="group relative rounded-xl overflow-hidden border border-white/10 hover:border-indigo-400 aspect-square bg-black/30"><img src="${escapeHtml(im.path)}" alt="" loading="lazy" class="w-full h-full object-cover"></button>`).join('') : '<p class="col-span-full text-xs text-gray-400 py-6 text-center">No images on this page yet — Upload one.</p>'}</div></div>`;
+      m.querySelector('#ip-close').onclick = () => m.remove();
+      m.querySelector('#ip-upload').onclick = () => { m.remove(); uploadImageFor(inputId); };
+      m.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { setFieldValue(inputId, b.dataset.pick); m.remove(); });
+    }
+    // In-builder menu links: #anchor scrolls to the section with that anchor.
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest && e.target.closest('#home-widgets a[href^="#"]');
+      if (!a) return;
+      e.preventDefault();
+      const name = a.getAttribute('href').slice(1);
+      const t = name && document.querySelector(`#home-widgets [data-anchor="${CSS.escape(name)}"]`);
+      if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
     // --- Section Library
     async function openSectionLibrary() {
       const grid = document.getElementById('section-library-types');
       grid.innerHTML = Object.entries(PAGE_SECTION_TYPES).map(([type, d]) => `
         <button onclick="addSection('${type}')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex items-center gap-3">
           <i class="fa-solid ${d.icon} text-indigo-400 text-lg w-6 text-center"></i>
-          <div><div class="text-white font-semibold text-sm">${d.label}</div><div class="text-gray-400 text-xs">${{ hero: 'Big headline, text and a button', features: 'Heading and a grid of cards', grid: 'A grid that holds widgets', gallery: 'A grid of photos with captions', pricing: 'Plans side by side', cta: 'A bold band with buttons', text: 'Paragraphs with bold, italics and links', footer: 'Name, small print and links' }[type] || ''}</div></div>
+          <div><div class="text-white font-semibold text-sm">${d.label}</div><div class="text-gray-400 text-xs">${{ hero: 'Big headline, text and a button', features: 'Heading and a grid of cards', grid: 'A grid that holds widgets', gallery: 'A grid of photos with captions', pricing: 'Plans side by side', cta: 'A bold band with buttons', text: 'Paragraphs with bold, italics and links', footer: 'Name, small print and links', header: 'Logo, menu links and a button — put it first' }[type] || ''}</div></div>
         </button>`).join('');
       document.getElementById('section-library-modal').classList.remove('hidden');
       const saved = document.getElementById('section-library-saved');
@@ -7062,7 +7174,7 @@ ${body}
         <button id="section-save-template-btn" onclick="saveSectionAsTemplate()" class="px-3 py-2 text-xs text-gray-300 hover:text-white rounded-lg border border-white/10"><i class="fa-solid fa-bookmark mr-1"></i>Save as template</button>
         <div class="flex-1"></div>
         <button onclick="closeSectionEdit(false)" class="px-4 py-2 text-sm text-gray-300 hover:text-white">Cancel</button>
-        <button onclick="closeSectionEdit(true)" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg shadow-lg">Save</button>
+        <button onclick="closeSectionEdit(true)" id="section-edit-save" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg shadow-lg">Save</button>
       </div>
     </div>
   </div>

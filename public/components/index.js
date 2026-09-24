@@ -26,3 +26,4 @@ import "./PricingSection.js";
 import "./CtaSection.js";
 import "./TextSection.js";
 import "./FooterSection.js";
+import "./HeaderSection.js";

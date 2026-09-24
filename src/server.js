@@ -624,7 +624,14 @@ const DEFAULT_HOMEPAGE = {
 // toggles {stats, quickLinks}) is an ordered list of full-width blocks. A
 // `grid` section holds widgets (w.section = its id; unassigned widgets go to
 // the first grid). A page without pageSections renders exactly as before.
-const PAGE_SECTION_TYPES = ['hero', 'features', 'grid', 'gallery', 'pricing', 'cta', 'text', 'footer'];
+const PAGE_SECTION_TYPES = ['hero', 'features', 'grid', 'gallery', 'pricing', 'cta', 'text', 'footer', 'header'];
+// Props that end up inside CSS url(...) or <img src>: http(s) or /media only,
+// no quotes/parens/whitespace (fb-1790206467677).
+const SAFE_IMAGE_URL_RE = /^(https?:\/\/[^\s"'()<>\\]{1,400}|\/media\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9._-]{1,120})$/;
+const SECTION_STYLE_RULES = {
+  'sec-bg': /^(alt|brand|gradient|image)$/, 'sec-width': /^(contained|full)$/, 'sec-pad': /^(s|m|l|xl)$/,
+  'sec-anchor': /^[a-z][a-z0-9-]{0,39}$/
+};
 const PAGE_SECTIONS_MAX = 30;
 
 // List props (feature cards, plans, images, links) are one string, one item
@@ -664,7 +671,10 @@ function sanitizePageSections(raw) {
         // restyle/re-identify the element.
         if (!/^[a-z][a-z0-9-]{0,39}$/.test(k) || /^on/.test(k) || ['style', 'id', 'class', 'is', 'slot'].includes(k)) continue;
         const cv = coercePropValue(k, v);
-        if (cv !== null) props[k] = cv.slice(0, 5000);
+        if (cv === null) continue;
+        if ((k === 'image' || k === 'logo' || k === 'sec-bg-image') && cv && !SAFE_IMAGE_URL_RE.test(cv.trim())) continue;
+        if (SECTION_STYLE_RULES[k] && !SECTION_STYLE_RULES[k].test(cv)) continue;
+        props[k] = cv.slice(0, 5000);
       }
     }
     const clean = { id, type: sec.type, props };
@@ -1134,6 +1144,10 @@ function authorizeRole(req, res, next) {
   }
   if ((mm = /^\/api\/pages\/([^/]+)$/.exec(p)) && (m === 'DELETE' || m === 'PATCH')) return pageOwnedBy(u, mm[1]) ? next() : deny();
   if ((mm = /^\/api\/pages\/([^/]+)\/publish$/.exec(p)) && (m === 'POST' || m === 'DELETE')) return pageOwnedBy(u, mm[1]) ? next() : deny();
+  if ((mm = /^\/api\/pages\/([^/]+)\/images(?:\/[^/]+)?$/.exec(p))) {
+    if (m === 'GET') return pageVisibleTo(u, mm[1]) ? next() : deny();
+    if (m === 'POST' || m === 'DELETE') return pageOwnedBy(u, mm[1]) ? next() : deny();
+  }
   if (p === '/api/homepage' && m === 'GET') return next();
   if (p === '/api/templates' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/templates\/([^/]+)$/.exec(p))) {
@@ -1254,7 +1268,9 @@ app.post('/api/pages/:id/publish', async (req, res) => {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
     // Images under /media need the dashboard login — copy them in.
-    html = html.replace(/(["'(])\/media\/([A-Za-z0-9_-]{1,64})\/([^"')\s?#]{1,200})/g, (m0, q, lib, file) => {
+    // Also after ";" — inside an HTML-escaped style attribute the quote is
+    // &#39;, which ends in ";" (a section background image, fb-1790206467677).
+    html = html.replace(/(["'(;])\/media\/([A-Za-z0-9_-]{1,64})\/([^"')&\s?#]{1,200})/g, (m0, q, lib, file) => {
       const clean = path.basename(decodeURIComponent(file));
       const src = path.join(MEDIA_DIR, lib, clean);
       if (!src.startsWith(MEDIA_DIR + path.sep) || !fs.existsSync(src)) { warnings.push(`image not found: /media/${lib}/${clean}`); return m0; }
@@ -1262,6 +1278,7 @@ app.post('/api/pages/:id/publish', async (req, res) => {
       fs.copyFileSync(src, path.join(dir, 'assets', dest));
       return `${q}assets/${dest}`;
     });
+    if (/\/media\//.test(html)) warnings.push('some images could not be bundled and will not show on the public page');
     // Anything still pointing at this server's paths would lead visitors back to it.
     const dashLinks = [...new Set((html.match(/href="\/(?!\/)[^"]*"/g) || []).map(x => x.slice(6, -1)))];
     if (dashLinks.length) warnings.push(`links that point at the dashboard (visitors cannot open them): ${dashLinks.slice(0, 8).join(', ')}`);
@@ -1304,6 +1321,52 @@ app.delete('/api/pages/:id/publish', async (req, res) => {
   if (!r.ok && r.status !== 404) return res.status(502).json({ error: 'Cloudflare refused: ' + cfErr(r) });
   delete pg.published;
   writePagesRegistry(pages);
+  res.json({ ok: true });
+});
+
+// --- PAGE IMAGES (fb-1790206467677) ------------------------------------------
+// Per-page uploads in media/page-<id>/, normalised with sharp (EXIF rotation,
+// max 2400px, WebP). Served from /media like other media (login required), and
+// Publish copies them into the static bundle.
+const pageImagesDir = (id) => path.join(MEDIA_DIR, `page-${id}`);
+app.get('/api/pages/:id/images', (req, res) => {
+  const id = req.params.id;
+  if (id !== 'home' && !PAGE_ID_RE.test(id)) return res.status(400).json({ error: 'Invalid page' });
+  const dir = pageImagesDir(id);
+  if (!fs.existsSync(dir)) return res.json([]);
+  const list = fs.readdirSync(dir).filter(f => /\.(webp|png|jpe?g|gif|svg)$/i.test(f)).map(f => {
+    const st = fs.statSync(path.join(dir, f));
+    return { file: f, path: `/media/page-${id}/${f}`, bytes: st.size, at: st.mtime.toISOString() };
+  }).sort((a, b) => b.at.localeCompare(a.at));
+  res.json(list);
+});
+app.post('/api/pages/:id/images', async (req, res) => {
+  const id = req.params.id;
+  if (id !== 'home' && !PAGE_ID_RE.test(id)) return res.status(400).json({ error: 'Invalid page' });
+  if (id === 'home' && !isAdminReq(req)) return res.status(403).json({ error: 'Not available for your account.' });
+  const { filename, dataUrl } = req.body || {};
+  const m = /^data:(image\/(png|jpe?g|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
+  if (!m) return res.status(400).json({ error: 'Upload a PNG, JPEG, WebP or GIF image.' });
+  const buf = Buffer.from(m[3], 'base64');
+  if (buf.length > 20 * 1024 * 1024) return res.status(400).json({ error: 'Image is larger than 20 MB.' });
+  const base = String(filename || 'image').replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'image';
+  const name = `${base}-${crypto.randomBytes(3).toString('hex')}.webp`;
+  try {
+    const sharp = require('sharp');
+    const dir = pageImagesDir(id);
+    fs.mkdirSync(dir, { recursive: true });
+    const info = await sharp(buf, { animated: false }).rotate().resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toFile(path.join(dir, name));
+    res.status(201).json({ file: name, path: `/media/page-${id}/${name}`, width: info.width, height: info.height, bytes: info.size });
+  } catch (e) {
+    res.status(400).json({ error: 'Could not read that image: ' + e.message });
+  }
+});
+app.delete('/api/pages/:id/images/:file', (req, res) => {
+  const { id, file } = req.params;
+  if ((id !== 'home' && !PAGE_ID_RE.test(id)) || !/^[a-z0-9-]{1,60}\.(webp|png|jpe?g|gif)$/i.test(file)) return res.status(400).json({ error: 'Invalid' });
+  const f = path.join(pageImagesDir(id), file);
+  if (!fs.existsSync(f)) return res.status(404).json({ error: 'Not found' });
+  fs.unlinkSync(f);
   res.json({ ok: true });
 });
 

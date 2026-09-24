@@ -20,7 +20,7 @@ export function safeSrc(v) {
 export function shell(inner, tone) {
   const bg = tone === 'brand' ? 'var(--ada-brand)' : 'var(--ada-surface)';
   const fg = tone === 'brand' ? 'var(--ada-on-brand, #ffffff)' : 'var(--ada-text)';
-  return `<section class="w-full overflow-hidden" style="background: ${bg}; color: ${fg}; border-radius: var(--ada-radius); padding: var(--ada-space) 1.5rem; font-family: var(--ada-font-body);">${inner}</section>`;
+  return `<section class="w-full overflow-hidden" style="background: ${bg}; color: ${fg}; border-radius: var(--ada-sec-radius, var(--ada-radius)); padding: var(--ada-space) 1.5rem; font-family: var(--ada-font-body);">${inner}</section>`;
 }
 export const headingStyle = (size) => `font-family: var(--ada-font-heading); font-size: clamp(1.5rem, 4.5vw, var(${size || '--ada-h2'})); line-height: 1.15; font-weight: 750;`;
 export const buttonStyle = (tone) => tone === 'ghost'

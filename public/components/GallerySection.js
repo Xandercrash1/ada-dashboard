@@ -3,7 +3,7 @@ import { esc, safeSrc, shell, headingStyle, lines } from './sectionUtils.js';
 class GallerySection extends HTMLElement {
   static configSchema = [
     { attr: 'heading', label: 'Heading', type: 'text', default: '' },
-    { attr: 'images', label: 'Images — one per line: URL | caption', type: 'textarea', default: '' },
+    { attr: 'images', label: 'Images — one per line: URL | caption', type: 'textarea', default: '', upload: 'append' },
     { attr: 'columns', label: 'Columns (desktop)', type: 'select', options: [['2', '2'], ['3', '3'], ['4', '4']], default: '3' },
     { attr: 'aspect', label: 'Image shape', type: 'select', options: [['square', 'Square'], ['landscape', 'Landscape'], ['portrait', 'Portrait']], default: 'landscape' },
   ];
