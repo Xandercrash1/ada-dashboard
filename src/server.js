@@ -624,7 +624,8 @@ const DEFAULT_HOMEPAGE = {
 // toggles {stats, quickLinks}) is an ordered list of full-width blocks. A
 // `grid` section holds widgets (w.section = its id; unassigned widgets go to
 // the first grid). A page without pageSections renders exactly as before.
-const PAGE_SECTION_TYPES = ['hero', 'features', 'grid', 'gallery', 'pricing', 'cta', 'text', 'footer', 'header'];
+const PAGE_SECTION_TYPES = ['hero', 'features', 'grid', 'gallery', 'pricing', 'cta', 'text', 'footer', 'header',
+  'split', 'testimonials', 'faq', 'team', 'stats', 'logos', 'steps', 'video', 'map', 'contact'];
 // Props that end up inside CSS url(...) or <img src>: http(s) or /media only,
 // no quotes/parens/whitespace (fb-1790206467677).
 const SAFE_IMAGE_URL_RE = /^(https?:\/\/[^\s"'()<>\\]{1,400}|\/media\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9._-]{1,120})$/;
@@ -1244,8 +1245,13 @@ function validatePublishHtml(html) {
   if (typeof html !== 'string' || !html.trim()) return 'Nothing to publish.';
   if (html.length > 3 * 1024 * 1024) return 'The page is too large to publish (3 MB max).';
   if (/<script\b/i.test(html)) return 'Published pages may not contain scripts.';
-  if (/<(iframe|object|embed|form|base)\b/i.test(html)) return 'Published pages may not contain frames, embeds or forms yet.';
-  if (/\son[a-z]+\s*=/i.test(html)) return 'Published pages may not contain event handlers.';
+  // The only frames allowed are the ones the video/map sections build from a
+  // parsed id: YouTube (privacy mode), Vimeo and Google Maps (fb-1790206467703).
+  const ALLOWED_IFRAME = /<iframe src="(?:https:\/\/www\.youtube-nocookie\.com\/embed\/[A-Za-z0-9_-]{6,20}|https:\/\/player\.vimeo\.com\/video\/\d{4,12}|https:\/\/www\.google\.com\/maps\?q=[^"<>]{1,600}&amp;output=embed)"(?: (?:title="[^"<>]{0,120}"|loading="lazy"|allow="[a-z; -]{0,160}"|allowfullscreen(?:="")?|referrerpolicy="[a-z-]{0,40}"|style="[a-z0-9:;%. -]{0,80}"))*><\/iframe>/gi;
+  const withoutAllowed = html.replace(ALLOWED_IFRAME, '');
+  if (/<(iframe|object|embed|form|base)\b/i.test(withoutAllowed)) return 'Published pages may only embed YouTube, Vimeo or Google Maps (from the video and map sections) — no other frames, embeds or forms.';
+  // Inside tags only: escaped text such as "&lt;img onerror=…&gt;" is harmless words.
+  if (/<[a-z][^>]*\son[a-z]+\s*=/i.test(html)) return 'Published pages may not contain event handlers.';
   if (/(href|src)\s*=\s*["']?\s*(javascript|data|vbscript):/i.test(html)) return 'Published pages may not contain script links.';
   return null;
 }

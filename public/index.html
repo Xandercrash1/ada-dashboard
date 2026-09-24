@@ -196,7 +196,7 @@
   <!-- DESKTOP / TABLET TABS -->
   <div class="border-b border-white/10 bg-transparent hidden md:block relative z-[999]">
     <div class="max-w-6xl mx-auto px-4 flex items-center justify-between">
-      <nav class="flex space-x-8">
+      <nav class="flex space-x-8 min-w-0 overflow-x-auto custom-scrollbar">
                 <button onclick="switchTab('home')" id="tab-btn-home" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
           <i class="fa-solid fa-house"></i> Home
         </button>
@@ -216,7 +216,7 @@
         </button>
       </nav>
       <div class="flex items-center gap-2">
-        <button onclick="openAccount()" class="theme-cycle account-btn" title="Account" aria-label="Account"><i class="fa-solid fa-circle-user"></i> <span class="account-name text-[11px] font-semibold"></span></button>
+        <button onclick="openAccount()" class="theme-cycle account-btn" title="Account" aria-label="Account"><i class="fa-solid fa-circle-user"></i> <span class="account-name hidden lg:inline text-[11px] font-semibold"></span></button>
         <!-- NOTIFICATIONS — server event stream (fb-1787765370485) -->
         <div class="relative">
           <button onclick="toggleNotifPanel(event)" class="theme-cycle ntf-bell" title="Notifications" aria-label="Notifications">
@@ -240,7 +240,7 @@
     <div id="ntf-toasts" class="fixed top-3 left-1/2 -translate-x-1/2 z-[1200] flex flex-col gap-2 w-[min(92vw,420px)] pointer-events-none"></div>
     <!-- THEME TOGGLE (mobile) — desktop bar is hidden on small screens -->
     <div class="md:hidden flex justify-end items-center gap-2 -mb-2">
-      <button onclick="openAccount()" class="theme-cycle account-btn" title="Account" aria-label="Account"><i class="fa-solid fa-circle-user"></i> <span class="account-name text-[11px] font-semibold"></span></button>
+      <button onclick="openAccount()" class="theme-cycle account-btn" title="Account" aria-label="Account"><i class="fa-solid fa-circle-user"></i> <span class="account-name hidden lg:inline text-[11px] font-semibold"></span></button>
       <div class="relative">
         <button onclick="toggleNotifPanel(event)" class="theme-cycle ntf-bell" title="Notifications" aria-label="Notifications">
           <i class="fa-solid fa-bell"></i>
@@ -5400,7 +5400,17 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       cta:      { label: 'Call to action', icon: 'fa-bullhorn', tag: 'ada-section-cta' },
       text:     { label: 'Text',        icon: 'fa-align-left', tag: 'ada-section-text' },
       footer:   { label: 'Footer',      icon: 'fa-shoe-prints', tag: 'ada-section-footer' },
-      header:   { label: 'Header / menu', icon: 'fa-bars',     tag: 'ada-section-header' }
+      header:   { label: 'Header / menu', icon: 'fa-bars',     tag: 'ada-section-header' },
+      split:    { label: 'Image + text', icon: 'fa-table-columns', tag: 'ada-section-split' },
+      testimonials: { label: 'Testimonials', icon: 'fa-quote-left', tag: 'ada-section-testimonials' },
+      faq:      { label: 'FAQ',         icon: 'fa-circle-question', tag: 'ada-section-faq' },
+      team:     { label: 'Team',        icon: 'fa-users',     tag: 'ada-section-team' },
+      stats:    { label: 'Numbers',     icon: 'fa-chart-simple', tag: 'ada-section-stats' },
+      logos:    { label: 'Logo strip',  icon: 'fa-certificate', tag: 'ada-section-logos' },
+      steps:    { label: 'Steps',       icon: 'fa-list-ol',   tag: 'ada-section-steps' },
+      video:    { label: 'Video',       icon: 'fa-circle-play', tag: 'ada-section-video' },
+      map:      { label: 'Map',         icon: 'fa-map-location-dot', tag: 'ada-section-map' },
+      contact:  { label: 'Contact',     icon: 'fa-address-card', tag: 'ada-section-contact' }
     };
 
     // Typography presets (fb-1790201502171). Web fonts load on demand, only
@@ -6090,7 +6100,7 @@ ${body}
       grid.innerHTML = Object.entries(PAGE_SECTION_TYPES).map(([type, d]) => `
         <button onclick="addSection('${type}')" class="text-left bg-black/20 border border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-colors p-4 rounded-xl flex items-center gap-3">
           <i class="fa-solid ${d.icon} text-indigo-400 text-lg w-6 text-center"></i>
-          <div><div class="text-white font-semibold text-sm">${d.label}</div><div class="text-gray-400 text-xs">${{ hero: 'Big headline, text and a button', features: 'Heading and a grid of cards', grid: 'A grid that holds widgets', gallery: 'A grid of photos with captions', pricing: 'Plans side by side', cta: 'A bold band with buttons', text: 'Paragraphs with bold, italics and links', footer: 'Name, small print and links', header: 'Logo, menu links and a button — put it first' }[type] || ''}</div></div>
+          <div><div class="text-white font-semibold text-sm">${d.label}</div><div class="text-gray-400 text-xs">${{ hero: 'Big headline, text and a button', features: 'Heading and a grid of cards', grid: 'A grid that holds widgets', gallery: 'A grid of photos with captions', pricing: 'Plans side by side', cta: 'A bold band with buttons', text: 'Paragraphs with bold, italics and links', footer: 'Name, small print and links', header: 'Logo, menu links and a button — put it first', split: 'A picture beside a block of text', testimonials: 'Quotes from happy customers', faq: 'Questions that open when tapped', team: 'People with photos and roles', stats: 'Big numbers with labels', logos: 'A row of partner or press logos', steps: 'Numbered how-it-works steps', video: 'A YouTube or Vimeo video', map: 'A Google map of your address', contact: 'Email, phone, address and hours' }[type] || ''}</div></div>
         </button>`).join('');
       document.getElementById('section-library-modal').classList.remove('hidden');
       const saved = document.getElementById('section-library-saved');
