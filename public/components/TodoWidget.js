@@ -84,6 +84,7 @@ class TodoWidget extends HTMLElement {
           </div>
           <div class="flex flex-wrap items-center gap-2 mt-1">
             ${t.project ? `<span class="px-1.5 py-0.5 rounded bg-white/5 text-gray-400 text-[9px] font-mono">${this.escapeHtml(t.project)}</span>` : ''}
+            ${(Array.isArray(t.tags) ? t.tags : []).map(n => `<span class="px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[9px]"><i class="fa-solid fa-user text-[7px]"></i> ${this.escapeHtml(n[0].toUpperCase() + n.slice(1))}</span>`).join('')}
             <span class="text-[9px] font-semibold ${priorityColor}">${this.escapeHtml(t.priority || 'None')}</span>
             ${t.dueDate ? `<span class="text-[9px] text-gray-500"><i class="fa-regular fa-clock"></i> ${this.formatDate(t.dueDate)}</span>` : ''}
           </div>

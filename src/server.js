@@ -1121,6 +1121,24 @@ function isAdminUserName(name) {
 function templateVisibleTo(user, t) { return !!t && ((t.owner || 'alex') === user.username || isAdminUserName(t.owner)); }
 function sessionOwnedBy(user, s) { return !!s && s.owner === user.username; }
 
+// User tags on TODO tasks (fb-1790204578669). Alex (admin) sees every task; a
+// pages user sees only tasks tagged with their username. A pages user's own
+// tag is always stamped on what they create or edit, and they may tag other
+// household members (shared tasks) but never remove someone else's tag.
+function taskVisibleTo(req, t) { return isAdminReq(req) || (!!t && Array.isArray(t.tags) && t.tags.includes(req.user.username)); }
+function taskPeople() {
+  const names = (userStore ? userStore.list() : []).filter(u => !u.disabled).map(u => u.username);
+  return [...new Set(['alex', ...names])].sort();
+}
+function resolveTaskTags(req, tags, existing) {
+  const prev = existing && Array.isArray(existing.tags) ? existing.tags : [];
+  const known = new Set(taskPeople());
+  const unknown = (tags || []).filter(x => !known.has(x) && !prev.includes(x));
+  if (unknown.length) return { error: `Unknown user tag(s): ${unknown.join(', ')}` };
+  if (isAdminReq(req)) return { tags: tags || [] };
+  return { tags: [...new Set([...(tags || []), ...prev, req.user.username])] };
+}
+
 // What a pages user may SAVE. Their pages are opened by Alex too, in his admin
 // session, and w.html is injected raw — so a pages user never stores HTML:
 // only one allow-listed custom element with its declared attributes, and ids,
@@ -1129,7 +1147,8 @@ function sessionOwnedBy(user, s) { return !!s && s.owner === user.username; }
 const SAFE_WIDGET_TAGS = {
   'ada-clock': ['format', 'font'], 'ada-analog-clock': [], 'ada-countdown': ['target', 'title'],
   'ada-timer': ['minutes', 'title'], 'ada-stopwatch': ['title'], 'ada-greeting': ['name'],
-  'ada-weather': [], 'ada-photo-frame': ['library', 'interval']
+  'ada-weather': [], 'ada-photo-frame': ['library', 'interval'],
+  'ada-todo': []   // shows only the viewer's own tagged tasks (fb-1790204578669)
 };
 function restrictWidgetHtml(html) {
   const m = /^\s*<(ada-[a-z-]+)((?:\s+[a-z][a-z0-9-]*="[^"<>]*")*)\s*>\s*<\/\1>\s*$/.exec(String(html || ''));
@@ -1214,6 +1233,13 @@ function authorizeRole(req, res, next) {
     if (m === 'DELETE') return (t && t.owner === u.username) ? next() : deny();
   }
   if (p === '/api/widgets/sanitize' && m === 'POST') return next();
+  // TODO tasks — the handlers filter every list to the user's own tags (fb-1790204578669)
+  if (['/api/todo', '/api/todo/projects', '/api/todo/completed', '/api/todo/people'].includes(p) && m === 'GET') return next();
+  if (p === '/api/todo/tasks' && (m === 'GET' || m === 'POST')) return next();
+  if ((mm = /^\/api\/todo\/tasks\/([^/]+)(\/complete)?$/.exec(p))) {
+    if (!taskVisibleTo(req, todoStore.readTasks().find(t => t.id === mm[1]))) return deny();
+    if (mm[2] ? m === 'POST' : (m === 'PATCH' || m === 'DELETE')) return next();
+  }
   if (m === 'GET' && ['/api/weather', '/api/glance', '/api/media/libraries', '/api/media/files', '/api/agent/models'].includes(p)) return next();
   if (p === '/api/agent/sessions' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/agent\/sessions\/([^/]+)(?:\/(chat|job))?$/.exec(p))) {
@@ -4503,7 +4529,7 @@ app.get('/api/todo', (req, res) => {
       if (changed) todoStore.writeTasks(newTasks);
       return newTasks;
     });
-    const view = todoEngine.buildView(rolledTasks, today);
+    const view = todoEngine.buildView(rolledTasks.filter(t => taskVisibleTo(req, t)), today);
     const response = {
       pastDue: view.pastDue,
       today: view.today,
@@ -4522,7 +4548,7 @@ app.get('/api/todo', (req, res) => {
 
 app.get('/api/todo/tasks', (req, res) => {
   try {
-    let tasks = todoStore.readTasks();
+    let tasks = todoStore.readTasks().filter(t => taskVisibleTo(req, t));
     const { project, type } = req.query;
     if (project) tasks = tasks.filter(t => t.project === project);
     if (type) tasks = tasks.filter(t => t.type === type);
@@ -4536,10 +4562,13 @@ app.post('/api/todo/tasks', (req, res) => {
   try {
     const { task, errors } = todoValidate.normalizeTask(req.body, null);
     if (errors) return res.status(400).json({ error: errors.join('; '), errors });
+    const tagged = resolveTaskTags(req, task.tags, null);
+    if (tagged.error) return res.status(400).json({ error: tagged.error });
     const nowIso = new Date().toISOString();
     const newTask = {
       id: todoEngine.generateId(),
       ...task,
+      tags: tagged.tags,
       sourceFile: null, // API/CLI-created tasks have no vault provenance
       createdAt: nowIso,
       updatedAt: nowIso
@@ -4564,7 +4593,9 @@ app.patch('/api/todo/tasks/:id', (req, res) => {
       if (idx === -1) { result = { status: 404, body: { error: 'Task not found' } }; return; }
       const { task, errors } = todoValidate.normalizeTask(req.body, tasks[idx]);
       if (errors) { result = { status: 400, body: { error: errors.join('; '), errors } }; return; }
-      tasks[idx] = { ...tasks[idx], ...task, updatedAt: new Date().toISOString() };
+      const tagged = resolveTaskTags(req, task.tags, tasks[idx]);
+      if (tagged.error) { result = { status: 400, body: { error: tagged.error } }; return; }
+      tasks[idx] = { ...tasks[idx], ...task, tags: tagged.tags, updatedAt: new Date().toISOString() };
       todoStore.writeTasks(tasks);
       result = { status: 200, body: tasks[idx] };
     });
@@ -4627,7 +4658,8 @@ app.post('/api/todo/tasks/:id/complete', (req, res) => {
         project: task.project,
         type: task.type,
         completedAt: new Date().toISOString(),
-        notes: task.notes || ''
+        notes: task.notes || '',
+        tags: task.tags || []
       };
       completed.unshift(entry);
       todoStore.writeCompleted(completed);
@@ -4644,16 +4676,19 @@ app.post('/api/todo/tasks/:id/complete', (req, res) => {
 
 app.get('/api/todo/completed', (req, res) => {
   try {
-    const items = todoStore.readCompleted().slice().sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+    const items = todoStore.readCompleted().filter(t => taskVisibleTo(req, t)).sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
     res.json(items);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// Everyone a task can be tagged with (fb-1790204578669): enabled accounts plus alex.
+app.get('/api/todo/people', (req, res) => res.json(taskPeople()));
+
 app.get('/api/todo/projects', (req, res) => {
   try {
-    const tasks = todoStore.readTasks();
+    const tasks = todoStore.readTasks().filter(t => taskVisibleTo(req, t));
     const projects = Array.from(new Set(tasks.map(t => t.project))).filter(Boolean).sort();
     res.json(projects);
   } catch (err) {

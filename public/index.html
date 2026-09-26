@@ -34,7 +34,7 @@
     (function () {
       const nativeFetch = window.fetch.bind(window);
       const PAGES_OK = [/^\/api\/me(\/password)?$/, /^\/api\/pages(\/|$)/, /^\/api\/homepage$/, /^\/api\/templates(\/|$)/, /^\/api\/widgets\/sanitize$/,
-        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/media\/(libraries|files)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/login$/, /^\/api\/logout$/];
+        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/todo(\/|$)/, /^\/api\/media\/(libraries|files)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/login$/, /^\/api\/logout$/];
       window.fetch = async function (input, init) {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
@@ -55,8 +55,8 @@
     .ada-inline-edit:focus { outline: 2px solid rgb(129, 140, 248); }
     .page-section.sec-drop-before { box-shadow: 0 -4px 0 0 rgb(129, 140, 248); }
     .page-section.sec-drop-after { box-shadow: 0 4px 0 0 rgb(129, 140, 248); }
-    .role-pages #tab-btn-todo, .role-pages #tab-btn-tools, .role-pages #tab-btn-server,
-    .role-pages #mob-btn-todo, .role-pages #mob-btn-tools, .role-pages #mob-btn-server,
+    .role-pages #tab-btn-tools, .role-pages #tab-btn-server,
+    .role-pages #mob-btn-tools, .role-pages #mob-btn-server,
     .role-pages .ntf-bell, .role-pages #edit-widget-advanced, .role-pages .admin-only { display: none !important; }
   </style>
   <script type="module" src="/components/index.js"></script>
@@ -1034,6 +1034,11 @@
           <textarea id="todo-notes" rows="3" class="w-full bg-black/20 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors resize-none" placeholder="Optional details or context..." autocomplete="off"></textarea>
         </div>
 
+        <div id="todo-people-wrap">
+          <label class="block text-xs font-semibold text-gray-300 mb-1">People <span class="font-normal text-gray-500">— who this task belongs to</span></label>
+          <div id="todo-people" class="flex flex-wrap gap-1.5"></div>
+        </div>
+
         <div id="todo-form-error" class="hidden bg-rose-950/40 border border-rose-800/60 text-rose-300 text-[11px] rounded-xl p-2.5"></div>
 
         <div class="flex justify-end gap-2.5 pt-2">
@@ -1614,6 +1619,7 @@
             ${t.notes ? `<div class="todo-note text-xs text-gray-400 leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-code:text-indigo-500 dark:prose-code:text-indigo-300 line-clamp-3 cursor-pointer" onclick="this.classList.toggle('line-clamp-3')" title="Click to expand / collapse">${marked.parse(t.notes)}</div>` : ''}
             <div class="flex items-center gap-3 text-[11px] text-gray-500 pt-0.5 flex-wrap">
               <span class="inline-flex items-center gap-1 text-indigo-400 font-medium"><i class="fa-solid fa-tag text-[9px]"></i> ${escapeHtml(t.project || '')}</span>
+              ${todoPeopleChips(t)}
               ${t.type === 'recurring' && t.frequency ? `<span class="inline-flex items-center gap-1"><i class="fa-solid fa-rotate text-[9px]"></i> ${escapeHtml(t.frequency)}</span>` : ''}
             </div>
           </div>
@@ -1772,6 +1778,41 @@
       }
       await loadTodoManage();
       await loadTodoDaily();
+    }
+
+    // --- USER TAGS (fb-1790204578669) ---
+    // A task belongs to the people tagged on it. Alex sees every task; a pages
+    // user sees only their own. The server enforces all of this — the picker
+    // just mirrors it: a pages user's own tag is always on, and tags other
+    // people already hold can't be removed from their account.
+    let todoPeople = null;
+    async function loadTodoPeople() {
+      if (todoPeople) return todoPeople;
+      const r = await todoApiFetch('/api/todo/people');
+      todoPeople = (r.ok && Array.isArray(r.data)) ? r.data : [];
+      return todoPeople;
+    }
+    function todoPersonLabel(n) { return n ? n[0].toUpperCase() + n.slice(1) : ''; }
+    function todoPeopleChips(t) {
+      const tags = Array.isArray(t.tags) ? t.tags : [];
+      return tags.map(n => `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[10px]"><i class="fa-solid fa-user text-[8px]"></i> ${escapeHtml(todoPersonLabel(n))}</span>`).join('');
+    }
+    async function renderTodoPeoplePicker(t) {
+      const box = document.getElementById('todo-people');
+      if (!box) return;
+      const me = (window.ME || await window.__meReady) || {};
+      const admin = me.role !== 'pages';
+      const had = t && Array.isArray(t.tags) ? t.tags : [];
+      const people = await loadTodoPeople();
+      const all = [...new Set([...people, ...had])];
+      box.innerHTML = all.map(n => {
+        const mine = !admin && n === me.username;
+        const checked = had.includes(n) || (!t && mine);
+        const locked = !admin && (mine || had.includes(n));
+        return `<label class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-white/10 bg-black/20 text-xs text-gray-200 ${locked ? 'opacity-70' : 'cursor-pointer hover:border-emerald-500/50'}">
+          <input type="checkbox" value="${escapeHtml(n)}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''} class="rounded text-emerald-600 focus:ring-0">
+          ${escapeHtml(todoPersonLabel(n))}${mine ? ' <span class="text-gray-500">(you)</span>' : ''}</label>`;
+      }).join('') || '<span class="text-[11px] text-gray-500">No household accounts yet.</span>';
     }
 
     // --- ADD/EDIT MODAL ---
@@ -1937,6 +1978,7 @@
       updateTodoFreqVisibility();
       document.getElementById('todo-nextdue').value = todayISO();
       document.getElementById('todo-scheduled-duedate').value = todayISO();
+      renderTodoPeoplePicker(null);
       document.getElementById('add-todo-modal').classList.remove('hidden');
     }
 
@@ -1989,6 +2031,7 @@
         document.getElementById('todo-backlog-added').value = t.added || '';
       }
 
+      renderTodoPeoplePicker(t);
       document.getElementById('add-todo-modal').classList.remove('hidden');
     }
 
@@ -2002,7 +2045,8 @@
         project: document.getElementById('todo-project').value.trim(),
         priority: document.getElementById('todo-priority').value,
         type,
-        notes: document.getElementById('todo-notes').value.trim()
+        notes: document.getElementById('todo-notes').value.trim(),
+        tags: [...document.querySelectorAll('#todo-people input:checked')].map(x => x.value)
       };
 
       // Per-type fields. The contract's JSON example (§2) shows only a

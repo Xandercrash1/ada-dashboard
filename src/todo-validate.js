@@ -47,12 +47,23 @@ function normalizeTask(raw, existing) {
   const notesRaw = pick('notes', '');
   const notes = typeof notesRaw === 'string' ? notesRaw : '';
 
+  // User tags (fb-1790204578669): usernames a task belongs to. Admin sees
+  // every task; a pages user sees only tasks carrying their own tag. Format
+  // is checked here; WHO may be tagged is the server's call (known users).
+  const tagsRaw = pick('tags', []);
+  let tags = [];
+  if (tagsRaw !== null && !Array.isArray(tagsRaw)) errors.push('tags must be an array of usernames');
+  else tags = [...new Set((tagsRaw || []).map(x => String(x).trim().toLowerCase()).filter(Boolean))];
+  if (tags.some(x => !/^[a-z][a-z0-9_-]{1,31}$/.test(x))) errors.push('tags must be usernames (lowercase letters, digits, - or _)');
+  if (tags.length > 20) errors.push('a task can carry at most 20 user tags');
+
   const task = {
     type,
     name,
     project,
     priority: typeof priority === 'string' && priority ? priority : 'Low',
     notes,
+    tags,
     // Type-specific fields default to null/undefined below and are filled
     // in per branch — kept explicit so PATCHing a task from one type's
     // shape never leaves stale fields from another type behind.
