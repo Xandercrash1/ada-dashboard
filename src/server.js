@@ -34,6 +34,14 @@ const { requireAuth, users: userStore } = mountAuth(app, {
   loginHtmlFile: path.join(__dirname, '../public/login.html'),
   behindProxy: true,                  // throws at startup if trust proxy is unset
 });
+// One Ada device enrollment (Plan — One Ada.md § 4 P2-2). The two token-authenticated routes
+// (POST /api/devices/enroll, GET /api/devices/enroll/:id) MUST be mounted before requireAuth.
+const deviceEnrollment = require('./devices').create({
+  dataDir: path.join(__dirname, '../data'),
+  isLive: String(PORT) === '3000',   // only live writes ~/.ssh/authorized_keys; staging writes ~/ops/test-authorized_keys
+  baseUrl: String(PORT) === '3000' ? 'https://303dashboard.duckdns.org' : `http://localhost:${PORT}`,
+});
+deviceEnrollment.mountPublic(app);
 app.use(requireAuth);                 // everything below requires a session
 app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1790201502191), defined below
 app.use(express.static(path.join(__dirname, '../public')));
@@ -1260,6 +1268,7 @@ function authorizeRole(req, res, next) {
 registerPageBuilder(app, { readPagesRegistry, getPageDocPath, readJsonStoreOrThrow, writeFileAtomic, snapshotBeforeWrite, isAdminReq, ownerName, isAdminUserName, homeBuilderFile: HOME_BUILDER_FILE, readHomepage });
 
 app.get('/api/me', (req, res) => res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : 'pages' }));
+deviceEnrollment.mountAdmin(app, { isAdminReq });   // One Ada: enroll-token, device list, approve/deny/revoke, /devices/confirm/:id
 app.post('/api/me/password', (req, res) => {
   const name = ownerName(req);
   const { current, next: nextPw } = req.body || {};
