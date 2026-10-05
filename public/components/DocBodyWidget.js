@@ -91,7 +91,7 @@ class DocBodyWidget extends HTMLElement {
         <div class="flex items-center justify-end gap-2 mb-1">
           <span data-role="status" class="text-[11px] text-gray-500 dark:text-gray-400 mr-auto"></span>
           <button data-role="toggle" type="button" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 flex items-center gap-1.5">
-            <i class="fa-solid fa-pen"></i> <span>Edit</span>
+            <i class="fa-solid fa-pen"></i> <span>Edit doc</span>
           </button>
         </div>
         <div data-role="body" class="flex-1 min-h-0 overflow-auto text-gray-800 dark:text-gray-200"></div>
@@ -141,9 +141,9 @@ class DocBodyWidget extends HTMLElement {
     const html = this.embedWidgets(this.clean(this.html));
     body.innerHTML = html.replace(/<p><br><\/p>/g, '').trim()
       ? `<div class="doc-view ql-snow"><div class="ql-editor">${html}</div></div>`
-      : `<div class="text-gray-400 dark:text-gray-500 text-sm py-6">Empty document — press <b>Edit</b> to start writing.</div>`;
+      : `<div class="text-gray-400 dark:text-gray-500 text-sm py-6">Empty document — press <b>Edit doc</b> to start writing.</div>`;
     const t = this.querySelector('[data-role="toggle"]');
-    t.innerHTML = '<i class="fa-solid fa-pen"></i> <span>Edit</span>';
+    t.innerHTML = '<i class="fa-solid fa-pen"></i> <span>Edit doc</span>';
     t.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-600');
   }
 

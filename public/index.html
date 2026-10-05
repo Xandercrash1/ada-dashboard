@@ -301,6 +301,11 @@
           <select id="page-theme-select" onchange="applyPageTheme(this.value)" title="Page theme preset" class="hidden px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-300 hover:text-white hover:border-gray-500 text-xs font-medium focus:outline-none focus:border-indigo-500 transition-all">
             <option value="custom">Theme: Custom</option>
           </select>
+          <!-- Page options (share, settings, history, publish, delete) — replaces reaching them through Edit Layout -->
+          <div class="relative" id="page-options-wrap">
+            <button onclick="togglePageOptionsMenu(event)" id="page-options-btn" class="hidden px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs font-medium items-center gap-2 transition-all"><i class="fa-solid fa-sliders"></i> <span>Page options</span></button>
+            <div id="page-options-menu" class="hidden absolute right-0 top-full mt-1 w-52 z-40 bg-dark-bg/95 backdrop-blur-xl border border-dark-border rounded-xl shadow-2xl p-1 text-xs"></div>
+          </div>
           <button onclick="openPageBuilder()" id="builder-btn" class="hidden px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-600/20 dark:border-indigo-500/60 dark:text-indigo-300 dark:hover:text-white dark:hover:bg-indigo-600/40 text-xs font-medium items-center gap-2 transition-all" title="Edit this page in the page builder"></button>
           <button onclick="toggleEditLayout()" id="edit-layout-btn" class="px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs font-medium flex items-center gap-2 transition-all">
             <i class="fa-solid fa-pen-ruler"></i> <span>Edit Layout</span>
@@ -5627,33 +5632,59 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (host) { host.classList.add('hidden'); host.innerHTML = ''; }
       return false;
     }
+    // Header buttons (Alex, 2026-10-04): "Edit page" opens the page builder on
+    // every page; the old grid editor ("Edit Layout") is gone, and a Document
+    // widget is edited through its own "Edit doc" button. Share / settings /
+    // history / publish / delete live in the "Page options" menu.
     function syncBuilderButtons() {
       const btn = document.getElementById('builder-btn');
       if (!btn) return;
       const pg = builderPageRef();
-      const live = !!(homepageDoc && homepageDoc.builderLive);
-      const show = !!pg && canEditCurrentPage();   // always offered while pages move to the new builder
+      const show = !!pg && canEditCurrentPage();
       btn.classList.toggle('hidden', !show);
       btn.classList.toggle('flex', show);
-      btn.innerHTML = live ? '<i class="fa-solid fa-pen-to-square"></i> <span>Edit page</span>' : '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>New page builder</span>';
-      btn.title = live ? 'Edit this page in the page builder' : 'Rebuild this page in the new page builder (the current page stays until you press Go live)';
-      // On a builder page the grid tools don't apply. "Edit Layout" becomes
-      // "Page options" (share, settings, history, delete); Home has none of
-      // those, so its button goes. Publishing to the web waits for the builder
-      // export (plan phase 7).
+      btn.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> <span>Edit page</span>';
+      btn.title = (homepageDoc && homepageDoc.builderLive)
+        ? 'Edit this page in the page builder'
+        : 'Edit this page in the page builder (it opens with the current layout; nothing changes for viewers until you press Go live)';
       const edit = document.getElementById('edit-layout-btn');
-      if (live && pg) {
-        if (edit) {
-          const showOpts = pg.id !== 'home' && canEditCurrentPage();
-          edit.classList.toggle('hidden', !showOpts);
-          if (showOpts) edit.innerHTML = window.isEditingLayout ? '<i class="fa-solid fa-check"></i> <span>Done</span>' : '<i class="fa-solid fa-sliders"></i> <span>Page options</span>';
-        }
-        ['designer-btn', 'undo-layout-btn', 'redo-layout-btn', 'save-template-btn', 'page-style-btn', 'export-page-btn', 'export-preview-btn', 'page-theme-select', 'publish-page-btn']
-          .forEach(id => { const b = document.getElementById(id); if (b) { b.classList.add('hidden'); b.classList.remove('flex'); } });
-      }
-      // Back on a grid page: restore the grid editor's own label.
-      else if (edit) edit.innerHTML = window.isEditingLayout ? '<i class="fa-solid fa-check"></i> <span>Done Editing</span>' : '<i class="fa-solid fa-pen-ruler"></i> <span>Edit Layout</span>';
+      if (edit) { edit.classList.add('hidden'); edit.classList.remove('flex'); }
+      if (window.isEditingLayout) toggleEditLayout();   // never left in the old grid edit mode
+      const opts = document.getElementById('page-options-btn');
+      const showOpts = !!currentPageEntry() && canEditCurrentPage();   // custom pages only, not Home
+      if (opts) { opts.classList.toggle('hidden', !showOpts); opts.classList.toggle('flex', showOpts); }
+      if (!showOpts) closePageOptionsMenu();
     }
+    function closePageOptionsMenu() {
+      const m = document.getElementById('page-options-menu');
+      if (m) m.classList.add('hidden');
+    }
+    function togglePageOptionsMenu(e) {
+      if (e) e.stopPropagation();
+      const m = document.getElementById('page-options-menu');
+      const pg = currentPageEntry();
+      if (!m || !pg) return;
+      if (!m.classList.contains('hidden')) return closePageOptionsMenu();
+      const builderPage = !!(homepageDoc && homepageDoc.builderLive);
+      const item = (icon, label, fn, cls = '') =>
+        `<button type="button" data-fn="${fn}" class="w-full text-left px-3 py-2 rounded-lg hover:bg-white/5 flex items-center gap-2 ${cls || 'text-gray-300'}"><i class="fa-solid ${icon} w-4"></i> ${label}</button>`;
+      m.innerHTML = [
+        item(pg.shared ? 'fa-user-group' : 'fa-lock', pg.shared ? 'Shared — make private' : 'Private — share with household', 'togglePageShared'),
+        item('fa-gear', 'Page settings', 'openPageSettings'),
+        item('fa-clock-rotate-left', 'History', 'openHistory'),
+        // Publishing a builder page to the web waits for the builder export (plan phase 7).
+        builderPage ? '' : item('fa-globe', pg.published ? 'Published — manage' : 'Publish to the web', 'openPublishDialog'),
+        '<div class="my-1 border-t border-dark-border"></div>',
+        item('fa-trash-can', 'Delete page', 'deleteCurrentPage', 'text-rose-400'),
+      ].join('');
+      m.querySelectorAll('[data-fn]').forEach(b => b.addEventListener('click', () => {
+        closePageOptionsMenu();
+        const fn = window[b.dataset.fn];
+        if (typeof fn === 'function') fn();
+      }));
+      m.classList.remove('hidden');
+    }
+    document.addEventListener('click', e => { if (!e.target.closest || !e.target.closest('#page-options-wrap')) closePageOptionsMenu(); });
     function openPageBuilder() {
       const pg = builderPageRef();
       if (pg) location.href = `/builder.html?page=${encodeURIComponent(pg.id)}`;
