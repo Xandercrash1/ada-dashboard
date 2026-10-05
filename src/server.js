@@ -1268,7 +1268,8 @@ function authorizeRole(req, res, next) {
 registerPageBuilder(app, { readPagesRegistry, getPageDocPath, readJsonStoreOrThrow, writeFileAtomic, snapshotBeforeWrite, isAdminReq, ownerName, isAdminUserName, homeBuilderFile: HOME_BUILDER_FILE, readHomepage });
 
 app.get('/api/me', (req, res) => res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : 'pages' }));
-deviceEnrollment.mountAdmin(app, { isAdminReq });   // One Ada: enroll-token, device list, approve/deny/revoke, /devices/confirm/:id
+deviceEnrollment.mountAdmin(app, { isAdminReq });
+require('./projects').create().mount(app, { isAdminReq });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault   // One Ada: enroll-token, device list, approve/deny/revoke, /devices/confirm/:id
 app.post('/api/me/password', (req, res) => {
   const name = ownerName(req);
   const { current, next: nextPw } = req.body || {};

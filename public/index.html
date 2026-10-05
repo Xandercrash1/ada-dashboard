@@ -64,6 +64,7 @@
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="projects-tab.js" defer></script><!-- One Ada: Projects tab -->
   <script>
     const renderer = new marked.Renderer();
     const originalCodeRenderer = renderer.code.bind(renderer);
@@ -213,8 +214,11 @@
           <i class="fa-solid fa-calendar-check"></i> Tasks
           <span id="badge-todo-count" class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800 hidden">0</span>
         </button>
+        <button onclick="switchTab('projects')" id="tab-btn-projects" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
+          <i class="fa-solid fa-diagram-project"></i> Projects
+        </button>
         <button onclick="switchTab('tools')" id="tab-btn-tools" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
-          <i class="fa-solid fa-toolbox"></i> Tools & Projects
+          <i class="fa-solid fa-toolbox"></i> Tools
         </button>
         <button onclick="switchTab('server')" id="tab-btn-server" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
           <i class="fa-solid fa-server"></i> Server
@@ -467,6 +471,8 @@
     <!-- ======================================================== -->
     <!-- TAB 3: SERVER (HEALTH & INTERACTIVE AGENTS)           -->
     <!-- ======================================================== -->
+    <section id="view-projects" class="hidden space-y-5"><div id="projects-root" class="space-y-5"></div></section><!-- One Ada: Projects tab -->
+
     <section id="view-server" class="hidden space-y-5">
       
       <!-- SUB-TAB SELECTOR -->
@@ -908,6 +914,10 @@
       <i class="fa-solid fa-calendar-check text-lg"></i>
       <span id="mob-badge-todo-count" class="hidden absolute top-0 right-6 w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">0</span>
       <span>Tasks</span>
+    </button>
+    <button onclick="switchTab('projects')" id="mob-btn-projects" class="flex flex-col items-center justify-center w-full py-1 text-gray-400 text-[11px] gap-1 transition-colors">
+      <i class="fa-solid fa-diagram-project text-lg"></i>
+      <span>Projects</span>
     </button>
     <button onclick="switchTab('tools')" id="mob-btn-tools" class="flex flex-col items-center justify-center w-full py-1 text-gray-400 text-[11px] gap-1 transition-colors">
       <i class="fa-solid fa-bolt text-lg"></i>
@@ -1367,9 +1377,9 @@
       currentTab = tab;
       try { localStorage.setItem('ada_activeTab', tab); } catch (e) {}
       
-      const allTabs = ['home', 'todo', 'tools', 'server', ...customPages.map(p => p.id)];
+      const allTabs = ['home', 'todo', 'projects', 'tools', 'server', ...customPages.map(p => p.id)];
       onDesignerTabSwitch(tab);
-      const viewTabs = ['home', 'todo', 'tools', 'server'];
+      const viewTabs = ['home', 'todo', 'projects', 'tools', 'server'];
       
       allTabs.forEach(t => {
         // Only hide views that actually exist as standalone sections
@@ -1399,6 +1409,10 @@
       } else {
          const targetView = document.getElementById(`view-${tab}`);
          if (targetView) targetView.classList.remove('hidden');
+         if (tab === 'projects' && window.AdaProjects) window.AdaProjects.show();   // One Ada: Projects tab (projects-tab.js)
+      }
+      if (tab !== 'projects' && location.hash.startsWith('#projects')) {
+         history.replaceState(null, '', location.pathname + location.search);   // leaving Projects drops its deep link
       }
 
       const activeDeskBtn = document.getElementById(`tab-btn-${tab}`);
@@ -7451,8 +7465,9 @@ ${body}
     window.addEventListener('DOMContentLoaded', async () => {
       let saved = 'home';
       try { saved = localStorage.getItem('ada_activeTab') || 'home'; } catch (e) {}
+      if (location.hash.startsWith('#projects')) saved = 'projects';   // One Ada deep links (#projects/start, …)
       try {
-        if (!['home', 'todo', 'tools', 'server'].includes(saved)) {
+        if (!['home', 'todo', 'projects', 'tools', 'server'].includes(saved)) {
           await (window.__customPagesReady || Promise.resolve());
           if (!customPages.some(p => p.id === saved)) saved = 'home';
         }
