@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Page</title>
+<script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+<script src="/builder/page-runtime.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script type="module" src="/components/index.js"></script>
+<style>
+  #edit-btn { position:fixed; right:16px; bottom:16px; z-index:50; padding:10px 16px; border-radius:12px; background:#4f46e5; color:#fff;
+    font:600 14px -apple-system,sans-serif; text-decoration:none; box-shadow:0 6px 20px rgba(0,0,0,.4); display:none; }
+  .pv-note { padding:32px 24px; color:#9ca3af; font:14px -apple-system,sans-serif; text-align:center; }
+</style>
+</head>
+<body>
+<a id="edit-btn" href="#"><i class="fa fa-pen"></i> Edit</a>
+<main id="page"><p class="pv-note">Loading…</p></main>
+<script>
+// Page Builder v3 viewer: renders a page's LIVE version (already cleaned by the
+// server). Embedded in the dashboard with ?embed=1, it reports its height to
+// the parent so the frame fits the page.
+(async () => {
+  const params = new URLSearchParams(location.search);
+  const id = params.get('page') || '';
+  const embedded = params.get('embed') === '1';
+  const main = document.getElementById('page');
+  let data;
+  try {
+    const r = await fetch(`/api/pages/${encodeURIComponent(id)}/builder`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    data = await r.json();
+  } catch (e) { main.innerHTML = '<p class="pv-note">This page could not be loaded.</p>'; return; }
+  document.title = data.page.title || 'Page';
+  if (!data.live) {
+    main.innerHTML = `<p class="pv-note">This page hasn't gone live yet.${data.canEdit ? ' Open the editor and press “Go live”.' : ''}</p>`;
+  } else {
+    const style = document.createElement('style'); style.textContent = data.live.css || ''; document.head.appendChild(style);
+    const body = new DOMParser().parseFromString(data.live.html || '', 'text/html').body;
+    main.replaceChildren(...body.childNodes);
+  }
+  if (data.canEdit && !embedded) {
+    const b = document.getElementById('edit-btn');
+    b.href = `/builder.html?page=${encodeURIComponent(id)}`; b.style.display = 'inline-block';
+  }
+  if (embedded && window.parent !== window) {
+    const post = () => window.parent.postMessage({ type: 'ada-page-height', page: id, height: document.documentElement.scrollHeight }, location.origin);
+    new ResizeObserver(post).observe(document.body);
+    post();
+  }
+})();
+</script>
+</body>
+</html>

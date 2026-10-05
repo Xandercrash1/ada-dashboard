@@ -33,13 +33,18 @@ class ClockWidget extends HTMLElement {
     const accent = this.getAttribute('accent') || 'indigo';
     let bgClass = '';
     let styleBg = '';
+    // One text colour per theme and mode — two competing text-* classes on one
+    // element let the palette order decide, which washed the clock out in light mode.
+    let textClass = 'text-gray-900 dark:text-white';
     
     if (theme === 'glass') {
         bgClass = 'bg-dark-bg/60 backdrop-blur-xl border border-dark-border shadow-sm';
     } else if (theme === 'neon') {
-        bgClass = `bg-${accent}-500/10 backdrop-blur-md border border-${accent}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accent}-500/30 text-${accent}-100`;
+        bgClass = `bg-${accent}-500/10 backdrop-blur-md border border-${accent}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accent}-500/30`;
+        textClass = `text-${accent}-700 dark:text-${accent}-100`;
     } else if (theme === 'gradient') {
-        bgClass = `bg-gradient-to-br from-${accent}-600/80 to-${accent}-900/80 backdrop-blur-md border border-${accent}-400/30 shadow-lg text-white`;
+        bgClass = `bg-gradient-to-br from-${accent}-600/80 to-${accent}-900/80 backdrop-blur-md border border-${accent}-400/30 shadow-lg`;
+        textClass = 'text-white';
     } else if (theme === 'transparent') {
         bgClass = '';
     } else {
@@ -48,9 +53,9 @@ class ClockWidget extends HTMLElement {
 
     const font = this.getAttribute('font') || "'Courier New', monospace";
     this.innerHTML = `
-      <div class="${bgClass} dark:text-white text-gray-900 rounded-2xl p-4 flex flex-col items-center justify-center h-full transition-all duration-300" style="${styleBg}">
+      <div class="${bgClass} ${textClass} rounded-2xl p-4 flex flex-col items-center justify-center h-full transition-all duration-300" style="${styleBg}">
           <div class="time" style="font-family:${font};font-size:2.4rem;font-weight:700;letter-spacing:3px;"></div>
-          <div class="date dark:text-white/80 text-gray-500" style="font-size:0.85rem;margin-top:5px;font-family: 'Inter', sans-serif;"></div>
+          <div class="date opacity-70" style="font-size:0.85rem;margin-top:5px;font-family: 'Inter', sans-serif;"></div>
       </div>
     `;
     this.updateTime();

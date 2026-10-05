@@ -149,7 +149,7 @@ class AdaGlance extends HTMLElement {
     let bgClass = 'bg-white/5 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-sm';
     
     if (theme === 'neon') bgClass = `bg-${accent}-500/10 backdrop-blur-md border border-${accent}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accent}-500/30 text-${accent}-100`;
-    else if (theme === 'gradient') bgClass = `bg-gradient-to-br from-${accent}-600/80 to-${accent}-900/80 backdrop-blur-md border border-${accent}-400/30 shadow-lg text-white`;
+    else if (theme === 'gradient') bgClass = `bg-gradient-to-br from-${accent}-600/80 to-${accent}-900/80 backdrop-blur-md border border-${accent}-400/30 shadow-lg text-white dark`;   // 'dark': this card is dark in both modes, so its contents use their dark: colours
     else if (theme === 'transparent') bgClass = '';
 
     this.innerHTML = `

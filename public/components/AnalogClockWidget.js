@@ -1,4 +1,13 @@
 class AnalogClockWidget extends HTMLElement {
+  static ensureThemeVars() {
+    if (document.getElementById('ada-analog-clock-vars')) return;
+    const st = document.createElement('style');
+    st.id = 'ada-analog-clock-vars';
+    st.textContent = `:root { --ada-clock-face: rgba(0,0,0,0.03); --ada-clock-marks: rgba(15,23,42,0.35); --ada-clock-hands: #1e293b; }
+      .dark { --ada-clock-face: rgba(255,255,255,0.05); --ada-clock-marks: rgba(255,255,255,0.3); --ada-clock-hands: #e2e8f0; }`;
+    document.head.appendChild(st);
+  }
+
   connectedCallback() {
     this.classList.add("block", "w-full", "h-full");
     this.render();
@@ -28,9 +37,12 @@ class AnalogClockWidget extends HTMLElement {
     const accentColor = this.getAttribute('accent') || 'indigo';
     let bgClass = '';
     let styleBg = '';
-    let face = 'rgba(255,255,255,0.05)';
-    let marks = 'rgba(255,255,255,0.3)';
-    let hands = '#e2e8f0';
+    // Default colours follow the page's light/dark mode (CSS variables below);
+    // the explicit 'light' / 'dark' faces and the gradient card set their own.
+    AnalogClockWidget.ensureThemeVars();
+    let face = 'var(--ada-clock-face)';
+    let marks = 'var(--ada-clock-marks)';
+    let hands = 'var(--ada-clock-hands)';
     let accent = '#6366f1'; 
     
     if (theme === 'glass') {
@@ -41,6 +53,8 @@ class AnalogClockWidget extends HTMLElement {
     } else if (theme === 'gradient') {
         bgClass = `bg-gradient-to-br from-${accentColor}-600/80 to-${accentColor}-900/80 backdrop-blur-md border border-${accentColor}-400/30 shadow-lg text-white`;
         face = 'rgba(0,0,0,0.2)';
+        marks = 'rgba(255,255,255,0.3)';
+        hands = '#e2e8f0';
     } else if (theme === 'light') {
         styleBg = 'background: #fff;';
         face = '#f3f4f6';

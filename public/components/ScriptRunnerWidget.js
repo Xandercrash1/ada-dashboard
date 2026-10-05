@@ -13,7 +13,7 @@ class ScriptRunnerWidget extends HTMLElement {
   
   async runScript() {
     const scriptId = this.getAttribute('script-id');
-    if (!scriptId) return;
+    if (!scriptId) { if (window.showToast) window.showToast('Pick a script for this button in its Settings', 'warn'); return; }
     
     const btn = this.querySelector('button');
     const iconEl = btn.querySelector('i');
@@ -30,11 +30,13 @@ class ScriptRunnerWidget extends HTMLElement {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: scriptId })
       });
-      if (res.ok) {
-        if (window.showToast) window.showToast('Script started successfully', 'success');
-      } else {
-        if (window.showToast) window.showToast('Failed to start script', 'error');
-      }
+      // The server waits for the script and returns its output: show it, and
+      // report the script's own result (it can fail with HTTP 200).
+      const data = await res.json().catch(() => ({}));
+      const ok = res.ok && data.success !== false;
+      const secs = typeof data.durationMs === 'number' ? ` in ${(data.durationMs / 1000).toFixed(1)}s` : '';
+      if (window.showToast) window.showToast(ok ? `Script finished${secs}` : `Script failed${data.error ? ': ' + data.error : ''}`, ok ? 'success' : 'error');
+      this.showOutput(ok, data);
     } catch (e) {
       if (window.showToast) window.showToast('Error connecting to server', 'error');
     } finally {
@@ -43,6 +45,21 @@ class ScriptRunnerWidget extends HTMLElement {
       btn.disabled = false;
       btn.classList.remove('opacity-50');
     }
+  }
+
+  showOutput(ok, data) {
+    const box = this.querySelector('[data-role="output"]');
+    const pre = this.querySelector('[data-role="output"] pre');
+    if (!box || !pre) return;
+    let text = (data.stdout || '').trimEnd();
+    if (data.stderr) text += (text ? '\n\n' : '') + '[stderr]\n' + String(data.stderr).trimEnd();
+    if (data.error && !ok) text += (text ? '\n' : '') + data.error;
+    if (Array.isArray(data.available)) text += '\nAvailable scripts: ' + data.available.join(', ');
+    pre.textContent = text || '(no output)';
+    pre.classList.toggle('text-rose-300', !ok);
+    box.classList.remove('hidden');
+    if (this._savedHeight === undefined) this._savedHeight = this.style.height;
+    this.style.height = 'auto';   // grow to show the output
   }
 
   render() {
@@ -58,18 +75,28 @@ class ScriptRunnerWidget extends HTMLElement {
     const label = this.getAttribute('label') || 'Run Script';
     const icon = this.getAttribute('icon') || 'fa-terminal';
     // const accent = this.getAttribute('accent') || 'indigo';
-    const scriptId = this.getAttribute('script-id') || 'sys-health';
-    
+    const scriptId = this.getAttribute('script-id') || '';
+
     this.innerHTML = `
-      <div class="${bgClass} rounded-xl p-4 flex flex-col justify-center items-center h-full gap-3 transition-colors hover:bg-dark-bg">
-        <div class="text-gray-400 text-xs font-semibold uppercase tracking-wider">${scriptId}</div>
+      <div class="${bgClass} rounded-xl p-4 flex flex-col justify-center items-center h-full gap-3 transition-colors">
+        <div class="text-gray-500 dark:text-gray-400 text-xs font-semibold uppercase tracking-wider">${scriptId || 'Pick a script in Settings'}</div>
         <button class="w-full py-3 px-4 rounded-lg bg-${accent}-500 hover:bg-${accent}-600 text-white font-bold flex items-center justify-center gap-2 transition-colors">
             <i class="fa-solid ${icon}"></i> ${label}
         </button>
+        <div data-role="output" class="hidden w-full">
+          <div class="flex justify-between items-center mb-1 text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 font-semibold">
+            <span>Output</span><button type="button" data-role="hide" class="normal-case tracking-normal hover:underline">Hide</button>
+          </div>
+          <pre class="w-full max-h-56 overflow-auto text-[11px] leading-snug p-2 rounded-lg bg-black/80 text-gray-100 text-left whitespace-pre-wrap break-words"></pre>
+        </div>
       </div>
     `;
-    
+
     this.querySelector('button').addEventListener('click', () => this.runScript());
+    this.querySelector('[data-role="hide"]').addEventListener('click', () => {
+      this.querySelector('[data-role="output"]').classList.add('hidden');
+      if (this._savedHeight !== undefined) { this.style.height = this._savedHeight; this._savedHeight = undefined; }
+    });
   }
 }
 customElements.define('ada-script-runner', ScriptRunnerWidget);

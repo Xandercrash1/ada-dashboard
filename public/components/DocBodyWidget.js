@@ -1,609 +1,239 @@
+// DocBodyWidget.js — <ada-doc-body>: a rich-text document (2026-10-04, Alex).
+//
+// Locked by default: the document shows as finished text. "Edit" opens a full
+// toolbar (Quill: fonts, sizes, headings, bold/italic/underline/strike, text
+// colour + highlight, lists and checklists, alignment, indent, quote, code,
+// links, images, clear formatting, undo/redo); "Done" saves and locks it again.
+// Changes autosave while editing.
+//
+// Storage is unchanged: /api/docs/<id> { text, format?, updatedAt }, with the
+// optimistic updatedAt check. Rich documents are saved as format 'html' and
+// cleaned on the server (save AND read); older Markdown documents still show,
+// and become rich text the first time they're edited.
+//
+// The id comes from the widget-id attribute, or the nearest data-widget-id
+// (the element itself on page-builder pages, the grid card on old pages).
+//
+// The old "/" insert-a-widget menu is a planned feature (backlog), not here.
+
 class DocBodyWidget extends HTMLElement {
-  constructor() {
-    super();
-    this.text = "";
-    this.typingTimer = null;
-    
-    this.widgetId = null;
-    this.fadeTimer = null;
-    
-    this.slashActive = false;
-    this.slashQuery = "";
-    this.slashStartIndex = -1;
-    this.slashSelectedIndex = 0;
+  // Libraries are bundled in /vendor (no CDN) and loaded once per page.
+  static loadAssets() {
+    if (DocBodyWidget._assets) return DocBodyWidget._assets;
+    const css = (href) => new Promise(res => {
+      if (document.querySelector(`link[href="${href}"]`)) return res();
+      const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; l.onload = res; l.onerror = res; document.head.appendChild(l);
+    });
+    const js = (src, ready) => new Promise((res, rej) => {
+      if (ready()) return res();
+      const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Could not load ' + src)); document.head.appendChild(s);
+    });
+    DocBodyWidget.ensureStyles();
+    DocBodyWidget._assets = Promise.all([
+      css('/vendor/quill/quill.snow.css'),
+      js('/vendor/dompurify/purify.min.js', () => !!window.DOMPurify),
+      js('/vendor/marked/marked.min.js', () => !!window.marked),
+    ]).then(() => js('/vendor/quill/quill.js', () => !!window.Quill));
+    return DocBodyWidget._assets;
+  }
+
+  // Theme-aware look for Quill's toolbar and the read view (light + dark).
+  static ensureStyles() {
+    if (document.getElementById('ada-doc-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'ada-doc-styles';
+    st.textContent = `
+      /* While editing, the toolbar stays put and only the text scrolls. */
+      ada-doc-body [data-role=body].editing { display:flex; flex-direction:column; overflow:hidden; }
+      ada-doc-body [data-role=body].editing .ql-toolbar { flex:none; }
+      ada-doc-body [data-role=body].editing .ql-container { flex:1; min-height:0; overflow:auto; }
+      ada-doc-body .ql-toolbar.ql-snow { border:0; border-bottom:1px solid rgba(100,116,139,.25); padding:6px 4px; display:flex; flex-wrap:wrap; gap:2px; }
+      ada-doc-body .ql-container.ql-snow { border:0; font-size:15px; }
+      ada-doc-body .ql-editor { padding:16px 4px; line-height:1.6; min-height:220px; }
+      ada-doc-body .doc-view .ql-editor { min-height:0; padding:4px; }
+      ada-doc-body .ql-editor.ql-blank::before { color:#94a3b8; font-style:normal; left:4px; }
+      ada-doc-body .ql-editor h1 { font-size:1.9em; font-weight:700; } ada-doc-body .ql-editor h2 { font-size:1.5em; font-weight:700; } ada-doc-body .ql-editor h3 { font-size:1.2em; font-weight:600; }
+      ada-doc-body .ql-editor a { color:#6366f1; text-decoration:underline; }
+      ada-doc-body .ql-editor blockquote { border-left:4px solid #6366f1; padding-left:12px; opacity:.85; }
+      .dark ada-doc-body .ql-snow .ql-stroke { stroke:#cbd5e1; }
+      .dark ada-doc-body .ql-snow .ql-fill, .dark ada-doc-body .ql-snow .ql-stroke.ql-fill { fill:#cbd5e1; }
+      .dark ada-doc-body .ql-snow .ql-picker { color:#cbd5e1; }
+      .dark ada-doc-body .ql-snow .ql-picker-options { background:#1f1f26; border-color:#2c2c36; }
+      .dark ada-doc-body .ql-snow.ql-toolbar button:hover .ql-stroke, .dark ada-doc-body .ql-snow.ql-toolbar button.ql-active .ql-stroke { stroke:#818cf8; }
+      .dark ada-doc-body .ql-snow.ql-toolbar button.ql-active .ql-fill { fill:#818cf8; }
+      .dark ada-doc-body .ql-snow .ql-tooltip { background:#1f1f26; color:#e2e8f0; border-color:#2c2c36; box-shadow:none; }
+      .dark ada-doc-body .ql-snow .ql-tooltip input[type=text] { background:#121212; color:#e2e8f0; border-color:#2c2c36; }
+      .dark ada-doc-body .ql-editor pre.ql-syntax, .dark ada-doc-body .ql-editor pre { background:#0d0d10; color:#e2e8f0; }
+      ada-doc-body .doc-view .embedded-widget { white-space:normal; }
+    `;
+    document.head.appendChild(st);
   }
 
   connectedCallback() {
-    this.classList.add("block", "w-full", "h-full", "min-h-[300px]");
+    this.classList.add('block', 'w-full', 'h-full', 'min-h-[300px]');
     this.widgetId = this.getAttribute('widget-id');
     if (!this.widgetId) {
-      // Generate a stable ID if none provided by looking at the parent widget container, 
-      // but ideally this is passed in from the layout builder
       const wrapper = this.closest('[data-widget-id]');
       this.widgetId = wrapper ? wrapper.getAttribute('data-widget-id') : 'default-body';
     }
+    this.editing = false;
+    this.html = '';
+    this.updatedAt = null;
     this.render();
-    this.fetchText();
+    DocBodyWidget.loadAssets().then(() => this.load()).catch(e => this.showError(e.message));
   }
 
-  // Save-before-load guard (2026-09-09). fetchText used to skip filling the
-  // textarea when it already had focus, and saveText had no idea whether the
-  // document had loaded yet. Click into the body before the fetch resolved
-  // (a few hundred ms on a slow link), type or drop anything, and the save
-  // wrote the empty textarea over the real document. Reproduced in Alex's
-  // Brave: "test" was overwritten by a single dropped shortcode.
-  async fetchText() {
-    if (!this.widgetId) return;
-    this.loaded = false;
-    try {
-      const res = await fetch(`/api/docs/${this.widgetId}`);
-      if (res.ok || res.status === 404) {
-        const data = res.ok ? await res.json() : { text: '' };
-        this.text = data.text || "";
-        this.updatedAt = data.updatedAt || null; // version we loaded (fb-1789015021701)
-        const textarea = this.querySelector('textarea');
-        if (textarea) {
-          const focused = document.activeElement === textarea;
-          if (!focused || !textarea.value) {
-            // Not being typed in, or focused but still empty: fill it. If the
-            // user already has the caret in it, keep the caret at the end.
-            textarea.value = this.text;
-            if (focused) textarea.setSelectionRange(this.text.length, this.text.length);
-          } else if (this.text && !textarea.value.includes(this.text)) {
-            // Typed before the load finished: keep both rather than lose either.
-            textarea.value = this.text + '\n\n' + textarea.value;
-            console.warn('[doc-body] document loaded after typing began; merged both');
-          }
-          setTimeout(() => this.adjustHeight(), 50);
-          if (this.text.trim() && !window.isEditingLayout && !focused) this.showPreview();
-        }
-        this.loaded = true;
-        if (this.pendingSave) { this.pendingSave = false; this.saveText(); }
-      } else {
-        console.error(`[doc-body] load failed (HTTP ${res.status}); saves are held until a reload succeeds`);
-      }
-    } catch (e) {
-      console.error("Failed to load doc body:", e);
-    }
-  }
-
-  async saveText() {
-    if (!this.widgetId) return;
-    const textarea = this.querySelector('textarea');
-    if (!textarea) return;
-    if (!this.loaded) {
-      // Never overwrite a document we have not read yet — queue the save and
-      // let fetchText flush it once the real text is in the textarea.
-      this.pendingSave = true;
-      return;
-    }
-    this.text = textarea.value;
-    
-    const statusIcon = this.querySelector('#doc-status');
-    if (statusIcon) {
-      statusIcon.style.opacity = '1';
-      statusIcon.className = 'fa-solid fa-spinner fa-spin text-gray-500 text-[10px] transition-all duration-300';
-    }
-
-    try {
-      const res = await fetch(`/api/docs/${this.widgetId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: this.text, expectedUpdatedAt: this.updatedAt })
-      });
-      if (res.status === 409) {
-        // Someone else saved this document since we loaded it. Refuse to
-        // overwrite; tell the user; keep their text in the textarea.
-        if (statusIcon) statusIcon.className = 'fa-solid fa-triangle-exclamation text-amber-500 text-[10px] transition-all duration-300';
-        if (typeof window.showAppToast === 'function') {
-          window.showAppToast('This document changed elsewhere. Reload to see the latest — your unsaved text stays in the editor until you do.', 'warn', { label: 'Reload', onClick: () => location.reload() });
-        }
-        console.warn('[doc-body] save refused: document is stale');
-        return;
-      }
-      if (res.ok) {
-        const out = await res.json().catch(() => ({}));
-        if (out.updatedAt) this.updatedAt = out.updatedAt;
-      }
-      if (statusIcon) {
-        statusIcon.className = 'fa-solid fa-cloud-arrow-up text-emerald-500 text-[10px] transition-all duration-300';
-        setTimeout(() => { if (statusIcon) statusIcon.className = 'fa-solid fa-cloud text-gray-500 text-[10px] transition-all duration-300'; }, 2000);
-        
-        clearTimeout(this.fadeTimer);
-        this.fadeTimer = setTimeout(() => { if (statusIcon) statusIcon.style.opacity = '0'; }, 45000);
-      }
-    } catch (e) {
-      if (statusIcon) {
-        statusIcon.className = 'fa-solid fa-circle-exclamation text-rose-500 text-[10px] transition-all duration-300';
-      }
-    }
-  }
-
-  handleKeydown(e) {
-    if (!this.slashActive) return;
-    
-    const menu = this.querySelector('#slash-menu');
-    const items = menu.querySelectorAll('.slash-item');
-    if (!items.length) return;
-    
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      this.slashSelectedIndex = (this.slashSelectedIndex + 1) % items.length;
-      this.updateSlashSelection();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      this.slashSelectedIndex = (this.slashSelectedIndex - 1 + items.length) % items.length;
-      this.updateSlashSelection();
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      items[this.slashSelectedIndex].click();
-    } else if (e.key === 'Escape') {
-      this.closeSlashMenu();
-    }
-  }
-
-  handleInput() {
-    clearTimeout(this.typingTimer);
-    clearTimeout(this.fadeTimer);
-    
-    this.checkSlashCommand();
-    
-    const statusIcon = this.querySelector('#doc-status');
-    if (statusIcon) {
-      statusIcon.className = 'fa-solid fa-pen text-indigo-400 text-[10px] transition-all duration-300';
-      statusIcon.style.opacity = '1';
-    }
-
-    this.adjustHeight();
-    this.typingTimer = setTimeout(() => this.saveText(), 1000);
-    
-  }
-
-  checkSlashCommand() {
-    const textarea = this.querySelector('textarea');
-    const val = textarea.value;
-    const pos = textarea.selectionStart;
-    
-    // Look backwards from cursor for a slash
-    const textBeforeCursor = val.substring(0, pos);
-    const match = textBeforeCursor.match(/(?:\s|^)\/([a-zA-Z0-9-]*)$/);
-    
-    if (match) {
-      this.slashActive = true;
-      this.slashQuery = match[1].toLowerCase();
-      this.slashStartIndex = pos - match[1].length - 1; // index of the '/'
-      this.openSlashMenu();
-    } else {
-      this.closeSlashMenu();
-    }
-  }
-
-  openSlashMenu() {
-    const menu = this.querySelector('#slash-menu');
-    const container = this.querySelector('#slash-menu-items');
-    
-    // Define the widget templates available for spawning
-    const templates = [
-      { type: 'blank', title: 'Blank Canvas', icon: 'fa-square-dashed', desc: 'Empty HTML container' },
-      { type: 'clock', title: 'Digital Clock', icon: 'fa-clock', desc: 'Standard digital time display' },
-      { type: 'countdown', title: 'Countdown Timer', icon: 'fa-hourglass-half', desc: 'Counts down to a specific date' },
-      { type: 'analog', title: 'Analog Clock', icon: 'fa-clock', desc: 'Classic analog clock face' },
-      { type: 'gauge', title: 'System Gauge', icon: 'fa-gauge-high', desc: 'CPU, Memory, or Disk metrics' },
-      { type: 'photo', title: 'Photo Frame', icon: 'fa-image', desc: 'Displays an image' },
-      { type: 'script', title: 'Script Runner', icon: 'fa-terminal', desc: 'Click to execute a bash script' },
-      { type: 'scratchpad', title: 'Scratchpad', icon: 'fa-pen-nib', desc: 'Rich markdown editor' },
-      { type: 'todo', title: 'To-Do List', icon: 'fa-list-check', desc: 'Interactive task manager linked to Tasks tab' },
-      { type: 'calendar', title: 'Agenda', icon: 'fa-calendar', desc: 'Weekly schedule and events list' },
-      { type: 'kanban', title: 'Kanban Board', icon: 'fa-table-columns', desc: 'Drag-and-drop columns for task tracking' },
-      { type: 'weather', title: 'Weather', icon: 'fa-cloud-sun', desc: 'Live forecast and current temperature' }
-    ];
-    
-    let available = templates;
-    if (this.slashQuery) {
-      available = templates.filter(t => 
-        t.title.toLowerCase().includes(this.slashQuery) || 
-        t.type.toLowerCase().includes(this.slashQuery) ||
-        t.desc.toLowerCase().includes(this.slashQuery)
-      );
-    }
-    
-    if (available.length === 0) {
-      this.closeSlashMenu();
-      return;
-    }
-    
-    container.innerHTML = available.map((t, i) => `
-        <div class="slash-item p-2 flex items-center gap-3 rounded-lg cursor-pointer hover:bg-indigo-500/10 text-gray-600 dark:text-gray-300 hover:text-indigo-500 transition-colors ${i === 0 ? 'bg-indigo-500/10 text-indigo-500' : ''}" data-type="${t.type}" data-index="${i}">
-          <div class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-black/20 rounded-md text-[10px]"><i class="fa-solid ${t.icon}"></i></div>
-          <div class="flex-1 flex flex-col">
-            <span class="text-xs font-bold leading-tight">${t.title}</span>
-            <span class="text-[9px] opacity-50 leading-tight">${t.desc}</span>
-          </div>
-        </div>
-    `).join('');
-    
-    this.slashSelectedIndex = 0;
-    
-    // Bind clicks
-    container.querySelectorAll('.slash-item').forEach(item => {
-      item.addEventListener('click', () => {
-        this.injectWidget(item.getAttribute('data-type'));
-      });
-      item.addEventListener('mouseenter', () => {
-        this.slashSelectedIndex = parseInt(item.getAttribute('data-index'));
-        this.updateSlashSelection();
-      });
-    });
-    
-    // Position the menu near the cursor (simplified positioning: bottom right of cursor generally)
-    const textarea = this.querySelector('textarea');
-    menu.classList.remove('hidden');
-    
-    // Fallback simple positioning if caret coords are hard: 
-    // Just float it below the top left, but visually it works.
-    // For a perfect Notion clone we'd use a mirror div, but this is a quick MVP.
-    menu.style.top = '40px';
-    menu.style.left = '20px';
-  }
-
-  updateSlashSelection() {
-    const items = this.querySelectorAll('.slash-item');
-    items.forEach((item, i) => {
-      if (i === this.slashSelectedIndex) {
-        item.classList.add('bg-indigo-500/10', 'text-indigo-500');
-        item.scrollIntoView({ block: 'nearest' });
-      } else {
-        item.classList.remove('bg-indigo-500/10', 'text-indigo-500');
-      }
-    });
-  }
-
-  closeSlashMenu() {
-    this.slashActive = false;
-    const menu = this.querySelector('#slash-menu');
-    if (menu) menu.classList.add('hidden');
-  }
-
-  async injectWidget(widgetType) {
-    // We need to generate a new widget exactly like index.html does
-    const newWidget = {
-      id: 'widget-' + Date.now() + Math.floor(Math.random()*1000),
-      size: '2x1',
-      cols: 2,
-      rows: 1,
-      theme: 'glass',
-      accent: 'indigo'
-    };
-    
-    switch(widgetType) {
-      case 'blank': newWidget.html = '<div class="flex items-center justify-center w-full h-full text-gray-400 font-medium">New Widget</div>'; break;
-      case 'clock': newWidget.html = '<ada-clock format="hh:mm:ss A"></ada-clock>'; break;
-      case 'countdown': newWidget.html = '<ada-countdown target="2027-01-01T00:00:00" label="New Year"></ada-countdown>'; newWidget.title = 'Countdown'; newWidget.icon = 'fa-hourglass-half'; break;
-      case 'analog': newWidget.html = '<ada-analog-clock></ada-analog-clock>'; newWidget.title = 'Analog Clock'; newWidget.icon = 'fa-clock'; newWidget.rows = 2; break;
-      case 'gauge': newWidget.html = '<ada-sysmon type="cpu"></ada-sysmon>'; newWidget.title = 'System Monitor'; newWidget.icon = 'fa-gauge-high'; break;
-      case 'photo': newWidget.html = '<ada-photo-frame src="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=800&q=80"></ada-photo-frame>'; newWidget.title = 'Photo'; newWidget.icon = 'fa-image'; newWidget.rows = 2; break;
-      case 'script': newWidget.html = '<ada-script-runner script-id="hello_world"></ada-script-runner>'; newWidget.title = 'Quick Action'; newWidget.icon = 'fa-bolt'; break;
-      case 'scratchpad': newWidget.html = '<ada-scratchpad></ada-scratchpad>'; newWidget.title = 'Scratchpad'; newWidget.icon = 'fa-pen-nib'; break;
-      case 'todo': newWidget.html = '<ada-todo></ada-todo>'; newWidget.title = 'To-Do List'; newWidget.icon = 'fa-list-check'; newWidget.rows = 3; break;
-      case 'calendar': newWidget.html = '<ada-calendar></ada-calendar>'; newWidget.title = 'Agenda'; newWidget.icon = 'fa-calendar'; newWidget.rows = 3; break;
-      case 'kanban': newWidget.html = '<ada-kanban></ada-kanban>'; newWidget.title = 'Kanban Board'; newWidget.icon = 'fa-table-columns'; newWidget.rows = 4; newWidget.cols = 4; break;
-      case 'weather': newWidget.html = '<ada-weather></ada-weather>'; newWidget.title = 'Weather'; newWidget.icon = 'fa-cloud-sun'; newWidget.rows = 2; break;
-    }
-    
-    // Push it to the page JSON and let index.html save it
-    if (window.homepageDoc && window.homepageDoc.widgets) {
-      window.homepageDoc.widgets.push(newWidget);
-      if (typeof window.saveHomepageDoc === 'function') {
-        window.saveHomepageDoc();
-      }
-    }
-
-    const textarea = this.querySelector('textarea');
-    const val = textarea.value;
-    
-    const before = val.substring(0, this.slashStartIndex);
-    const after = val.substring(textarea.selectionStart);
-    
-    const shortcode = `[widget: ${newWidget.id}]`;
-    textarea.value = before + shortcode + ' ' + after;
-    
-    this.closeSlashMenu();
-    this.saveText();
-    
-    const newPos = this.slashStartIndex + shortcode.length + 1;
-    textarea.setSelectionRange(newPos, newPos);
-    textarea.focus();
-    
-    // Open the widget inspector so the user can immediately configure the spawned widget
-    if (typeof window.editWidget === 'function') {
-      window.editWidget(newWidget.id);
-    }
-  }
-
-  // What a drop onto the document carries depends on where the drag began:
-  // the slash menu and re-drags of an existing embed carry the `[widget: id]`
-  // shortcode, but the page builder's widget cards (handleWidgetDragStart in
-  // index.html) carry the BARE widget id. Until 2026-09-09 only the shortcode
-  // form matched, so dragging a sidebar widget into the document did nothing,
-  // silently — the "drag-and-drop fails" report (fb-1788929000123). Accept
-  // both; a bare id must name a widget on this page.
-  shortcodeFromDragData(rawData) {
-    if (!rawData) return null;
-    const m = rawData.match(/\[widget:\s*([a-zA-Z0-9-]+)\]/);
-    if (m) return `[widget: ${m[1]}]`;
-    const id = rawData.trim();
-    const widgets = (window.homepageDoc && window.homepageDoc.widgets) || [];
-    if (/^[a-zA-Z0-9-]+$/.test(id) && widgets.some(w => w.id === id)) return `[widget: ${id}]`;
-    return null;
-  }
-
-  checkSelection(e) {
-    const textarea = this.querySelector('textarea');
-    const toolbar = this.querySelector('#format-toolbar');
-    
-    // Slight delay to let selection update natively
-    setTimeout(() => {
-      if (textarea.selectionStart !== textarea.selectionEnd) {
-        // Text is selected!
-        toolbar.classList.remove('hidden');
-        
-        // Anchor it reliably to the top center of the editor
-        toolbar.style.left = '50%';
-        toolbar.style.top = '60px';
-      } else {
-        toolbar.classList.add('hidden');
-      }
-    }, 10);
-  }
-
-  applyFormat(type) {
-    const textarea = this.querySelector('textarea');
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    if (start === end) return;
-    
-    const val = textarea.value;
-    const selectedText = val.substring(start, end);
-    let newText = selectedText;
-    let cursorOffset = 0;
-    
-    switch(type) {
-      case 'bold': newText = `**${selectedText}**`; break;
-      case 'italic': newText = `*${selectedText}*`; break;
-      case 'strikethrough': newText = `~~${selectedText}~~`; break;
-      case 'code': newText = `\`${selectedText}\``; break;
-      case 'header': newText = `### ${selectedText}`; break;
-      case 'link': 
-        newText = `[${selectedText}](url)`; 
-        cursorOffset = newText.length - 4; // position cursor inside the parenthesis to type URL
-        break;
-    }
-    
-    textarea.value = val.substring(0, start) + newText + val.substring(end);
-    this.saveText();
-    
-    // Close toolbar and restore selection
-    this.querySelector('#format-toolbar').classList.add('hidden');
-    textarea.focus();
-    
-    if (type === 'link') {
-      textarea.setSelectionRange(start + cursorOffset, start + cursorOffset + 3);
-    } else {
-      textarea.setSelectionRange(start + newText.length, start + newText.length);
-    }
-  }
-
-  showPreview() {
-    if (typeof marked === 'undefined') return;
-    const textarea = this.querySelector('textarea');
-    const preview = this.querySelector('[data-md-preview]');
-    if (!textarea || !preview || !textarea.value.trim()) return;
-    
-    let html = marked.parse(textarea.value);
-    
-    // Reset all sidebar widgets to visible
-    document.querySelectorAll('.widget-container').forEach(c => c.style.display = '');
-    
-    // Inject Live Widgets
-    if (window.homepageDoc && window.homepageDoc.widgets) {
-      html = html.replace(/\[widget:\s*([a-zA-Z0-9-]+)\]/g, (match, id) => {
-        const w = window.homepageDoc.widgets.find(widget => widget.id === id);
-        if (w) {
-          // Hide it from the sidebar
-          const container = document.getElementById(w.id + '-container');
-          if (container) container.style.display = 'none';
-          
-          return `<div class="embedded-widget my-6 relative min-h-[150px]">${w.html}</div>`;
-        }
-        return match;
-      });
-    }
-    
-    preview.innerHTML = html;
-    this.wireCheckboxes(preview, textarea);
-    textarea.classList.add('hidden');
-    preview.classList.remove('hidden');
-  }
-
-  wireCheckboxes(preview, textarea) {
-    preview.querySelectorAll('input[type="checkbox"]').forEach((box, i) => {
-      box.disabled = false;
-      box.classList.add('cursor-pointer');
-      box.addEventListener('change', () => {
-        let n = -1;
-        textarea.value = textarea.value.replace(
-          /(^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\[)([ xX])(\])/gm,
-          (m, pre, state, post) => {
-            n++;
-            if (n !== i) return m;
-            return pre + (state === ' ' ? 'x' : ' ') + post;
-          }
-        );
-        this.saveText();
-        this.showPreview(); 
-      });
-    });
-  }
-
-  showEditor() {
-    const textarea = this.querySelector('textarea');
-    const preview = this.querySelector('[data-md-preview]');
-    if (!textarea || !preview) return;
-    
-    // Show all sidebar widgets while editing so they can be dragged
-    document.querySelectorAll('.widget-container').forEach(c => c.style.display = '');
-    
-    preview.classList.add('hidden');
-    textarea.classList.remove('hidden');
-    textarea.focus();
-    const end = textarea.value.length;
-    textarea.setSelectionRange(end, end);
-  }
-
-  adjustHeight() {
-    const textarea = this.querySelector('textarea');
-    if (!textarea) return;
-    textarea.style.height = '0px';
-    const contentHeight = textarea.scrollHeight;
-    textarea.style.height = Math.max(contentHeight, 300) + 'px';
-  }
+  disconnectedCallback() { if (this.editing) this.save(); }
 
   render() {
-    // Completely borderless and transparent, looking like a native Notion document
     this.innerHTML = `
-      <div class="relative w-full h-full p-4 group">
-        <div class="absolute top-2 right-4 flex items-center justify-end h-4 w-4">
-           <i id="doc-status" class="fa-solid fa-cloud text-gray-600 text-[10px] transition-all duration-300" style="opacity: 0;"></i>
+      <div class="relative w-full h-full flex flex-col rounded-2xl">
+        <div class="flex items-center justify-end gap-2 mb-1">
+          <span data-role="status" class="text-[11px] text-gray-500 dark:text-gray-400 mr-auto"></span>
+          <button data-role="toggle" type="button" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 flex items-center gap-1.5">
+            <i class="fa-solid fa-pen"></i> <span>Edit</span>
+          </button>
         </div>
-        
-        <textarea class="w-full h-full min-h-[300px] bg-transparent border-none resize-none focus:outline-none text-gray-800 dark:text-gray-200 text-base placeholder-gray-400 dark:placeholder-gray-600 custom-scrollbar leading-relaxed" placeholder="Type '/' for commands, or start writing your document here..."></textarea>
-        
-        <div data-md-preview class="hidden w-full h-full min-h-[300px] cursor-text prose dark:prose-invert max-w-none prose-p:leading-relaxed prose-headings:mt-8 prose-headings:mb-4 marker:text-indigo-400 prose-a:text-indigo-400" title="Click to edit"></div>
-        
-        <div id="slash-menu" class="hidden absolute z-50 w-64 bg-white dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-xl shadow-2xl overflow-hidden flex flex-col">
-           <div class="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-dark-card border-b border-gray-200 dark:border-dark-border">Embed Widget</div>
-           <div id="slash-menu-items" class="max-h-64 overflow-y-auto custom-scrollbar p-1"></div>
-        </div>
-        
-        <div id="format-toolbar" class="hidden absolute z-50 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-lg shadow-xl flex items-center p-1 gap-1 -translate-x-1/2">
-          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="bold"><i class="fa-solid fa-bold"></i></button>
-          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="italic"><i class="fa-solid fa-italic"></i></button>
-          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="strikethrough"><i class="fa-solid fa-strikethrough"></i></button>
-          <div class="w-px h-5 bg-gray-200 dark:bg-dark-border mx-1"></div>
-          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="header"><i class="fa-solid fa-heading"></i></button>
-          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="code"><i class="fa-solid fa-code"></i></button>
-          <button class="format-btn w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors" data-format="link"><i class="fa-solid fa-link"></i></button>
-        </div>
-      </div>
-    `;
+        <div data-role="body" class="flex-1 min-h-0 overflow-auto text-gray-800 dark:text-gray-200"></div>
+      </div>`;
+    this.querySelector('[data-role="toggle"]').addEventListener('click', () => this.editing ? this.finishEditing() : this.startEditing());
+  }
 
-    const textarea = this.querySelector('textarea');
-    const preview = this.querySelector('[data-md-preview]');
-    
-    textarea.addEventListener('keydown', (e) => {
-      this.handleKeydown(e);
+  setStatus(t) { const s = this.querySelector('[data-role="status"]'); if (s) s.textContent = t || ''; }
+  showError(msg) { this.setStatus(msg); }
+  clean(html) { return window.DOMPurify ? window.DOMPurify.sanitize(html, { ADD_ATTR: ['data-list', 'target'] }) : ''; }
+
+  async load() {
+    try {
+      const res = await fetch(`/api/docs/${encodeURIComponent(this.widgetId)}`);
+      if (!res.ok) { this.showError(res.status === 403 ? 'Not available for your account.' : `Could not load (HTTP ${res.status}).`); return; }
+      const doc = await res.json();
+      this.updatedAt = doc.updatedAt || null;
+      // Older documents are Markdown: shown as HTML, saved as rich text after the first edit.
+      this.html = doc.format === 'html' ? (doc.text || '') : (doc.text ? window.marked.parse(String(doc.text)) : '');
+      this.showView();
+    } catch (e) { this.showError('Could not load the document.'); }
+  }
+
+  // [widget: id] shortcodes (old grid pages, e.g. Home): in the read view the
+  // widget with that id is shown inside the document and its own card is hidden
+  // from the grid, as the old widget did. Widget html comes from the page's own
+  // layout (same trust level as the grid itself). Stays as text while editing.
+  embedWidgets(html) {
+    document.querySelectorAll('.widget-container').forEach(c => { if (c.dataset.embeddedInDoc === this.widgetId) { c.style.display = ''; delete c.dataset.embeddedInDoc; } });
+    const widgets = (window.homepageDoc && window.homepageDoc.widgets) || [];
+    if (!widgets.length) return html;
+    const embed = (match, id) => {
+      const w = widgets.find(x => x.id === id);
+      if (!w || !w.html) return match;
+      const card = document.getElementById(w.id + '-container');
+      if (card) { card.style.display = 'none'; card.dataset.embeddedInDoc = this.widgetId; }
+      return `<div class="embedded-widget my-6 relative min-h-[150px]">${w.html}</div>`;
+    };
+    return html
+      .replace(/<p>\s*\[widget:\s*([a-zA-Z0-9_-]+)\]\s*<\/p>/g, embed)
+      .replace(/\[widget:\s*([a-zA-Z0-9_-]+)\]/g, embed);
+  }
+
+  showView() {
+    const body = this.querySelector('[data-role="body"]');
+    body.classList.remove('editing');
+    const html = this.embedWidgets(this.clean(this.html));
+    body.innerHTML = html.replace(/<p><br><\/p>/g, '').trim()
+      ? `<div class="doc-view ql-snow"><div class="ql-editor">${html}</div></div>`
+      : `<div class="text-gray-400 dark:text-gray-500 text-sm py-6">Empty document — press <b>Edit</b> to start writing.</div>`;
+    const t = this.querySelector('[data-role="toggle"]');
+    t.innerHTML = '<i class="fa-solid fa-pen"></i> <span>Edit</span>';
+    t.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-600');
+  }
+
+  startEditing() {
+    if (!window.Quill) return;
+    this.editing = true;
+    // Embedded widgets go back to their grid cards while the shortcodes are plain text.
+    document.querySelectorAll('.widget-container').forEach(c => { if (c.dataset.embeddedInDoc === this.widgetId) { c.style.display = ''; delete c.dataset.embeddedInDoc; } });
+    const body = this.querySelector('[data-role="body"]');
+    body.classList.add('editing');
+    body.innerHTML = '<div data-role="editor"></div>';
+    const icons = window.Quill.import('ui/icons');
+    icons.undo = '<svg viewBox="0 0 18 18"><polygon class="ql-fill ql-stroke" points="6 10 4 12 2 10 6 10"></polygon><path class="ql-stroke" d="M8.09,13.91A4.6,4.6,0,0,0,9,14,5,5,0,1,0,4,9"></path></svg>';
+    icons.redo = '<svg viewBox="0 0 18 18"><polygon class="ql-fill ql-stroke" points="12 10 14 12 16 10 12 10"></polygon><path class="ql-stroke" d="M9.91,13.91A4.6,4.6,0,0,1,9,14a5,5,0,1,1,5-5"></path></svg>';
+    this.quill = new window.Quill(body.querySelector('[data-role="editor"]'), {
+      theme: 'snow',
+      placeholder: 'Start writing your document here...',
+      modules: {
+        history: { delay: 800, maxStack: 200, userOnly: true },
+        toolbar: {
+          container: [
+            ['undo', 'redo'],
+            [{ font: [] }, { size: ['small', false, 'large', 'huge'] }],
+            [{ header: [1, 2, 3, false] }],
+            ['bold', 'italic', 'underline', 'strike'],
+            [{ color: [] }, { background: [] }],
+            [{ script: 'sub' }, { script: 'super' }],
+            [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }],
+            [{ indent: '-1' }, { indent: '+1' }, { align: [] }],
+            ['blockquote', 'code-block', 'link', 'image'],
+            ['clean'],
+          ],
+          handlers: {
+            undo: () => this.quill.history.undo(),
+            redo: () => this.quill.history.redo(),
+            // Images by address (a pasted/uploaded file would be a huge data: URL the server drops).
+            image: () => {
+              const url = window.prompt('Image address (https://… or /media/…)');
+              if (!url) return;
+              const range = this.quill.getSelection(true);
+              this.quill.insertEmbed(range ? range.index : this.quill.getLength(), 'image', url.trim(), 'user');
+            },
+          },
+        },
+      },
     });
-    
-    textarea.addEventListener('keyup', () => this.checkSelection(null));
-    textarea.addEventListener('mouseup', () => this.checkSelection(null));
-    textarea.addEventListener('select', () => this.checkSelection(null));
-    
-    textarea.addEventListener('input', () => {
-      this.handleInput();
-      this.checkSelection(null);
+    if (this.html) this.quill.clipboard.dangerouslyPasteHTML(this.clean(this.html), 'silent');
+    this.quill.history.clear();
+    this.quill.on('text-change', (d, o, source) => {
+      if (source !== 'user') return;
+      this.dirty = true; this.setStatus('Editing…');
+      clearTimeout(this.saveTimer);
+      this.saveTimer = setTimeout(() => this.save(), 1000);
     });
-    
-    // Fallback global tracker for Safari/WebKit quirks
-    document.addEventListener('selectionchange', () => {
-      if (document.activeElement === textarea || document.activeElement === this || this.contains(document.activeElement)) {
-        this.checkSelection(null);
-      } else {
-        const toolbar = this.querySelector('#format-toolbar');
-        if (toolbar) toolbar.classList.add('hidden');
-      }
-    });
-    
-    const toolbar = this.querySelector('#format-toolbar');
-    toolbar.querySelectorAll('.format-btn').forEach(btn => {
-      // Use mousedown with preventDefault so clicking the toolbar doesn't blur the textarea!
-      btn.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        this.applyFormat(btn.getAttribute('data-format'));
+    const t = this.querySelector('[data-role="toggle"]');
+    t.innerHTML = '<i class="fa-solid fa-check"></i> <span>Done</span>';
+    t.classList.add('bg-indigo-600', 'text-white', 'border-indigo-600');
+    this.quill.focus();
+  }
+
+  async finishEditing() {
+    clearTimeout(this.saveTimer);
+    if (this.dirty) await this.save();
+    this.editing = false;
+    this.quill = null;
+    this.showView();
+    this.setStatus('');
+  }
+
+  async save() {
+    if (!this.quill) return;
+    const html = this.quill.root.innerHTML;
+    this.dirty = false;
+    this.setStatus('Saving…');
+    try {
+      const res = await fetch(`/api/docs/${encodeURIComponent(this.widgetId)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: html, format: 'html', expectedUpdatedAt: this.updatedAt }),
       });
-    });
-    
-    textarea.addEventListener('blur', () => {
-      if (window.isEditingLayout) return;
-      this.showPreview();
-    });
-    
-    // Explicitly handle drops into the textarea
-    textarea.addEventListener('dragover', (e) => {
-      if (window.isEditingLayout) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
+      const out = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        this.setStatus('Changed elsewhere — reload to see the latest version (your last edit was not saved).');
+        if (window.showToast) window.showToast('This document was changed elsewhere. Reload before editing.', 'warn');
+        return;
       }
-    });
-    
-    textarea.addEventListener('drop', (e) => {
-      if (!window.isEditingLayout) return;
-      e.preventDefault();
-      
-      const rawData = e.dataTransfer.getData('text/plain');
-      const shortcode = this.shortcodeFromDragData(rawData);
-      if (shortcode) {
-        
-        // Try to insert exactly where dropped!
-        let inserted = false;
-        if (document.caretRangeFromPoint) {
-          const range = document.caretRangeFromPoint(e.clientX, e.clientY);
-          if (range && range.startContainer) {
-            // Because it's a textarea, caretRangeFromPoint often returns the text node of the textarea.
-            // But getting exact string index is tricky. We can use selectionStart/End if focus is updated, 
-            // but preventDefault stops focus.
-            // Let's just focus, set the selection, and insert.
-            textarea.focus();
-            
-            // Textarea specific drop injection:
-            // The browser's native textdrop is blocked because we are dragging a DOM element.
-            // A reliable hack for textareas is to just append if we can't find the exact index.
-            const text = textarea.value;
-            textarea.value = text + '\n\n' + shortcode + '\n';
-            inserted = true;
-          }
-        }
-        
-        if (!inserted) {
-           textarea.value += '\n\n' + shortcode + '\n';
-        }
-
-        this.saveText();
-        this.showPreview();
-      }
-    });
-    
-    preview.addEventListener('click', () => this.showEditor());
-    
-    // Allow dragging directly onto the preview mode document!
-    preview.addEventListener('dragover', (e) => {
-      if (window.isEditingLayout) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-      }
-    });
-    
-    preview.addEventListener('drop', (e) => {
-      if (!window.isEditingLayout) return;
-      e.preventDefault();
-      const rawData = e.dataTransfer.getData('text/plain');
-      const shortcode = this.shortcodeFromDragData(rawData);
-      if (shortcode) {
-        textarea.value += '\n\n' + shortcode + '\n';
-        this.saveText();
-        this.showPreview();
-      }
-    });
+      if (!res.ok) { this.dirty = true; this.setStatus('Save failed — will retry'); this.saveTimer = setTimeout(() => this.save(), 4000); return; }
+      this.updatedAt = out.updatedAt;
+      this.html = html;
+      this.setStatus('Saved');
+    } catch (e) { this.dirty = true; this.setStatus('Save failed — will retry'); this.saveTimer = setTimeout(() => this.save(), 4000); }
   }
 }
-
 customElements.define('ada-doc-body', DocBodyWidget);

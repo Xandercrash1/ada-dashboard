@@ -101,8 +101,9 @@
               900: '#1e1b4b'
             },
             dark: {
-              bg: 'var(--bg)',
-              card: 'var(--card)',
+              // RGB channels so opacity modifiers (bg-dark-bg/60) compile; plain var() silently dropped them.
+              bg: 'rgb(var(--bg-rgb) / <alpha-value>)',
+              card: 'rgb(var(--card-rgb) / <alpha-value>)',
               border: 'var(--border)',
               accent: 'var(--accent)'
             }
@@ -116,11 +117,11 @@
   <style>
     /* Theme tokens. The Tailwind dark.* palette points at these vars. */
     :root, [data-theme="dark"] {
-      --bg: #121212; --card: #121212; --border: rgba(255, 255, 255, 0.05); --accent: rgba(255, 255, 255, 0.08); --text: #e2e8f0;
+      --bg: #121212; --card: #121212; --bg-rgb: 18 18 18; --card-rgb: 18 18 18; --border: rgba(255, 255, 255, 0.05); --accent: rgba(255, 255, 255, 0.08); --text: #e2e8f0;
       --scroll-track: transparent; --scroll-thumb: rgba(255, 255, 255, 0.1);
     }
     [data-theme="light"] {
-      --bg: #ffffff; --card: #ffffff; --border: rgba(0, 0, 0, 0.06); --accent: rgba(0, 0, 0, 0.05); --text: #1e293b;
+      --bg: #ffffff; --card: #ffffff; --bg-rgb: 255 255 255; --card-rgb: 255 255 255; --border: rgba(0, 0, 0, 0.06); --accent: rgba(0, 0, 0, 0.05); --text: #1e293b;
       --scroll-track: transparent; --scroll-thumb: rgba(0, 0, 0, 0.15);
     }
     body {
@@ -143,6 +144,9 @@
     [data-theme="light"] .text-gray-500 { color: #64748b; }
     [data-theme="light"] .text-gray-600 { color: #94a3b8; }
     [data-theme="light"] .placeholder-gray-500::placeholder { color: #94a3b8; }
+    /* Hover states too: hover:text-gray-200 / hover:text-white turned tabs and buttons near-white on white. */
+    [data-theme="light"] .hover\:text-gray-200:hover, [data-theme="light"] .hover\:text-gray-100:hover { color: #1e293b; }
+    [data-theme="light"] .hover\:text-white:hover:not([class*="bg-indigo-"]):not([class*="bg-rose-"]):not([class*="hover:bg-indigo-"]):not([class*="hover:bg-rose-"]) { color: #0f172a; }
     /* Exceptions: text-white on a colored/gradient/dark element must STAY white. */
     [data-theme="light"] [class*="bg-indigo-"].text-white,
     [data-theme="light"] [class*="bg-purple-"].text-white,
@@ -297,6 +301,7 @@
           <select id="page-theme-select" onchange="applyPageTheme(this.value)" title="Page theme preset" class="hidden px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-300 hover:text-white hover:border-gray-500 text-xs font-medium focus:outline-none focus:border-indigo-500 transition-all">
             <option value="custom">Theme: Custom</option>
           </select>
+          <button onclick="openPageBuilder()" id="builder-btn" class="hidden px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-600/20 dark:border-indigo-500/60 dark:text-indigo-300 dark:hover:text-white dark:hover:bg-indigo-600/40 text-xs font-medium items-center gap-2 transition-all" title="Edit this page in the page builder"></button>
           <button onclick="toggleEditLayout()" id="edit-layout-btn" class="px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs font-medium flex items-center gap-2 transition-all">
             <i class="fa-solid fa-pen-ruler"></i> <span>Edit Layout</span>
           </button>
@@ -309,6 +314,8 @@
                   sm:col-span-1 sm:col-span-2 sm:col-span-3 sm:col-span-4 sm:col-span-5 sm:col-span-6
                   lg:col-span-1 lg:col-span-2 lg:col-span-3 lg:col-span-4 lg:col-span-5 lg:col-span-6"></div>
                   
+      <!-- Page Builder v3 (GrapesJS): a page with a live builder version renders here instead of the widget grid -->
+      <div id="builder-page-host" class="hidden w-full"></div>
       <div id="home-widgets" class="hidden w-full"></div>
 
       <!-- Hidden state store for live stats so Designer widgets can safely mirror them -->
@@ -4316,6 +4323,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         syncPageThemeSelect();
       }
       updateLayoutHistoryButtons();
+      syncBuilderButtons();
       if (window.isEditingLayout) {
         // Light-mode readable + dark variants (fb-1789012380662).
         btn.classList.add('bg-indigo-50', 'border-indigo-400', 'text-indigo-700', 'dark:bg-indigo-500/20', 'dark:border-indigo-500', 'dark:text-indigo-400');
@@ -4335,6 +4343,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
     // App toast — shares the notification toast host; optional action button.
     // level: info | success | warn | error. Also backs window.alert (below).
+    // Widgets (Chat, Script button) call window.showToast; it never existed, so their
+    // feedback was silently dropped. Alias it to the app toast.
+    window.showToast = (text, level) => showAppToast(text, level);
     function showAppToast(text, level, action, icon) {
       const host = document.getElementById('ntf-toasts');
       if (!host) return;
@@ -5591,6 +5602,68 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       filterWidgetLibraryForRole();
       if (['todo', 'tools', 'server'].includes(currentTab)) switchTab('home');
     }
+    // --- Page Builder v3 (GrapesJS) ---
+    // A page with a live builder version shows /page-view.html in a frame;
+    // its "Edit page" button opens /builder.html. Older pages keep the grid
+    // editor, and offer "New page builder" while in edit mode.
+    // Home is a builder page too (admin-only editing), but not in customPages.
+    function builderPageRef() {
+      if (currentCanvasPage === 'home') return { id: 'home', title: 'Home' };
+      return currentPageEntry();
+    }
+    function renderBuilderPage() {
+      const host = document.getElementById('builder-page-host');
+      const grid = document.getElementById('home-widgets');
+      const pg = builderPageRef();
+      if (host && pg && homepageDoc && homepageDoc.builderLive) {
+        let f = host.querySelector('iframe');
+        if (!f || f.dataset.page !== pg.id) {
+          host.innerHTML = `<iframe data-page="${escapeHtml(pg.id)}" src="/page-view.html?page=${encodeURIComponent(pg.id)}&embed=1" title="${escapeHtml(pg.title || pg.id)}" style="width:100%;border:0;min-height:60vh;display:block;background:transparent"></iframe>`;
+        }
+        host.classList.remove('hidden');
+        if (grid) grid.classList.add('hidden');
+        return true;
+      }
+      if (host) { host.classList.add('hidden'); host.innerHTML = ''; }
+      return false;
+    }
+    function syncBuilderButtons() {
+      const btn = document.getElementById('builder-btn');
+      if (!btn) return;
+      const pg = builderPageRef();
+      const live = !!(homepageDoc && homepageDoc.builderLive);
+      const show = !!pg && canEditCurrentPage();   // always offered while pages move to the new builder
+      btn.classList.toggle('hidden', !show);
+      btn.classList.toggle('flex', show);
+      btn.innerHTML = live ? '<i class="fa-solid fa-pen-to-square"></i> <span>Edit page</span>' : '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>New page builder</span>';
+      btn.title = live ? 'Edit this page in the page builder' : 'Rebuild this page in the new page builder (the current page stays until you press Go live)';
+      // On a builder page the grid tools don't apply. "Edit Layout" becomes
+      // "Page options" (share, settings, history, delete); Home has none of
+      // those, so its button goes. Publishing to the web waits for the builder
+      // export (plan phase 7).
+      const edit = document.getElementById('edit-layout-btn');
+      if (live && pg) {
+        if (edit) {
+          const showOpts = pg.id !== 'home' && canEditCurrentPage();
+          edit.classList.toggle('hidden', !showOpts);
+          if (showOpts) edit.innerHTML = window.isEditingLayout ? '<i class="fa-solid fa-check"></i> <span>Done</span>' : '<i class="fa-solid fa-sliders"></i> <span>Page options</span>';
+        }
+        ['designer-btn', 'undo-layout-btn', 'redo-layout-btn', 'save-template-btn', 'page-style-btn', 'export-page-btn', 'export-preview-btn', 'page-theme-select', 'publish-page-btn']
+          .forEach(id => { const b = document.getElementById(id); if (b) { b.classList.add('hidden'); b.classList.remove('flex'); } });
+      }
+      // Back on a grid page: restore the grid editor's own label.
+      else if (edit) edit.innerHTML = window.isEditingLayout ? '<i class="fa-solid fa-check"></i> <span>Done Editing</span>' : '<i class="fa-solid fa-pen-ruler"></i> <span>Edit Layout</span>';
+    }
+    function openPageBuilder() {
+      const pg = builderPageRef();
+      if (pg) location.href = `/builder.html?page=${encodeURIComponent(pg.id)}`;
+    }
+    window.addEventListener('message', e => {
+      if (e.origin !== location.origin || !e.data || e.data.type !== 'ada-page-height') return;
+      const f = document.querySelector('#builder-page-host iframe');
+      if (f && f.dataset.page === e.data.page) f.style.height = Math.max(200, Number(e.data.height) || 0) + 'px';
+    });
+
     function updatePageAccessUI() {
       const editBtn = document.getElementById('edit-layout-btn');
       const ok = canEditCurrentPage();
@@ -5607,6 +5680,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         share.classList.toggle('hidden', !(window.isEditingLayout && pg && ok));
         if (pg) share.innerHTML = pg.shared ? '<i class="fa-solid fa-user-group"></i> <span>Shared</span>' : '<i class="fa-solid fa-lock"></i> <span>Private</span>';
       }
+      syncBuilderButtons();
     }
     async function togglePageShared() {
       const pg = currentPageEntry();
@@ -6598,6 +6672,7 @@ ${body}
       if (!homepageDoc) return;
       syncPageThemeSelect();
       updatePageAccessUI();
+      if (renderBuilderPage()) return;
       
       const gt = homepageDoc.glanceTheme || { theme: 'glass', accent: 'indigo' };
       const glance = document.getElementById('home-glance-banner');

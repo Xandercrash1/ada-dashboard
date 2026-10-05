@@ -1,4 +1,10 @@
 class TodoWidget extends HTMLElement {
+  // Settings shown by the page builder (and any inspector reading configSchema).
+  static configSchema = [
+    { attr: 'show-past-due', label: 'Show overdue', type: 'checkbox', default: 'true' },
+    { attr: 'show-today', label: 'Show today', type: 'checkbox', default: 'true' },
+    { attr: 'show-upcoming', label: 'Show upcoming', type: 'checkbox', default: 'false' },
+  ];
   constructor() {
     super();
     this.todoView = null;
@@ -11,9 +17,26 @@ class TodoWidget extends HTMLElement {
 
   connectedCallback() {
     this.classList.add("block", "w-full", "h-full");
+    if (!this._wired) {
+      this._wired = true;
+      this.addEventListener('click', e => this.onAction(e));
+      this.addEventListener('submit', e => { e.preventDefault(); this.submitForm(); });
+    }
     this.loadConfig();
     this.render();
     this.fetchData();
+  }
+
+  // Settings come from attributes first (show-past-due / show-today / show-upcoming,
+  // "true"/"false"), so a page builder can set them directly. Falls back to the
+  // legacy homepageDoc lookup for the current dashboard grid.
+  static get observedAttributes() { return ['show-past-due', 'show-today', 'show-upcoming']; }
+
+  attributeChangedCallback() {
+    if (!this.isConnected) return;
+    this.loadConfig();
+    this.render();
+    this.updateView();
   }
 
   loadConfig() {
@@ -23,6 +46,10 @@ class TodoWidget extends HTMLElement {
       if (w && w.config) {
         this.config = { ...this.config, ...w.config };
       }
+    }
+    const attrMap = { 'show-past-due': 'showPastDue', 'show-today': 'showToday', 'show-upcoming': 'showUpcoming' };
+    for (const [attr, key] of Object.entries(attrMap)) {
+      if (this.hasAttribute(attr)) this.config[key] = this.getAttribute(attr) !== 'false';
     }
   }
 
@@ -71,13 +98,13 @@ class TodoWidget extends HTMLElement {
   renderTaskRow(t) {
     const priorityColor = this.getPriorityColor(t.priority);
     return `
-      <div class="flex items-start gap-3 group relative hover:bg-black/10 p-2 rounded-xl transition-colors border-l-2 border-transparent hover:border-indigo-400/50">
-        <button onclick="window.completeTodoTask && window.completeTodoTask('${this.escapeHtml(t.id)}'); setTimeout(() => document.querySelector('ada-todo').fetchData(), 500)" class="mt-0.5 w-4 h-4 rounded border border-gray-500 hover:border-indigo-400 hover:bg-indigo-500/20 flex items-center justify-center transition-all flex-shrink-0 text-transparent hover:text-indigo-400" title="Complete">
+      <div data-row="${this.escapeHtml(t.id)}" class="flex items-start gap-3 group relative hover:bg-black/10 p-2 rounded-xl transition-colors border-l-2 border-transparent hover:border-indigo-400/50">
+        <button data-action="complete" data-id="${this.escapeHtml(t.id)}" class="mt-0.5 w-4 h-4 rounded border border-gray-500 hover:border-indigo-400 hover:bg-indigo-500/20 flex items-center justify-center transition-all flex-shrink-0 text-transparent hover:text-indigo-400" title="Complete">
           <i class="fa-solid fa-check text-[9px]"></i>
         </button>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between gap-2">
-            <h4 class="text-xs font-semibold text-gray-200 truncate cursor-pointer hover:text-indigo-300" onclick="window.openEditTodoModal && window.openEditTodoModal('${this.escapeHtml(t.id)}')">
+            <h4 class="text-xs font-semibold text-gray-200 truncate cursor-pointer hover:text-indigo-300" data-action="edit" data-id="${this.escapeHtml(t.id)}">
               ${t.type === 'meeting' ? '<i class="fa-solid fa-users mr-1"></i> ' : ''}
               ${this.escapeHtml(t.name)}
             </h4>
@@ -161,6 +188,8 @@ class TodoWidget extends HTMLElement {
 
   toggleConfig(key) {
     this.config[key] = !this.config[key];
+    const attr = key.replace(/[A-Z]/g, c => '-' + c.toLowerCase());
+    if (this.hasAttribute(attr)) this.setAttribute(attr, String(this.config[key]));
     
     // Save to homepageDoc if editing
     if (window.homepageDoc && window.homepageDoc.widgets) {
@@ -173,6 +202,113 @@ class TodoWidget extends HTMLElement {
     }
     
     this.updateView();
+  }
+
+  // --- Actions: the widget talks to the TODO API itself, so it works on any page ---
+  async api(url, opts) {
+    try {
+      const res = await fetch(url, opts);
+      let data = null;
+      try { data = await res.json(); } catch (_) { /* empty/non-JSON body */ }
+      return { ok: res.ok, status: res.status, data };
+    } catch (err) {
+      return { ok: false, status: 0, data: null };
+    }
+  }
+
+  showError(msg) {
+    const el = this.querySelector('[data-role="error"]');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+    if (msg) setTimeout(() => el.classList.add('hidden'), 6000);
+  }
+
+  findTask(id) {
+    const v = this.todoView || {};
+    return [...(v.pastDue || []), ...(v.today || []), ...(v.upcoming || [])].find(t => t.id === id);
+  }
+
+  // Keep the dashboard's own TODO views in step when the widget sits on the dashboard.
+  async refreshAll() {
+    await this.fetchData();
+    if (typeof window.loadTodoDaily === 'function') window.loadTodoDaily();
+  }
+
+  onAction(e) {
+    const el = e.target.closest('[data-action]');
+    if (!el || !this.contains(el)) return;
+    const { action, id } = el.dataset;
+    if (action === 'complete') this.completeTask(id);
+    else if (action === 'edit') this.openForm('edit', id);
+    else if (action === 'add') this.openForm('add');
+    else if (action === 'cancel') this.closeForm();
+  }
+
+  async completeTask(id) {
+    const row = this.querySelector(`[data-row="${CSS.escape(id)}"]`);
+    if (row) { row.style.opacity = '0.35'; row.style.pointerEvents = 'none'; }
+    const r = await this.api(`/api/todo/tasks/${encodeURIComponent(id)}/complete`, { method: 'POST' });
+    if (!r.ok) {
+      if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
+      this.showError('Could not complete task' + (r.data && r.data.error ? ': ' + r.data.error : '.'));
+      return;
+    }
+    this.showError(null);
+    await this.refreshAll();
+  }
+
+  openForm(mode, id) {
+    // On the dashboard, use its full task modal (recurrence, people, etc.).
+    if (mode === 'edit' && typeof window.openEditTodoModal === 'function') return window.openEditTodoModal(id);
+    if (mode === 'add' && typeof window.openAddTodoModal === 'function') return window.openAddTodoModal();
+    const form = this.querySelector('[data-role="form"]');
+    const t = mode === 'edit' ? this.findTask(id) : null;
+    if (mode === 'edit' && !t) return this.showError('Task not found — try refreshing.');
+    this.editingId = t ? t.id : null;
+    form.reset();
+    this.querySelector('[data-role="form-title"]').textContent = t ? 'Edit task' : 'New task';
+    // Due date applies to new one-off tasks; editing keeps the task's own schedule.
+    this.querySelector('[data-role="due-row"]').classList.toggle('hidden', !!t);
+    if (t) {
+      form.name.value = t.name || '';
+      form.project.value = t.project || '';
+      form.priority.value = t.priority || 'Medium';
+      form.notes.value = t.notes || '';
+    } else {
+      form.dueDate.value = new Date().toLocaleDateString('en-CA');
+    }
+    form.classList.remove('hidden');
+    form.name.focus();
+  }
+
+  closeForm() {
+    this.querySelector('[data-role="form"]')?.classList.add('hidden');
+    this.editingId = null;
+  }
+
+  async submitForm() {
+    const form = this.querySelector('[data-role="form"]');
+    const payload = {
+      name: form.name.value.trim(),
+      project: form.project.value.trim(),
+      priority: form.priority.value,
+      notes: form.notes.value.trim(),
+    };
+    if (!payload.name) return this.showError('Give the task a name.');
+    let r;
+    if (this.editingId) {
+      r = await this.api(`/api/todo/tasks/${encodeURIComponent(this.editingId)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    } else {
+      r = await this.api('/api/todo/tasks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, type: 'scheduled', dueDate: form.dueDate.value }) });
+    }
+    if (!r.ok) return this.showError((r.data && r.data.error) || `Could not save task (HTTP ${r.status || 0}).`);
+    this.showError(null);
+    this.closeForm();
+    await this.refreshAll();
   }
 
   render() {
@@ -216,16 +352,36 @@ class TodoWidget extends HTMLElement {
               </div>
             </div>
 
-            <button onclick="window.openAddTodoModal && window.openAddTodoModal(); setTimeout(() => document.querySelector('ada-todo').fetchData(), 10000);" class="w-6 h-6 rounded-md bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center text-white transition-colors" title="New Task">
+            <button data-action="add" class="w-6 h-6 rounded-md bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center text-white transition-colors" title="New Task">
               <i class="fa-solid fa-plus text-[10px]"></i>
             </button>
           </div>
         </div>
 
+        <div data-role="error" class="hidden mb-2 px-2 py-1.5 rounded-lg bg-rose-500/10 text-rose-300 text-[11px]"></div>
+
         <!-- Task List Content -->
         <div id="todo-content" class="flex-1 overflow-y-auto custom-scrollbar pr-1 -mr-1">
           <!-- Populated dynamically -->
         </div>
+
+        <!-- Built-in add/edit form, used when the dashboard's full task modal isn't on the page -->
+        <form data-role="form" class="hidden absolute inset-0 z-30 p-4 bg-[#121212]/95 backdrop-blur-xl flex flex-col gap-2 text-xs">
+          <div class="flex items-center justify-between mb-1">
+            <h3 data-role="form-title" class="text-sm font-bold text-gray-200">New task</h3>
+            <button type="button" data-action="cancel" class="w-6 h-6 rounded-md hover:bg-white/10 text-gray-400" title="Cancel"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <input name="name" required placeholder="Task name" class="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 placeholder-gray-500">
+          <div class="grid grid-cols-2 gap-2">
+            <input name="project" placeholder="Project" class="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 placeholder-gray-500">
+            <select name="priority" class="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100">
+              <option>High</option><option selected>Medium</option><option>Low</option>
+            </select>
+          </div>
+          <label data-role="due-row" class="flex items-center gap-2 text-gray-400">Due <input name="dueDate" type="date" class="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100"></label>
+          <textarea name="notes" rows="2" placeholder="Notes" class="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-100 placeholder-gray-500"></textarea>
+          <button type="submit" class="mt-auto py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold">Save</button>
+        </form>
 
       </div>
     `;

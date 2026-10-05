@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<script>
+  // Editor chrome follows the dashboard's light/dark setting (localStorage 'ada_theme').
+  (function () {
+    const mql = matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      let m = 'auto'; try { m = localStorage.getItem('ada_theme') || 'auto'; } catch (e) {}
+      document.documentElement.setAttribute('data-theme', (m === 'light' || m === 'dark') ? m : (mql.matches ? 'dark' : 'light'));
+    };
+    apply();
+    window.addEventListener('storage', e => { if (e.key === 'ada_theme') apply(); });
+    mql.addEventListener('change', apply);
+  })();
+</script>
+<title>Page Builder</title>
+<link rel="stylesheet" href="/vendor/grapesjs/grapes.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+  /* Page Builder v3 (GrapesJS). Plan: vault Projects/AI Server/Plan — Page Builder GrapesJS Build.md */
+  :root, [data-theme="dark"] { --ui-bg:#17171c; --ui-panel:#1f1f26; --ui-line:#2c2c36; --ui-text:#e5e7eb; --ui-dim:#9ca3af; --ui-field:#2a2a33; --ui-accent:#6366f1; --ui-code:#0d0d10; }
+  [data-theme="light"] { --ui-bg:#f1f5f9; --ui-panel:#ffffff; --ui-line:#e2e8f0; --ui-text:#0f172a; --ui-dim:#64748b; --ui-field:#f8fafc; --ui-accent:#6366f1; --ui-code:#f8fafc; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--ui-bg); color:var(--ui-text); font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  #app { display:grid; grid-template-rows:48px auto 1fr; grid-template-columns:260px 1fr 300px; height:100vh; }
+  #topbar { grid-column:1 / -1; display:flex; align-items:center; gap:8px; padding:0 12px; background:var(--ui-panel); border-bottom:1px solid var(--ui-line); }
+  #topbar .title { font-weight:600; margin-right:auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #topbar .title small { color:var(--ui-dim); font-weight:400; margin-left:6px; }
+  #banner { grid-column:1 / -1; display:none; padding:8px 12px; background:#7f1d1d; color:#fee2e2; font-size:13px; }
+  #banner.show { display:block; }
+  .btn { background:transparent; color:var(--ui-text); border:1px solid var(--ui-line); border-radius:8px; padding:6px 10px; cursor:pointer; font:inherit; white-space:nowrap; }
+  .btn:hover { border-color:var(--ui-accent); }
+  .btn.on { background:var(--ui-accent); border-color:var(--ui-accent); color:#fff; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  #golive.pending { background:#16a34a; border-color:#16a34a; color:#fff; }
+  .seg { display:flex; border:1px solid var(--ui-line); border-radius:8px; overflow:hidden; }
+  .seg .btn { border:0; border-radius:0; }
+  #status { color:var(--ui-dim); font-size:12px; min-width:80px; text-align:right; }
+  #left, #right { background:var(--ui-panel); overflow:auto; }
+  #left { border-right:1px solid var(--ui-line); }
+  #right { border-left:1px solid var(--ui-line); }
+  .panel-h { padding:10px 12px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ui-dim); border-bottom:1px solid var(--ui-line); }
+  #canvas-wrap { position:relative; }
+  #gjs { height:100%; }
+  .dev-only { display:none; }
+  body.dev .dev-only { display:block; }
+  #presets { padding:10px 12px; }
+  #presets .group { margin-bottom:12px; }
+  #presets .label { color:var(--ui-dim); font-size:12px; margin-bottom:6px; }
+  #presets .row { display:flex; flex-wrap:wrap; gap:6px; }
+  .empty { color:var(--ui-dim); font-size:12px; padding:10px 12px; }
+  #code-modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:100; }
+  #code-modal.show { display:flex; }
+  #code-modal .box { width:min(1000px,94vw); height:80vh; background:var(--ui-panel); border:1px solid var(--ui-line); border-radius:12px; display:flex; flex-direction:column; gap:8px; padding:12px; }
+  #code-modal textarea { flex:1; width:100%; background:var(--ui-code); color:var(--ui-text); border:1px solid var(--ui-line); border-radius:8px; font:12px ui-monospace,Menlo,monospace; padding:8px; }
+  /* GrapesJS theme to match (both themes) */
+  .gjs-one-bg { background-color:var(--ui-panel); }
+  .gjs-two-color { color:var(--ui-text); }
+  .gjs-three-bg { background-color:var(--ui-accent); color:#fff; }
+  .gjs-field, .gjs-field input, .gjs-field select, .gjs-field textarea, .gjs-clm-tags #gjs-clm-new { background-color:var(--ui-field); color:var(--ui-text); }
+  .gjs-field { border:1px solid var(--ui-line); }
+  .gjs-block { color:var(--ui-text); background-color:var(--ui-panel); }
+  .gjs-layer, .gjs-sm-sector-title, .gjs-trt-trait__wrp, .gjs-clm-tags { background-color:var(--ui-panel); color:var(--ui-text); }
+  .gjs-layer-title { background-color:var(--ui-panel); border-bottom:1px solid var(--ui-line); }
+  .gjs-sm-property .gjs-sm-label, .gjs-label, .gjs-trt-trait .gjs-label-wrp { color:var(--ui-dim); }
+  .gjs-mdl-dialog { background-color:var(--ui-panel); color:var(--ui-text); }
+  .gjs-four-color, .gjs-four-color-h:hover { color:var(--ui-accent); }
+  .gjs-cv-canvas { width:100%; height:100%; top:0; }
+  .gjs-blocks-c { padding:6px; gap:6px; }
+  .gjs-block { width:calc(50% - 10px); margin:0; padding:10px 4px; min-height:64px; border-radius:10px; border:1px solid var(--ui-line); }
+  .gjs-block:hover { border-color:var(--ui-accent); }
+  .gjs-block svg { width:26px; height:26px; }
+  .gjs-block-label { font-size:12px; }
+  .gjs-block-category .gjs-title { background:var(--ui-panel); border-bottom:1px solid var(--ui-line); font-size:12px; }
+  .gjs-trt-trait { padding:6px 12px; }
+  @media (max-width: 900px) {
+    #app { grid-template-columns:1fr; grid-template-rows:48px auto 1fr 40vh; }
+    #left { display:none; }
+    #right { grid-column:1; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="title"><span id="page-title">Page</span><small>Page builder</small></div>
+    <div class="seg" id="devices">
+      <button class="btn on" data-device="Desktop" title="Desktop"><i class="fa fa-desktop"></i></button>
+      <button class="btn" data-device="Tablet" title="Tablet"><i class="fa fa-tablet-screen-button"></i></button>
+      <button class="btn" data-device="Phone" title="Phone (390px)"><i class="fa fa-mobile-screen"></i></button>
+    </div>
+    <button class="btn" id="undo" title="Undo"><i class="fa fa-rotate-left"></i></button>
+    <button class="btn" id="redo" title="Redo"><i class="fa fa-rotate-right"></i></button>
+    <button class="btn" id="preview" title="Preview"><i class="fa fa-eye"></i></button>
+    <button class="btn dev-toggle" id="dev" title="Developer mode: styles, layers, code (admin)" style="display:none">Developer</button>
+    <button class="btn" id="golive" title="Make this draft what viewers see">Go live</button>
+    <button class="btn" id="done" title="Back to the dashboard">Done</button>
+    <span id="status">Loading…</span>
+  </div>
+  <div id="banner"></div>
+  <div id="left">
+    <div class="panel-h">Drag onto the page</div>
+    <div id="blocks"></div>
+  </div>
+  <div id="canvas-wrap"><div id="gjs"></div></div>
+  <div id="right">
+    <div class="panel-h">Settings</div>
+    <div id="traits"></div>
+    <div class="panel-h">Look</div>
+    <div id="presets"><div class="empty">Select something on the page.</div></div>
+    <div class="dev-only">
+      <div class="panel-h">Styles (developer)</div>
+      <div id="styles"></div>
+      <div class="panel-h">Layers (developer)</div>
+      <div id="layers"></div>
+      <div style="padding:10px 12px"><button class="btn" id="code">Edit code</button></div>
+    </div>
+  </div>
+</div>
+<div id="code-modal">
+  <div class="box">
+    <div style="display:flex;align-items:center;gap:8px"><strong style="margin-right:auto">Page code</strong>
+      <span style="color:var(--ui-dim);font-size:12px">Scripts and unsafe markup are removed by the server when saved.</span>
+      <button class="btn" id="code-cancel">Cancel</button><button class="btn on" id="code-apply">Apply</button></div>
+    <textarea id="code-html" spellcheck="false" placeholder="HTML"></textarea>
+    <textarea id="code-css" spellcheck="false" placeholder="CSS" style="flex:.5"></textarea>
+  </div>
+</div>
+
+<script src="/vendor/grapesjs/grapes.min.js"></script>
+<script src="/vendor/grapesjs/grapesjs-blocks-basic.js"></script>
+<script type="module">
+const pageId = new URLSearchParams(location.search).get('page') || '';
+const $ = id => document.getElementById(id);
+const status = t => { $('status').textContent = t; };
+const banner = t => { $('banner').textContent = t || ''; $('banner').classList.toggle('show', !!t); };
+const getJson = async url => { const r = await fetch(url); if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.json(); };
+
+// Friendly names and icons for the widgets; anything else gets a name from its tag.
+const META = {
+  'ada-sysmon': ['System monitor', 'fa-microchip', 260], 'ada-todo': ['To-do list', 'fa-list-check', 340],
+  'ada-weather': ['Weather', 'fa-cloud-sun', 200], 'ada-calendar': ['Calendar', 'fa-calendar-days', 320],
+  'ada-clock': ['Clock', 'fa-clock', 160], 'ada-analog-clock': ['Analog clock', 'fa-clock', 220],
+  'ada-countdown': ['Countdown', 'fa-hourglass-half', 180], 'ada-timer': ['Timer', 'fa-stopwatch', 200],
+  'ada-stopwatch': ['Stopwatch', 'fa-stopwatch-20', 200], 'ada-greeting': ['Greeting', 'fa-hand', 140],
+  'ada-photo-frame': ['Photo frame', 'fa-image', 300], 'ada-kanban': ['Kanban board', 'fa-table-columns', 400],
+  'ada-scratchpad': ['Scratchpad', 'fa-note-sticky', 260],
+  'ada-script-runner': ['Script button', 'fa-play', 120], 'ada-stat-box': ['Stat box', 'fa-chart-simple', 140],
+  'ada-glance': ['At a glance', 'fa-gauge', 200], 'ada-doc-body': ['Document', 'fa-file-lines', 400],
+};
+const nameFromTag = tag => { const s = tag.replace(/^ada-(section-)?/, '').replace(/-/g, ' '); return s[0].toUpperCase() + s.slice(1); };
+const THEMES = ['glass', 'solid', 'transparent', 'neon', 'gradient'];
+const ACCENTS = ['indigo', 'emerald', 'sky', 'violet', 'rose', 'amber', 'teal', 'orange', 'cyan'];
+const opt = o => Array.isArray(o) ? { id: String(o[0]), label: String(o[1] ?? o[0]) } : { id: String(o), label: String(o)[0].toUpperCase() + String(o).slice(1) };
+
+// Settings panel fields, from the component's own configSchema plus theme/accent.
+function traitsFor(tag) {
+  const cls = customElements.get(tag);
+  const schema = (cls && Array.isArray(cls.configSchema)) ? cls.configSchema : [];
+  const observed = (cls && cls.observedAttributes) || [];
+  const traits = schema.filter(f => f && f.attr).map(f => {
+    const base = { name: f.attr, label: f.label || f.attr };
+    if (Array.isArray(f.options)) return { ...base, type: 'select', options: [{ id: '', label: 'Default' }, ...f.options.map(opt)] };
+    // Options loaded from the server (e.g. the Script button's script list).
+    if (f.source && f.source.url) return { ...base, type: 'select', options: SOURCE_OPTIONS[f.source.url] || [] };
+    if (f.type === 'checkbox' || f.type === 'boolean') return { ...base, type: 'checkbox', valueTrue: 'true', valueFalse: 'false' };
+    if (f.type === 'number') return { ...base, type: 'number' };
+    if (f.type === 'color') return { ...base, type: 'color' };
+    return { ...base, type: 'text' };
+  });
+  const have = new Set(traits.map(t => t.name));
+  if (observed.includes('theme') && !have.has('theme')) traits.push({ type: 'select', name: 'theme', label: 'Style', options: [{ id: '', label: 'Default' }, ...THEMES.map(opt)] });
+  if (observed.includes('accent') && !have.has('accent')) traits.push({ type: 'select', name: 'accent', label: 'Accent', options: [{ id: '', label: 'Default' }, ...ACCENTS.map(opt)] });
+  return { traits, defaults: Object.fromEntries(schema.filter(f => f && f.attr && f.default !== undefined).map(f => [f.attr, String(f.default)])) };
+}
+
+// "Look" presets: friendly buttons that swap Tailwind classes, no code.
+const LOOKS = [
+  { label: 'Width', opts: [['Full', 'w-full'], ['Narrow', 'max-w-3xl mx-auto'], ['Half', 'md:w-1/2']] },
+  { label: 'Spacing', opts: [['None', 'p-0'], ['Small', 'p-4'], ['Large', 'p-10']] },
+  { label: 'Corners', opts: [['Square', 'rounded-none'], ['Rounded', 'rounded-2xl']] },
+  { label: 'Background', opts: [['None', 'bg-transparent'], ['Card', 'bg-white/5'], ['Accent', 'bg-indigo-600/20']] },
+];
+
+const PRESETS = {
+  hero: ['Hero', 'fa-star', `<section class="px-6 py-20 text-center bg-gradient-to-br from-indigo-100 to-white dark:from-indigo-900/60 dark:to-[#121212]">
+      <h1 class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">A big welcome</h1>
+      <p class="text-lg text-slate-600 dark:text-gray-300 max-w-2xl mx-auto mb-8">Double-click any text to change it.</p>
+      <a href="#" class="inline-block px-6 py-3 rounded-xl bg-indigo-600 text-white font-semibold">Get started</a></section>`],
+  'widget-row': ['Widget row', 'fa-table-columns', `<section class="px-6 py-8"><div class="grid grid-cols-1 md:grid-cols-3 gap-4 min-h-[140px]"></div></section>`],
+  'text-section': ['Text section', 'fa-align-left', `<section class="px-6 py-12 max-w-3xl mx-auto"><h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-3">A heading</h2>
+      <p class="text-slate-600 dark:text-gray-300 leading-relaxed">Write something here. Double-click to edit.</p></section>`],
+  split: ['Image + text', 'fa-image', `<section class="px-6 py-12 grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+      <img src="https://picsum.photos/seed/ada/800/500" alt="" class="w-full rounded-2xl">
+      <div><h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-3">Side by side</h2><p class="text-slate-600 dark:text-gray-300">Text next to a picture. Stacks on a phone.</p></div></section>`],
+  cards: ['Three cards', 'fa-grip', `<section class="px-6 py-12 grid grid-cols-1 md:grid-cols-3 gap-4">${['One', 'Two', 'Three'].map(t =>
+      `<div class="p-6 rounded-2xl bg-white/5 border border-white/10"><h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">${t}</h3><p class="text-gray-500 dark:text-gray-400 text-sm">A short description.</p></div>`).join('')}</section>`],
+  footer: ['Footer', 'fa-window-minimize', `<footer class="px-6 py-8 text-center text-sm text-gray-500 border-t border-white/10">Made with Ada</footer>`],
+};
+
+// Dropdown options a component loads from the server ({ source: { url, value, label } }
+// in its configSchema), fetched once before the editor builds its Settings.
+const SOURCE_OPTIONS = {};
+async function loadSourceOptions(tags) {
+  const fields = tags.flatMap(t => ((customElements.get(t) || {}).configSchema || [])).filter(f => f && f.source && f.source.url);
+  await Promise.all(fields.map(async f => {
+    try {
+      const list = await getJson(f.source.url);
+      const arr = Array.isArray(list) ? list : (list.items || list.scripts || []);
+      // Items may be plain strings (e.g. /api/media/libraries → ["default"]) or records.
+      SOURCE_OPTIONS[f.source.url] = arr.map(x => typeof x === 'string' || typeof x === 'number'
+        ? { id: String(x), label: String(x) }
+        : { id: String(x[f.source.value || 'id']), label: String(x[f.source.label || 'name'] || x[f.source.value || 'id']) });
+    } catch (e) { SOURCE_OPTIONS[f.source.url] = []; }
+  }));
+}
+
+async function main() {
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(pageId)) { banner('No page chosen. Open the builder from a page on the dashboard.'); status(''); return; }
+  let me, catalog, data;
+  try {
+    [me, catalog, data] = await Promise.all([getJson('/api/me'), getJson('/api/builder/catalog'), getJson(`/api/pages/${pageId}/builder`)]);
+  } catch (e) { banner('Could not load this page: ' + e.message); status(''); return; }
+  if (!data.canEdit) { location.replace(`/page-view.html?page=${encodeURIComponent(pageId)}`); return; }
+  $('page-title').textContent = data.page.title || pageId;
+  document.title = `${data.page.title || pageId} — Page Builder`;
+  const isAdmin = me.role === 'admin';
+  if (isAdmin) $('dev').style.display = '';
+
+  // Component classes, so the Settings panel can read each configSchema.
+  try { await import('/components/index.js'); } catch (e) { console.warn('components', e); }
+  await loadSourceOptions(catalog.map(c => c.tag));
+
+  const widgetPlugin = editor => {
+    for (const c of catalog) {
+      const [label, icon, height] = META[c.tag] || [nameFromTag(c.tag), c.kind === 'section' ? 'fa-layer-group' : 'fa-cube', 240];
+      const { traits, defaults } = traitsFor(c.tag);
+      editor.DomComponents.addType(c.tag, {
+        isComponent: el => el.tagName && el.tagName.toLowerCase() === c.tag,
+        model: { defaults: {
+          tagName: c.tag, name: label, droppable: false, editable: false, components: [], traits,
+          resizable: c.kind === 'widget' ? { tl: 0, tc: 0, tr: 0, cl: 0, cr: 0, bl: 0, br: 0, bc: 1, keyHeight: 'height' } : false,
+        } },
+        // The web component renders its own live content; GrapesJS must not
+        // overwrite it with (empty) child components on re-render.
+        view: { renderChildren() {} },
+      });
+      if (c.tag === 'ada-widget') continue;   // added below as purpose-made blocks
+      const attrs = Object.entries(defaults).map(([k, v]) => ` ${k}="${v.replace(/"/g, '&quot;')}"`).join('');
+      editor.Blocks.add(c.tag, {
+        label, category: c.kind === 'section' ? 'Ready-made sections' : 'Live widgets',
+        media: `<i class="fa ${icon}" style="font-size:22px"></i>`,
+        content: c.kind === 'widget' ? `<${c.tag}${attrs} style="height:${height}px"></${c.tag}>` : `<${c.tag}${attrs}></${c.tag}>`,
+      });
+    }
+  };
+  // <ada-widget> (ChatWidget.js) is the agent's generative-UI element, shown
+  // here as two purpose-made blocks (admin only: it can call the API).
+  const agentWidgetPlugin = editor => {
+    if (!catalog.some(c => c.tag === 'ada-widget')) return;
+    const t = (name, label) => ({ type: 'text', name, label });
+    editor.DomComponents.addType('ada-widget', {
+      isComponent: el => el.tagName && el.tagName.toLowerCase() === 'ada-widget',
+      model: { defaults: {
+        tagName: 'ada-widget', name: 'Agent widget', droppable: false, editable: false, components: [],
+        traits: [
+          { type: 'select', name: 'type', label: 'Kind', options: [{ id: 'gauge', label: 'Gauge' }, { id: 'button', label: 'Action button' }, { id: 'countdown', label: 'Countdown' }, { id: 'photo', label: 'Photo' }] },
+          t('label', 'Label'), { type: 'select', name: 'accent', label: 'Accent', options: [{ id: '', label: 'Default' }, ...ACCENTS.map(opt)] },
+          t('endpoint', 'API endpoint (gauge/button)'), t('path', 'Value path (gauge)'), t('unit', 'Unit (gauge)'), t('max', 'Max (gauge)'), t('refresh', 'Refresh seconds (gauge)'),
+          t('script-id', 'Script id (button)'), t('icon', 'Icon (button)'), t('confirm', 'Confirm text (button)'), t('target', 'Target time (countdown)'), t('src', 'Image URL (photo)'), t('caption', 'Caption (photo)'),
+        ],
+      } },
+      view: { renderChildren() {} },
+    });
+    editor.Blocks.add('agent-gauge', { label: 'Gauge', category: 'Live widgets', media: '<i class="fa fa-gauge-high" style="font-size:22px"></i>',
+      content: '<ada-widget type="gauge" label="RAM" endpoint="/api/system/stats" path="memory.percent" unit="%" max="100" refresh="10"></ada-widget>' });
+    editor.Blocks.add('agent-button', { label: 'Action button', category: 'Live widgets', media: '<i class="fa fa-hand-pointer" style="font-size:22px"></i>',
+      content: '<ada-widget type="button" label="Run" icon="fa-play" accent="indigo"></ada-widget>' });
+  };
+  const presetPlugin = editor => {
+    for (const [id, [label, icon, content]] of Object.entries(PRESETS)) {
+      editor.Blocks.add(id, { label, category: 'Page pieces', media: `<i class="fa ${icon}" style="font-size:22px"></i>`, content });
+    }
+  };
+
+  const editor = grapesjs.init({
+    container: '#gjs', height: '100%', width: 'auto', fromElement: false,
+    noticeOnUnload: false,          // our own warning, below: only while a save is pending or failed
+    protectedCss: '* { box-sizing: border-box; } body { margin: 0; background-color: var(--bg); color: var(--text); }',   // follows the dashboard theme (page-runtime.js)
+    plugins: [widgetPlugin, agentWidgetPlugin, presetPlugin, 'gjs-blocks-basic'],
+    pluginsOpts: { 'gjs-blocks-basic': { blocks: isAdmin ? ['text', 'image', 'link', 'video', 'map'] : ['text', 'image', 'link'], category: 'Basics', flexGrid: true } },
+    panels: { defaults: [] },
+    blockManager: { appendTo: '#blocks' },
+    traitManager: { appendTo: '#traits' },
+    styleManager: { appendTo: '#styles' },
+    layerManager: { appendTo: '#layers' },
+    selectorManager: { componentFirst: true },
+    storageManager: false,          // saved through /api/pages/:id/builder/draft
+    assetManager: {
+      upload: false, assets: [],
+      uploadFile: async e => {
+        const files = [...((e.dataTransfer || e.target).files || [])];
+        for (const f of files) {
+          const dataUrl = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
+          const res = await fetch(`/api/pages/${pageId}/images`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: f.name, dataUrl }) });
+          const out = await res.json().catch(() => ({}));
+          if (res.ok) editor.AssetManager.add({ src: out.path }); else banner(out.error || 'Image upload failed.');
+        }
+      },
+    },
+    deviceManager: { devices: [
+      { id: 'Desktop', name: 'Desktop', width: '' },
+      { id: 'Tablet', name: 'Tablet', width: '768px', widthMedia: '992px' },
+      { id: 'Phone', name: 'Phone', width: '390px', widthMedia: '480px' },
+    ] },
+    canvas: {
+      scripts: ['https://cdn.tailwindcss.com?plugins=typography', '/builder/page-runtime.js', { src: '/components/index.js', type: 'module' }],
+      styles: ['https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'],
+    },
+  });
+  window.editor = editor;
+
+  // Page images already uploaded for this page.
+  getJson(`/api/pages/${pageId}/images`).then(list => editor.AssetManager.add(list.map(i => ({ src: i.path })))).catch(() => {});
+
+  // ---- Load the draft (or the live version) ----
+  let loading = true;
+  const src = data.draft || data.live || data.starter;   // starter = the page's current grid layout, first time only
+  editor.on('load', () => {
+    if (src) { editor.setComponents(src.html || ''); editor.setStyle(src.css || ''); }
+    editor.UndoManager.clear();
+    setTimeout(() => { loading = false; }, 0);
+    status(src ? 'Ready' : 'Empty page — drag blocks in from the left');
+    if (!data.draft && !data.live && data.starter) {
+      // Save the converted layout as the first draft, so "Go live" is one click away.
+      banner('');
+      status('Started from your current layout');
+      dirty = true; setTimeout(save, 0);
+    }
+    setLive(data.unpublished);
+  });
+
+  // ---- Draft autosave ----
+  let expected = data.draft ? data.draft.updatedAt : null;
+  let dirty = false, saving = false, queued = false, failed = false, timer = null, conflict = false;
+  const save = async () => {
+    if (conflict) return;
+    if (saving) { queued = true; return; }
+    if (!dirty) return;
+    saving = true; dirty = false; status('Saving…');
+    try {
+      const r = await fetch(`/api/pages/${pageId}/builder/draft`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: editor.getHtml(), css: editor.getCss(), expectedUpdatedAt: expected }) });
+      const out = await r.json().catch(() => ({}));
+      if (r.status === 409) {
+        conflict = true; status('Not saved');
+        banner(`Someone else (${out.updatedBy || 'another tab'}) changed this page. Reload to see their version — your latest changes here were not saved.`);
+      } else if (!r.ok) { dirty = true; failed = true; status('Save failed'); banner(out.error || `Saving failed (HTTP ${r.status}). Your changes are still here; they will retry.`); }
+      else {
+        failed = false; banner(''); expected = out.updatedAt; status('Draft saved'); setLive(out.unpublished);
+        if (out.report && out.report.length) banner('Saved, but some content was removed for safety: ' + out.report.join('; '));
+      }
+    } catch (e) { dirty = true; failed = true; status('Save failed'); }
+    saving = false;
+    if (queued || (failed && dirty)) { queued = false; clearTimeout(timer); timer = setTimeout(save, failed ? 4000 : 0); }
+  };
+  const flush = async () => { clearTimeout(timer); await save(); while (saving) await new Promise(r => setTimeout(r, 100)); };
+  editor.on('update', () => {
+    if (loading) return;
+    dirty = true; status('Unsaved…'); setLive(true);
+    clearTimeout(timer); timer = setTimeout(save, 1200);
+  });
+  window.addEventListener('beforeunload', e => { if (dirty || saving || failed) { e.preventDefault(); e.returnValue = ''; } });
+
+  // ---- Go live / Done ----
+  function setLive(pending) {
+    const b = $('golive');
+    b.classList.toggle('pending', !!pending);
+    b.textContent = pending ? 'Go live' : 'Live';
+    b.disabled = !pending;
+  }
+  $('golive').onclick = async () => {
+    await flush();
+    if (conflict) return;
+    const r = await fetch(`/api/pages/${pageId}/builder/go-live`, { method: 'POST' });
+    const out = await r.json().catch(() => ({}));
+    if (r.ok) { status('Live'); setLive(false); } else banner(out.error || 'Could not go live.');
+  };
+  $('done').onclick = async () => {
+    await flush();
+    try { localStorage.setItem('ada_activeTab', pageId); } catch (e) {}
+    location.href = '/';
+  };
+
+  // ---- Top bar ----
+  document.querySelectorAll('#devices .btn').forEach(b => b.onclick = () => {
+    editor.setDevice(b.dataset.device);
+    document.querySelectorAll('#devices .btn').forEach(x => x.classList.toggle('on', x === b));
+  });
+  $('undo').onclick = () => editor.UndoManager.undo();
+  $('redo').onclick = () => editor.UndoManager.redo();
+  $('preview').onclick = () => editor.Commands.isActive('preview') ? editor.stopCommand('preview') : editor.runCommand('preview');
+  $('dev').onclick = () => { if (!isAdmin) return; document.body.classList.toggle('dev'); $('dev').classList.toggle('on', document.body.classList.contains('dev')); };
+
+  // ---- Developer code editor (admin) ----
+  $('code').onclick = () => { $('code-html').value = editor.getHtml(); $('code-css').value = editor.getCss(); $('code-modal').classList.add('show'); };
+  $('code-cancel').onclick = () => $('code-modal').classList.remove('show');
+  $('code-apply').onclick = () => {
+    if (!isAdmin) return;
+    editor.setComponents($('code-html').value); editor.setStyle($('code-css').value);
+    $('code-modal').classList.remove('show');
+  };
+
+  // ---- Look presets panel ----
+  function renderLooks() {
+    const box = $('presets');
+    const c = editor.getSelected();
+    if (!c) { box.innerHTML = '<div class="empty">Select something on the page.</div>'; return; }
+    box.innerHTML = '';
+    LOOKS.forEach(group => {
+      const g = document.createElement('div'); g.className = 'group';
+      g.innerHTML = `<div class="label">${group.label}</div><div class="row"></div>`;
+      const row = g.querySelector('.row');
+      group.opts.forEach(([label, classes]) => {
+        const b = document.createElement('button'); b.className = 'btn'; b.textContent = label;
+        b.classList.toggle('on', classes.split(' ').every(cl => c.getClasses().includes(cl)));
+        b.onclick = () => {
+          group.opts.forEach(([, cls]) => cls.split(' ').forEach(cl => c.removeClass(cl)));
+          classes.split(' ').forEach(cl => c.addClass(cl));
+          renderLooks();
+        };
+        row.appendChild(b);
+      });
+      box.appendChild(g);
+    });
+  }
+  editor.on('component:selected component:deselected', renderLooks);
+
+  // Every widget gets a stable id when it's added, so widgets that store data
+  // (Kanban board, Document, To-do settings) keep it, and two of them never share.
+  editor.on('component:add', c => {
+    const tag = c.get('tagName');
+    if (!tag || !/^ada-/.test(tag) || /^ada-section-/.test(tag)) return;
+    if (!c.getAttributes()['data-widget-id']) c.addAttributes({ 'data-widget-id': 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) });
+  });
+}
+main();
+</script>
+</body>
+</html>

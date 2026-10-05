@@ -51,7 +51,7 @@ class AdaCalendar extends HTMLElement {
     const bgClass = theme === 'transparent' ? 'bg-transparent' :
                    theme === 'solid' ? 'bg-dark-card border border-dark-border' :
                    theme === 'neon' ? `bg-dark-card border border-${accent}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accent}-500/20` :
-                   theme === 'gradient' ? `bg-gradient-to-br from-${accent}-900/40 to-dark-card border border-${accent}-500/30` :
+                   theme === 'gradient' ? `bg-gradient-to-br from-${accent}-50/90 to-white dark:from-${accent}-900/40 dark:to-dark-card border border-${accent}-200 dark:border-${accent}-500/30` :   // light + dark, as WeatherWidget
                    `bg-dark-bg/60 backdrop-blur-xl border border-dark-border shadow-sm`; // glass
 
     const TZ = 'America/New_York';

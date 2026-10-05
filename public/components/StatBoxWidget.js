@@ -18,7 +18,7 @@ class StatBoxWidget extends HTMLElement {
     if (theme === 'glass') bgClass = 'bg-dark-bg/60 backdrop-blur-xl border border-dark-border shadow-sm';
     else if (theme === 'solid') bgClass = 'bg-dark-card border border-dark-border';
     else if (theme === 'neon') bgClass = `bg-${accent}-500/10 backdrop-blur-md border border-${accent}-500/50 shadow-[0_0_15px_rgba(0,0,0,0)] shadow-${accent}-500/30 text-${accent}-100`;
-    else if (theme === 'gradient') bgClass = `bg-gradient-to-br from-${accent}-600/80 to-${accent}-900/80 backdrop-blur-md border border-${accent}-400/30 shadow-lg text-white`;
+    else if (theme === 'gradient') bgClass = `bg-gradient-to-br from-${accent}-600/80 to-${accent}-900/80 backdrop-blur-md border border-${accent}-400/30 shadow-lg text-white dark`;   // 'dark': this card is dark in both modes, so its contents use their dark: colours
     else bgClass = '';
 
     const stat = this.getAttribute('stat') || 'todo';
@@ -28,8 +28,8 @@ class StatBoxWidget extends HTMLElement {
     
     this.innerHTML = `
       <div class="${bgClass} rounded-xl p-4 flex flex-col justify-between h-full">
-        ${title ? `<div class="text-gray-400 text-xs font-semibold mb-2">${title}</div>` : ''}
-        <div class="text-2xl font-bold text-white flex items-end justify-between">
+        ${title ? `<div class="text-gray-500 dark:text-gray-400 text-xs font-semibold mb-2">${title}</div>` : ''}
+        <div class="text-2xl font-bold text-gray-900 dark:text-white flex items-end justify-between">
           <span data-home-stat="${stat}">--</span>
           <i class="fa-solid ${icon} text-${accent}-500/50 text-xl"></i>
         </div>
