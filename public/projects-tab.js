@@ -45,7 +45,8 @@
     let rows;
     try { rows = await api('/api/projects'); } catch (e) { return fail(e); }
     const row = (p) => {
-      const where = /^repo/i.test(p.home) ? '' : `<span class="text-xs px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800">${esc(p.home.replace(/^device:/, 'on '))}${/^device:/.test(p.home) ? ' only' : ''}</span>`;
+      const onlyDevice = !/repo/i.test(p.home);   // "device:x (live) · repo (snapshot)" is not device-only
+      const where = /^repo/i.test(p.home) ? '' : `<span class="text-xs px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800">${esc(p.home.replace(/device:/g, 'on '))}${onlyDevice ? ' only' : ''}</span>`;
       const needs = p.requires ? `<span class="text-xs text-gray-400">needs ${esc(p.requires)}</span>` : '';
       const docs = p.hasHub ? `<a href="#projects/${esc(p.slug)}" class="${btn} bg-indigo-600 hover:bg-indigo-500 text-white"><i class="fa-solid fa-folder-open"></i> Docs</a>` : '';
       const web = p.web ? `<a href="${esc(p.web)}" target="_blank" rel="noopener" class="${btn} bg-gray-700 hover:bg-gray-600 text-white"><i class="fa-solid fa-arrow-up-right-from-square"></i> Website</a>` : '';

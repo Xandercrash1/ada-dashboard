@@ -87,7 +87,9 @@ function listDocs(dir, base = dir, depth = 0, out = []) {
 function create(opts = {}) {
   const vault = opts.vault || VAULT;
   const find = (slug) => readRegistry(vault).find((p) => p.slug === slug);
-  const projectDir = (p) => (p && p.path && /^repo/i.test(p.home) ? path.join(vault, p.path) : null);
+  // Any project with a folder in the vault gets a hub, including a device-hosted one with a repo snapshot
+  // (e.g. "device:adatwo (live) · repo (snapshot)"). A purely device-only project simply has no folder.
+  const projectDir = (p) => (p && p.path ? path.join(vault, p.path) : null);
 
   function list() {
     return readRegistry(vault).map((p) => {
