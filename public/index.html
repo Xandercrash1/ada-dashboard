@@ -307,9 +307,6 @@
             <div id="page-options-menu" class="hidden absolute right-0 top-full mt-1 w-52 z-40 bg-dark-bg/95 backdrop-blur-xl border border-dark-border rounded-xl shadow-2xl p-1 text-xs"></div>
           </div>
           <button onclick="openPageBuilder()" id="builder-btn" class="hidden px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-600/20 dark:border-indigo-500/60 dark:text-indigo-300 dark:hover:text-white dark:hover:bg-indigo-600/40 text-xs font-medium items-center gap-2 transition-all" title="Edit this page in the page builder"></button>
-          <button onclick="toggleEditLayout()" id="edit-layout-btn" class="px-3 py-1.5 rounded-lg bg-dark-card border border-dark-border text-gray-400 hover:text-white hover:border-gray-500 text-xs font-medium flex items-center gap-2 transition-all">
-            <i class="fa-solid fa-pen-ruler"></i> <span>Edit Layout</span>
-          </button>
         </div>
       </div>
       
@@ -4308,7 +4305,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     window.isEditingLayout = false;
     function toggleEditLayout() {
       window.isEditingLayout = !window.isEditingLayout;
-      const btn = document.getElementById('edit-layout-btn');
+      // The "Edit Layout" button was removed (2026-10-04): pages are edited in the
+      // page builder. A detached stand-in keeps this function safe for old callers.
+      const btn = document.getElementById('edit-layout-btn') || document.createElement('button');
       // The Designer entry point rides the edit-mode state (fb-1788202033208):
       // visible only while editing, gone the moment editing ends.
       const designerBtn = document.getElementById('designer-btn');
@@ -5647,8 +5646,6 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       btn.title = (homepageDoc && homepageDoc.builderLive)
         ? 'Edit this page in the page builder'
         : 'Edit this page in the page builder (it opens with the current layout; nothing changes for viewers until you press Go live)';
-      const edit = document.getElementById('edit-layout-btn');
-      if (edit) { edit.classList.add('hidden'); edit.classList.remove('flex'); }
       if (window.isEditingLayout) toggleEditLayout();   // never left in the old grid edit mode
       const opts = document.getElementById('page-options-btn');
       const showOpts = !!currentPageEntry() && canEditCurrentPage();   // custom pages only, not Home
@@ -5696,9 +5693,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     });
 
     function updatePageAccessUI() {
-      const editBtn = document.getElementById('edit-layout-btn');
       const ok = canEditCurrentPage();
-      if (editBtn) editBtn.classList.toggle('hidden', !ok);
       if (!ok && window.isEditingLayout) toggleEditLayout();
       const share = document.getElementById('share-page-btn');
       const pg = currentPageEntry();
