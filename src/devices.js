@@ -203,7 +203,7 @@ function create(opts) {
     store.write(d);
     const link = `${baseUrl}/devices/confirm/${dev.id}`;
     const sent = await mail({
-      subject: `Ada: approve new device "${host}"?`,
+      subject: `${opts.isLive ? '' : '[STAGING] '}Ada: approve new device "${host}"?`,
       text: [
         `A machine is asking to join Ada with SSH access to the VPS.`, ``,
         `Device:      ${host}`, `Fingerprint: ${key.fingerprint}`, `From IP:     ${ip || 'unknown'}`, `Requested:   ${dev.requestedAt}`, ``,
@@ -211,13 +211,15 @@ function create(opts) {
         `If you didn't start a device setup just now, click Deny.`,
       ].join('\n'),
     });
-    return { status: 201, body: { id: dev.id, pollSecret, fingerprint: key.fingerprint, hostname: host, status: 'pending', emailSent: !!sent.ok } };
+    // confirmUrl is not a secret: opening it still needs Alex's admin login. Returning it lets the
+    // joining terminal show Alex the exact link, so he never has to find the right email.
+    return { status: 201, body: { id: dev.id, pollSecret, fingerprint: key.fingerprint, hostname: host, status: 'pending', emailSent: !!sent.ok, confirmUrl: link } };
   }
 
   function poll(id, secret) {
     const dev = store.read().devices.find((x) => x.id === id);
     if (!dev || !safeEqualHex(dev.pollHash, sha256(secret || ''))) return { status: 404, body: { error: 'Unknown enrollment.' } };
-    return { status: 200, body: { status: dev.status, hostname: dev.hostname, fingerprint: dev.fingerprint, ...(dev.status === 'approved' ? { sshHost: '158.69.211.140', sshUser: 'ubuntu' } : {}) } };
+    return { status: 200, body: { status: dev.status, hostname: dev.hostname, fingerprint: dev.fingerprint, confirmUrl: `${baseUrl}/devices/confirm/${dev.id}`, ...(dev.status === 'approved' ? { sshHost: '158.69.211.140', sshUser: 'ubuntu' } : {}) } };
   }
 
   function decide(id, action) {
