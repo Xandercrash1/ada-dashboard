@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project Forum</title>
+<script src="/vendor/marked/marked.min.js"></script>
+<script src="/vendor/dompurify/purify.min.js"></script>
+<style>
+/* forum.html — a project's VPS-native forum (forum.js, 2026-10-06).
+   ?project=<slug>  [&embed=1 when framed inside a project page]  [#t-<nn> scrolls to a thread] */
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e3e1dc;--accent:#4f46e5;--crit:#dc2626;--sig:#ea8a1e;--mod:#c9a20a;--min:#16a34a;--reply:#eef2ff;--mine:#f3f4f6;--field:#fbfbfa;--pend:#b45309}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d1117;--card:#161b22;--ink:#e6edf3;--mute:#8b949e;--line:#30363d;--accent:#818cf8;--reply:#1c2333;--mine:#1b222c;--field:#0d1117;--pend:#f59e0b}}
+:root[data-theme="dark"]{--bg:#0d1117;--card:#161b22;--ink:#e6edf3;--mute:#8b949e;--line:#30363d;--accent:#818cf8;--reply:#1c2333;--mine:#1b222c;--field:#0d1117;--pend:#f59e0b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+body.embed{background:transparent}
+.wrap{max-width:880px;margin:0 auto;padding:24px 16px 48px}
+body.embed .wrap{padding:8px 4px 24px}
+header h1{margin:0 0 4px;font-size:22px}
+header p{margin:0 0 16px;color:var(--mute);font-size:14px}
+header a{color:var(--accent)}
+nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
+nav a{font-size:13px;text-decoration:none;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+nav a .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+nav a.closed{opacity:.5}
+nav a.waiting{border-color:var(--pend)}
+article{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--sev,var(--line));border-radius:14px;padding:16px 20px;margin-bottom:14px;overflow-wrap:anywhere}
+article.closed{opacity:.8}
+article h2{font-size:18px;margin:0 0 4px;padding-right:130px}
+.meta{color:var(--mute);font-size:13px;margin:0 0 8px}
+.tag{float:right;font-size:12px;color:var(--mute);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
+.tag.waiting{color:var(--pend);border-color:var(--pend)}
+.tag.answered{color:var(--min);border-color:var(--min)}
+.post{border-radius:10px;padding:8px 12px;margin:8px 0}
+.post.claude{background:var(--reply)}
+.post.alex{background:var(--mine)}
+.post .who{font-size:12px;color:var(--mute);margin-bottom:2px}
+.post p:first-of-type,.intro p:first-of-type{margin-top:0}.post>div>:last-child,.intro>:last-child{margin-bottom:0}
+code{background:rgba(127,127,127,.16);border-radius:4px;padding:1px 4px;font-size:13px}
+pre{white-space:pre-wrap}
+.reply{margin-top:12px;border-top:1px dashed var(--line);padding-top:12px}
+.reply textarea,.newthread input,.newthread textarea,.newthread select{width:100%;font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:6px}
+.reply textarea{min-height:64px;resize:vertical}
+.reply textarea:focus,.newthread *:focus{outline:2px solid var(--accent);outline-offset:0}
+.row{display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap}
+button{font:inherit;font-size:14px;border:0;border-radius:8px;padding:7px 14px;background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--mute);border:1px solid var(--line);padding:4px 10px;font-size:13px}
+button:disabled{opacity:.5;cursor:default}
+.status{font-size:13px;color:var(--mute)}
+.submitbar{position:sticky;bottom:0;margin-top:18px;padding:12px 16px;background:var(--card);border:1px solid var(--line);border-radius:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;box-shadow:0 -6px 20px rgba(0,0,0,.12)}
+.submitbar button{padding:9px 20px;font-weight:600}
+.empty{color:var(--mute);padding:20px;text-align:center;border:1px dashed var(--line);border-radius:14px}
+details.newthread{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 16px;margin-bottom:16px}
+details.newthread summary{cursor:pointer;color:var(--accent)}
+.closenote{color:var(--mute);font-size:13px;margin-top:6px}
+</style></head>
+<body><div class="wrap">
+<header><h1 id="h">Forum</h1>
+<p>Write under any threads you want, then press <b>Submit</b> at the bottom: everything goes to Ada together, and Ada answers here (the page refreshes by itself). End a reply with <code>CLOSED</code> to close that thread. Drafts are kept in this browser until you submit. <span id="openfull"></span></p></header>
+<nav id="nav"></nav>
+<details class="newthread" id="newthread"><summary>Start a new thread</summary>
+  <input id="nt-title" placeholder="Title" maxlength="200">
+  <select id="nt-sev"><option>Moderate</option><option>Significant</option><option>Critical</option><option>Minor</option></select>
+  <input id="nt-scope" placeholder="Scope (optional)" maxlength="200">
+  <textarea id="nt-body" rows="4" placeholder="What needs a decision? (Markdown)"></textarea>
+  <div class="row"><button id="nt-go">Create thread</button><span class="status" id="nt-status"></span></div>
+</details>
+<main id="main"><div class="empty">Loading…</div></main>
+<div class="submitbar" id="bar" hidden><button id="submit" disabled>Submit</button><span class="status" id="barstatus">Nothing written yet.</span></div>
+</div>
+<script>
+(() => {
+  const qs = new URLSearchParams(location.search);
+  const slug = qs.get('project') || '';
+  const api = '/api/projects/' + encodeURIComponent(slug) + '/forum';
+  const HDR = { 'Content-Type': 'application/json', 'X-Forum-Confirm': '1' };
+  if (qs.get('embed')) {
+    document.body.classList.add('embed');
+    document.getElementById('openfull').innerHTML = '<a href="' + location.pathname + '?project=' + encodeURIComponent(slug) + '" target="_blank">Open full page ↗</a>';
+  }
+  // Every piece of thread text goes through DOMPurify; if the vendored libs are missing, it is shown escaped as plain text.
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const md = (s) => (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(String(s))) : '<pre>' + esc(s) + '</pre>';
+  const sevColor = { Critical: 'var(--crit)', Significant: 'var(--sig)', Moderate: 'var(--mod)', Minor: 'var(--min)' };
+  const pad = (n) => String(n).padStart(2, '0');
+  const draftKey = (nn) => 'forum-draft:' + slug + ':' + nn;
+  const store = { get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } }, set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} } };
+  const when = (iso) => { try { return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); } catch { return ''; } };
+  let sig = '';
+
+  const written = () => [...document.querySelectorAll('textarea[data-nn]')].filter((t) => t.value.trim());
+  function refreshBar(msg) {
+    const n = written().length, btn = document.getElementById('submit'), st = document.getElementById('barstatus');
+    btn.disabled = !n;
+    btn.textContent = n ? 'Submit ' + n + ' repl' + (n === 1 ? 'y' : 'ies') : 'Submit';
+    st.textContent = typeof msg === 'string' ? msg : (n ? 'Ready to send to Ada.' : 'Nothing written yet.');
+  }
+
+  async function call(url, opts) {
+    const r = await fetch(url, { credentials: 'same-origin', ...opts });
+    let j = {}; try { j = await r.json(); } catch {}
+    if (!r.ok) throw new Error(j.error || r.status);
+    return j;
+  }
+
+  function render(data, msg) {
+    const nav = document.getElementById('nav'), main = document.getElementById('main');
+    document.getElementById('h').textContent = (data.project || slug) + ' — Forum';
+    document.title = (data.project || slug) + ' Forum';
+    nav.innerHTML = ''; main.innerHTML = '';
+    if (!data.threads.length) {
+      main.innerHTML = '<div class="empty">No threads in this forum yet. Start one above.</div>';
+      document.getElementById('bar').hidden = true;
+      return;
+    }
+    for (const t of data.threads) {
+      const id = 't-' + t.nn, closed = t.status === 'closed';
+      const a = document.createElement('a'); a.href = '#' + id;
+      a.className = (closed ? 'closed ' : '') + (t.pending ? 'waiting' : '');
+      const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = sevColor[t.severity] || 'var(--line)';
+      a.append(dot, document.createTextNode(pad(t.nn) + ' ' + t.title + (t.pending ? ' · waiting on Ada' : '')));
+      a.onclick = (e) => { e.preventDefault(); document.getElementById(id).scrollIntoView({ behavior: 'smooth' }); };
+      nav.appendChild(a);
+
+      const art = document.createElement('article'); art.id = id; if (closed) art.className = 'closed';
+      art.style.setProperty('--sev', sevColor[t.severity] || 'var(--line)');
+      const tag = document.createElement('span');
+      tag.className = 'tag ' + (closed ? '' : t.pending ? 'waiting' : 'answered');
+      tag.textContent = closed ? 'closed' : t.pending ? 'waiting on Ada' : 'answered';
+      const h = document.createElement('h2'); h.textContent = pad(t.nn) + ' — ' + t.title;
+      const meta = document.createElement('p'); meta.className = 'meta';
+      meta.textContent = t.severity + (t.scope ? ' · ' + t.scope : '') + ' · opened ' + when(t.openedAt) + ' by ' + (t.author === 'alex' ? 'Alex' : 'Ada');
+      art.append(tag, h, meta);
+      if (t.body) { const d = document.createElement('div'); d.className = 'intro'; d.innerHTML = md(t.body); art.appendChild(d); }
+      for (const p of t.posts) {
+        const d = document.createElement('div'); d.className = 'post ' + (p.author === 'claude' ? 'claude' : 'alex');
+        const who = document.createElement('div'); who.className = 'who'; who.textContent = (p.author === 'claude' ? 'Ada' : 'Alex') + ' · ' + when(p.ts);
+        const body = document.createElement('div'); body.innerHTML = md(p.body);
+        d.append(who, body); art.appendChild(d);
+      }
+      const box = document.createElement('div'); box.className = 'reply';
+      if (closed) {
+        box.innerHTML = '<div class="closenote"></div><div class="row"><button class="ghost" data-reopen>Reopen thread</button></div>';
+        box.querySelector('.closenote').textContent = 'Closed ' + when(t.closedAt) + (t.closeNote ? ' — ' + t.closeNote : '') + '.';
+        box.querySelector('[data-reopen]').onclick = async () => {
+          try { await call(api + '/' + t.nn + '/reopen', { method: 'POST', headers: HDR, body: '{}' }); await load(true, 'Thread ' + pad(t.nn) + ' reopened.'); }
+          catch (e) { refreshBar('Could not reopen: ' + e.message); }
+        };
+      } else {
+        box.innerHTML = '<textarea placeholder="Your reply…"></textarea><div class="row"><button class="ghost" data-close>Close thread</button></div>';
+        const ta = box.querySelector('textarea'); ta.dataset.nn = t.nn;
+        ta.value = store.get(draftKey(t.nn));
+        ta.addEventListener('input', () => { store.set(draftKey(t.nn), ta.value); refreshBar(); });
+        box.querySelector('[data-close]').onclick = async () => {
+          if (!confirm('Close thread ' + pad(t.nn) + '?')) return;
+          try { await call(api + '/' + t.nn + '/close', { method: 'POST', headers: HDR, body: '{}' }); await load(true, 'Thread ' + pad(t.nn) + ' closed.'); }
+          catch (e) { refreshBar('Could not close: ' + e.message); }
+        };
+      }
+      art.appendChild(box);
+      main.appendChild(art);
+    }
+    document.getElementById('bar').hidden = false;
+    refreshBar(msg);
+  }
+
+  async function load(force, msg) {
+    let data;
+    try { data = await call(api + '?full=1'); }
+    catch (e) { if (force || !sig) document.getElementById('main').innerHTML = '<div class="empty">Could not load the forum: ' + esc(e.message) + '</div>'; return; }
+    const s = JSON.stringify(data.threads.map((t) => [t.nn, t.status, t.updatedAt, t.posts.length]));
+    if (!force && s === sig) return;
+    // Background refresh never re-renders under the cursor: only when nothing is being typed.
+    if (!force && sig && document.activeElement && document.activeElement.tagName === 'TEXTAREA') return;
+    const first = !sig; sig = s;
+    render(data, msg);
+    if (first && location.hash) { const el = document.getElementById(location.hash.slice(1)); if (el) el.scrollIntoView(); }
+  }
+
+  document.getElementById('submit').onclick = async () => {
+    const tas = written(); if (!tas.length) return;
+    const btn = document.getElementById('submit'); btn.disabled = true;
+    document.getElementById('barstatus').textContent = 'Submitting…';
+    try {
+      const j = await call(api + '/submit', { method: 'POST', headers: HDR, body: JSON.stringify({ replies: tas.map((t) => ({ nn: Number(t.dataset.nn), body: t.value })) }) });
+      tas.forEach((t) => store.set(draftKey(t.dataset.nn), ''));
+      await load(true, 'Submitted ' + j.count + ' ✓ — Ada will answer here.');
+    } catch (e) { btn.disabled = false; document.getElementById('barstatus').textContent = 'Not submitted: ' + e.message; }
+  };
+
+  document.getElementById('nt-go').onclick = async () => {
+    const st = document.getElementById('nt-status');
+    try {
+      const j = await call(api, { method: 'POST', headers: HDR, body: JSON.stringify({
+        title: document.getElementById('nt-title').value, severity: document.getElementById('nt-sev').value,
+        scope: document.getElementById('nt-scope').value, body: document.getElementById('nt-body').value }) });
+      ['nt-title', 'nt-scope', 'nt-body'].forEach((i) => { document.getElementById(i).value = ''; });
+      document.getElementById('newthread').open = false; st.textContent = '';
+      await load(true, 'Created thread ' + pad(j.thread.nn) + '. Ada will see it as waiting.');
+    } catch (e) { st.textContent = e.message; }
+  };
+
+  load(true);
+  setInterval(() => { if (!document.hidden) load(false); }, 20000);
+})();
+</script>
+</body></html>

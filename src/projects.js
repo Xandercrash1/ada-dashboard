@@ -14,6 +14,7 @@
  */
 
 const fs = require('fs');
+const forum = require('./forum');
 const os = require('os');
 const path = require('path');
 
@@ -107,7 +108,9 @@ function create(opts = {}) {
     const statusFile = docs.find((d) => d.rel === 'projectStatus.md');
     const statusMd = statusFile ? fs.readFileSync(path.join(dir, 'projectStatus.md'), 'utf8') : '';
     const pages = (readPages() || []).filter((pg) => pg.project === slug).map((pg) => ({ id: pg.id, title: pg.title, icon: pg.icon }));
-    return { status: 200, body: { ...p, statusMd, docs: docs.filter((d) => d.rel !== 'projectStatus.md'), pages } };
+    let forumInfo = { open: 0, pending: 0, total: 0 };
+    try { forumInfo = forumSummary(slug); } catch { /* forum store unreadable: hub still loads */ }
+    return { status: 200, body: { ...p, statusMd, docs: docs.filter((d) => d.rel !== 'projectStatus.md'), pages, forum: forumInfo } };
   }
 
   function doc(slug, rel) {
@@ -118,6 +121,44 @@ function create(opts = {}) {
     const st = fs.statSync(full);
     if (st.size > MAX_DOC_BYTES) return { status: 413, body: { error: 'Document too large to view here.' } };
     return { status: 200, body: { project: p.name, rel: path.relative(fs.realpathSync(dir), full), md: fs.readFileSync(full, 'utf8'), mtime: st.mtime.toISOString() } };
+  }
+
+  // Project forums (forum.js, 2026-10-06): VPS-native, data/forums/<slug>/<NN>.jsonl is the source of truth.
+  // Claude answers through forum-cli.js on the box, never through these routes (they are Alex's).
+  function forumProject(slug) {
+    let p = null;
+    try { p = find(slug); } catch { /* registry unreadable: fall back to existing forum data */ }
+    if (!p && !(forum.SLUG_RE.test(slug) && forum.threadNums(slug).length)) throw new forum.ForumError(404, 'Unknown project.');
+    return { slug, name: p ? p.name : slug, registered: !!p };
+  }
+  const forumSummary = (slug) => {
+    const ts = forum.listThreads(slug);
+    return { open: ts.filter((t) => t.status === 'open').length, pending: ts.filter((t) => t.pending).length, total: ts.length };
+  };
+  function forumAllList() {
+    const have = new Map(forum.listForums().map((f) => [f.slug, f]));
+    let reg = []; try { reg = readRegistry(vault); } catch { /* none */ }
+    return [...have.values()].map((f) => ({ ...f, name: (reg.find((p) => p.slug === f.slug) || {}).name || f.slug }));
+  }
+  function forumList(slug, full) {
+    const p = forumProject(slug);
+    return { status: 200, body: { project: p.name, slug, threads: forum.listThreads(slug, { full }) } };
+  }
+  function forumGet(slug, nn) {
+    const p = forumProject(slug), t = forum.readThread(slug, nn);
+    return t ? { status: 200, body: { project: p.name, thread: t } } : { status: 404, body: { error: 'No such thread.' } };
+  }
+  function forumCreate(slug, b) {
+    const p = forumProject(slug);
+    if (!p.registered) throw new forum.ForumError(404, 'Unknown project.');
+    b = b || {};
+    return { status: 201, body: { thread: forum.createThread(slug, { title: b.title, severity: b.severity, scope: b.scope, body: b.body, author: 'alex' }) } };
+  }
+  function forumSubmit(slug, b) { forumProject(slug); return { status: 200, body: forum.submitBatch(slug, b && b.replies) }; }
+  function forumCloseReopen(slug, nn, action, b) {
+    forumProject(slug);
+    const ev = (action === 'close' ? forum.closeThread : forum.reopenThread)(slug, nn, 'alex', b && b.note);
+    return { status: 200, body: { ok: true, type: ev.type, thread: forum.readThread(slug, nn) } };
   }
 
   function start() {
@@ -134,14 +175,22 @@ function create(opts = {}) {
     if (readPagesRegistry) readPages = readPagesRegistry;
     const adminOnly = (req, res, next) => (isAdminReq(req) ? next() : res.status(403).json({ error: 'Not available for your account.' }));
     const send = (res, r) => res.status(r.status).json(r.body);
-    const guard = (fn) => (req, res) => { try { send(res, fn(req)); } catch (e) { res.status(500).json({ error: e.code === 'ENOENT' ? 'The vault clone is not available on this server.' : e.message }); } };
+    const guard = (fn) => (req, res) => { try { send(res, fn(req)); } catch (e) { res.status(e instanceof forum.ForumError ? e.status : 500).json({ error: e instanceof forum.ForumError ? e.message : e.code === 'ENOENT' ? 'The vault clone is not available on this server.' : e.message }); } };
+    // A custom header blocks cross-site POSTs (same pattern as devices.js / X-Device-Confirm).
+    const confirm = (req, res, next) => (req.get('X-Forum-Confirm') === '1' ? next() : res.status(400).json({ error: 'Missing X-Forum-Confirm header.' }));
     app.get('/api/projects', adminOnly, guard(() => ({ status: 200, body: list() })));
     app.get('/api/projects/:slug', adminOnly, guard((req) => hub(req.params.slug)));
     app.get('/api/projects/:slug/doc', adminOnly, guard((req) => doc(req.params.slug, req.query.p)));
+    app.get('/api/forums', adminOnly, guard(() => ({ status: 200, body: forumAllList() })));
+    app.get('/api/projects/:slug/forum', adminOnly, guard((req) => forumList(req.params.slug, req.query.full === '1')));
+    app.post('/api/projects/:slug/forum', adminOnly, confirm, guard((req) => forumCreate(req.params.slug, req.body)));
+    app.post('/api/projects/:slug/forum/submit', adminOnly, confirm, guard((req) => forumSubmit(req.params.slug, req.body)));
+    app.get('/api/projects/:slug/forum/:nn(\\d+)', adminOnly, guard((req) => forumGet(req.params.slug, req.params.nn)));
+    app.post('/api/projects/:slug/forum/:nn(\\d+)/:action(close|reopen)', adminOnly, confirm, guard((req) => forumCloseReopen(req.params.slug, req.params.nn, req.params.action, req.body)));
     app.get('/api/one-ada/start', adminOnly, guard(() => start()));
   }
 
-  return { mount, list, hub, doc, start, vaultHead };
+  return { mount, list, hub, doc, start, vaultHead, forumList, forumSubmit, forumCreate, forumGet, forumCloseReopen, forumAllList };
 }
 
 module.exports = { create, readRegistry, safeResolve, slugify };

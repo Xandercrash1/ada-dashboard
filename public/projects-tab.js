@@ -81,6 +81,10 @@
       ${back('#projects', 'All projects')}
       <div class="flex items-center justify-between gap-3"><h2 class="text-xl font-semibold text-gray-900 dark:text-white">${esc(h.name)}</h2>
         ${h.web ? `<a href="${esc(h.web)}" target="_blank" rel="noopener" class="${btn} bg-gray-700 hover:bg-gray-600 text-white"><i class="fa-solid fa-arrow-up-right-from-square"></i> Website</a>` : ''}</div>
+      <a href="/forum.html?project=${encodeURIComponent(slug)}" class="block ${card} p-4 hover:border-indigo-500 transition-colors" id="pj-forum-link">
+        <div class="font-semibold text-gray-900 dark:text-white"><i class="fa-regular fa-comments text-indigo-400"></i> Forum
+          <span class="text-xs font-normal text-gray-400 ml-2">${(h.forum && h.forum.open) || 0} open${h.forum && h.forum.pending ? ` · <span class="text-amber-500">${h.forum.pending} waiting on Ada</span>` : ''}</span></div>
+        <div class="text-sm text-gray-400 mt-1">Threads that need your decision. Write replies and press Submit; Ada answers there.</div></a>
       <div class="${card} p-5"><div class="text-xs uppercase tracking-wide text-gray-400 mb-2">Project status</div>
         <div class="${prose}">${h.statusMd ? md(h.statusMd) : '<p class="text-gray-400">No projectStatus.md yet.</p>'}</div></div>
       <div class="${card} p-5"><div class="flex items-center justify-between"><div class="text-xs uppercase tracking-wide text-gray-400">Pages (${(h.pages || []).length})</div>

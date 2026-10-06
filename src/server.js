@@ -42,6 +42,7 @@ const deviceEnrollment = require('./devices').create({
   baseUrl: String(PORT) === '3000' ? 'https://303dashboard.duckdns.org' : `http://localhost:${PORT}`,
 });
 deviceEnrollment.mountPublic(app);
+require("./forum").mountPublic(app);   // forum email bounce link (public same-site hop, like the device-approval page)
 app.use(requireAuth);                 // everything below requires a session
 app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1790201502191), defined below
 app.use(express.static(path.join(__dirname, '../public')));
