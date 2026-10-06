@@ -89,6 +89,7 @@ function create(opts = {}) {
   const find = (slug) => readRegistry(vault).find((p) => p.slug === slug);
   // Any project with a folder in the vault gets a hub, including a device-hosted one with a repo snapshot
   // (e.g. "device:adatwo (live) · repo (snapshot)"). A purely device-only project simply has no folder.
+  let readPages = () => [];   // set by mount(): the dashboard's page registry, for each hub's project pages
   const projectDir = (p) => (p && p.path ? path.join(vault, p.path) : null);
 
   function list() {
@@ -105,7 +106,8 @@ function create(opts = {}) {
     const docs = listDocs(dir);
     const statusFile = docs.find((d) => d.rel === 'projectStatus.md');
     const statusMd = statusFile ? fs.readFileSync(path.join(dir, 'projectStatus.md'), 'utf8') : '';
-    return { status: 200, body: { ...p, statusMd, docs: docs.filter((d) => d.rel !== 'projectStatus.md') } };
+    const pages = (readPages() || []).filter((pg) => pg.project === slug).map((pg) => ({ id: pg.id, title: pg.title, icon: pg.icon }));
+    return { status: 200, body: { ...p, statusMd, docs: docs.filter((d) => d.rel !== 'projectStatus.md'), pages } };
   }
 
   function doc(slug, rel) {
@@ -128,7 +130,8 @@ function create(opts = {}) {
     try { return fs.readFileSync(path.join(vault, '.git/HEAD'), 'utf8').trim(); } catch { return null; }
   }
 
-  function mount(app, { isAdminReq }) {
+  function mount(app, { isAdminReq, readPagesRegistry }) {
+    if (readPagesRegistry) readPages = readPagesRegistry;
     const adminOnly = (req, res, next) => (isAdminReq(req) ? next() : res.status(403).json({ error: 'Not available for your account.' }));
     const send = (res, r) => res.status(r.status).json(r.body);
     const guard = (fn) => (req, res) => { try { send(res, fn(req)); } catch (e) { res.status(500).json({ error: e.code === 'ENOENT' ? 'The vault clone is not available on this server.' : e.message }); } };

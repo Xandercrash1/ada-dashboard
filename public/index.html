@@ -2418,7 +2418,8 @@
       const homeTab = document.getElementById('tab-btn-home'); // Desktop nav anchor
       const mobileHome = document.getElementById('mob-btn-home');
 
-      customPages.forEach(page => {
+      // Project pages (page.project set) live on their project's hub, not in the top bar (One Ada, 2026-10-05).
+      customPages.filter(page => !page.project).forEach(page => {
          if (homeTab) {
            const btn = document.createElement('button');
            btn.className = 'custom-page-tab tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all';

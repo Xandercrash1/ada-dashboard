@@ -1114,6 +1114,7 @@ const PAGES_USER_DESIGNER_MODEL = 'gpt-4o-mini';
 const isAdminReq = (req) => !req.user || req.user.role === 'admin';
 const ownerName = (req) => (!req.user || req.user.username === 'system') ? 'alex' : req.user.username;
 const PAGE_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const PROJECT_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;   // matches projects.js slugify()
 function pageEntry(id) { return readPagesRegistry().find(pg => pg.id === id) || null; }
 function pageVisibleTo(user, id) {
   if (id === 'home') return true;
@@ -1269,7 +1270,7 @@ registerPageBuilder(app, { readPagesRegistry, getPageDocPath, readJsonStoreOrThr
 
 app.get('/api/me', (req, res) => res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : 'pages' }));
 deviceEnrollment.mountAdmin(app, { isAdminReq });
-require('./projects').create().mount(app, { isAdminReq });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault   // One Ada: enroll-token, device list, approve/deny/revoke, /devices/confirm/:id
+require('./projects').create().mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
 app.post('/api/me/password', (req, res) => {
   const name = ownerName(req);
   const { current, next: nextPw } = req.body || {};
@@ -1802,6 +1803,13 @@ app.patch('/api/pages/:id', (req, res) => {
   if (!pg) return res.status(404).json({ error: 'Page not found' });
   if (typeof req.body.shared === 'boolean') pg.shared = req.body.shared;
   if (typeof req.body.title === 'string' && req.body.title.trim()) pg.title = req.body.title.replace(/[<>]/g, '').trim().slice(0, 60);
+  // Project pages (One Ada, 2026-10-05): a page tied to a project is listed on that project's hub
+  // instead of getting a top-bar tab. Admin-only; null clears it.
+  if (isAdminReq(req) && 'project' in req.body) {
+    if (req.body.project === null) delete pg.project;
+    else if (PROJECT_SLUG_RE.test(req.body.project || '')) pg.project = req.body.project;
+    else return res.status(400).json({ error: 'project: lowercase slug' });
+  }
   writePagesRegistry(pages);
   res.json({ ...pg, owner: pg.owner || 'alex', shared: pg.shared === true });
 });
@@ -1828,7 +1836,8 @@ app.post('/api/pages', (req, res) => {
     startDoc = { ...(isAdminReq(req) ? tpl.doc : restrictPageDoc(tpl.doc).doc), updatedAt: new Date().toISOString() };
   }
   
-  pages.push({ id, title, icon, owner: ownerName(req), shared: false });
+  const project = isAdminReq(req) && PROJECT_SLUG_RE.test(req.body.project || '') ? req.body.project : undefined;   // project pages: no top-bar tab
+  pages.push({ id, title, icon, owner: ownerName(req), shared: false, ...(project ? { project } : {}) });
   writePagesRegistry(pages);
   
   const docPath = getPageDocPath(id);
@@ -1836,7 +1845,7 @@ app.post('/api/pages', (req, res) => {
     writeFileAtomic(docPath, JSON.stringify(startDoc, null, 2));
   }
   
-  res.json({ success: true, page: { id, title, icon, owner: ownerName(req), shared: false } });
+  res.json({ success: true, page: { id, title, icon, owner: ownerName(req), shared: false, ...(project ? { project } : {}) } });
 });
 
 app.get('/api/pages/:id/content', (req, res) => {

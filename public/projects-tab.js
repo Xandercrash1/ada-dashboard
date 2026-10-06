@@ -83,7 +83,33 @@
         ${h.web ? `<a href="${esc(h.web)}" target="_blank" rel="noopener" class="${btn} bg-gray-700 hover:bg-gray-600 text-white"><i class="fa-solid fa-arrow-up-right-from-square"></i> Website</a>` : ''}</div>
       <div class="${card} p-5"><div class="text-xs uppercase tracking-wide text-gray-400 mb-2">Project status</div>
         <div class="${prose}">${h.statusMd ? md(h.statusMd) : '<p class="text-gray-400">No projectStatus.md yet.</p>'}</div></div>
+      <div class="${card} p-5"><div class="flex items-center justify-between"><div class="text-xs uppercase tracking-wide text-gray-400">Pages (${(h.pages || []).length})</div>
+        <button id="pj-new-page" class="${btn} bg-indigo-600 hover:bg-indigo-500 text-white"><i class="fa-solid fa-plus"></i> New project page</button></div>
+        ${(h.pages || []).length ? `<ul class="mt-2 space-y-1 text-sm">${h.pages.map((pg) => `<li><a href="#" data-open-page="${esc(pg.id)}" class="text-indigo-400 hover:text-indigo-300"><i class="fa-solid ${esc(/^fa-[a-z0-9-]+$/.test(pg.icon || '') ? pg.icon : 'fa-file')}"></i> ${esc(pg.title)}</a></li>`).join('')}</ul>`
+          : '<p class="text-gray-400 text-sm mt-2">No dashboard pages yet. New docs for this project can be built as pages here.</p>'}
+        <div id="pj-msg" class="text-sm text-gray-400 mt-2"></div></div>
       <div class="${card} p-5"><div class="text-xs uppercase tracking-wide text-gray-400">Documents (${h.docs.length})</div>${lists || '<p class="text-gray-400 text-sm mt-2">No other documents.</p>'}</div>`;
+    root().querySelectorAll('[data-open-page]').forEach((a) => { a.onclick = (e) => { e.preventDefault(); openPage(a.dataset.openPage); }; });
+    document.getElementById('pj-new-page').onclick = () => createProjectPage(h).catch((e) => { document.getElementById('pj-msg').textContent = e.message; });
+  }
+
+  // ------------------------------------------------------------ project pages
+  // A project page is a normal dashboard page tagged with `project`: no top-bar tab, listed on the hub.
+  // It starts with a short intro linking back here; status and docs stay in the vault (one home each).
+  async function openPage(id) {
+    if (typeof loadCustomPages === 'function' && !(window.customPages || []).some?.((p) => p.id === id)) { try { await loadCustomPages(); } catch {} }
+    if (typeof switchTab === 'function') switchTab(id);
+  }
+  async function createProjectPage(h) {
+    let id = ('proj-' + h.slug).slice(0, 64).replace(/-+$/, '');
+    const taken = new Set(((await api('/api/pages')).pages || []).map((p) => p.id));
+    for (let i = 2; taken.has(id); i++) id = ('proj-' + h.slug).slice(0, 60).replace(/-+$/, '') + '-' + i;
+    await api('/api/pages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, title: h.name, icon: 'fa-diagram-project', project: h.slug }) });
+    const intro = `<p>Dashboard page for <strong>${esc(h.name)}</strong>. Build new, interactive docs and tools for this project here.</p>`
+      + `<p><a href="#projects/${esc(h.slug)}" class="text-indigo-400 hover:text-indigo-300 underline">Status &amp; documents → ${esc(h.name)} hub</a></p>`;
+    await api(`/api/pages/${id}/content`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ widgets: [{ id: 'project-intro', title: 'About this page', icon: 'fa-circle-info', html: intro }] }) });
+    if (typeof loadCustomPages === 'function') await loadCustomPages();
+    return openPage(id);
   }
 
   // ------------------------------------------------------------ doc
@@ -173,6 +199,16 @@
   }
 
   window.AdaProjects = { show: route };
+  // Page canvases swallow link clicks inside widgets, so a "#projects/…" link on a project page did
+  // nothing. Catch those clicks first (capture phase) and route them here.
+  document.addEventListener('click', (e) => {
+    const a = e.target && e.target.closest && e.target.closest('a[href^="#projects"]');
+    if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault(); e.stopPropagation();
+    history.replaceState(null, '', a.getAttribute('href'));
+    if (typeof currentTab !== 'undefined' && currentTab !== 'projects' && typeof switchTab === 'function') switchTab('projects');
+    else route();
+  }, true);
   window.addEventListener('hashchange', () => {
     if (!location.hash.startsWith('#projects')) return;
     if (typeof currentTab !== 'undefined' && currentTab !== 'projects' && typeof switchTab === 'function') switchTab('projects');
