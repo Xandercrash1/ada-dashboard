@@ -100,7 +100,7 @@ fs.writeFileSync(keysFile, STATIC + '\n', { mode: 0o600 });   // reset for the s
   assert.strictEqual(r.status, 201);
   const { id, pollSecret } = r.body;
   assert.strictEqual(mails.length, 1);
-  assert.ok(mails[0].text.includes(`https://example.test/devices/confirm/${id}`));
+  assert.ok(mails[0].text.includes(`https://example.test/devices/approve/${id}`));
   assert.ok(mails[0].text.includes(r.body.fingerprint));
   r = await svc.enroll({ token, hostname: 'adatwo', pubkey: K2, ip: '1.1.1.1' });
   assert.strictEqual(r.status, 401);

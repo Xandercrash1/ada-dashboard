@@ -201,7 +201,7 @@ function create(opts) {
     };
     d.devices.push(dev);
     store.write(d);
-    const link = `${baseUrl}/devices/confirm/${dev.id}`;
+    const link = `${baseUrl}/devices/approve/${dev.id}`;   // bounce page, see mountPublic
     const sent = await mail({
       subject: `${opts.isLive ? '' : '[STAGING] '}Ada: approve new device "${host}"?`,
       text: [
@@ -219,7 +219,7 @@ function create(opts) {
   function poll(id, secret) {
     const dev = store.read().devices.find((x) => x.id === id);
     if (!dev || !safeEqualHex(dev.pollHash, sha256(secret || ''))) return { status: 404, body: { error: 'Unknown enrollment.' } };
-    return { status: 200, body: { status: dev.status, hostname: dev.hostname, fingerprint: dev.fingerprint, confirmUrl: `${baseUrl}/devices/confirm/${dev.id}`, ...(dev.status === 'approved' ? { sshHost: '158.69.211.140', sshUser: 'ubuntu' } : {}) } };
+    return { status: 200, body: { status: dev.status, hostname: dev.hostname, fingerprint: dev.fingerprint, confirmUrl: `${baseUrl}/devices/approve/${dev.id}`, ...(dev.status === 'approved' ? { sshHost: '158.69.211.140', sshUser: 'ubuntu' } : {}) } };
   }
 
   function decide(id, action) {
@@ -270,6 +270,20 @@ if (ok) ok.onclick = () => act('approve'); if (no) no.onclick = () => act('deny'
 
   /** Token-authenticated routes. MUST be mounted BEFORE requireAuth. */
   function mountPublic(app) {
+    // The session cookie is SameSite=Strict, so a link clicked in Gmail (a cross-site
+    // navigation) arrives WITHOUT it and requireAuth bounces Alex to /login even when he
+    // is logged in. This public page does nothing but a same-site hop to the real,
+    // login-gated confirm page; that second navigation carries the cookie. It reveals
+    // nothing: no device data, and the id is format-checked before it is echoed.
+    app.get('/devices/approve/:id', (req, res) => {
+      const id = String(req.params.id || '');
+      if (!/^[A-Za-z0-9_-]{8,32}$/.test(id)) return res.status(404).send('Unknown device.');
+      const to = `/devices/confirm/${id}`;
+      res.set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' })
+        .send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ada · approve device</title>`
+          + `<meta http-equiv="refresh" content="0;url=${to}"><script>location.replace(${JSON.stringify(to)})</script>`
+          + `<p style="font-family:system-ui;padding:24px">Opening the approval page… <a href="${to}">continue</a></p>`);
+    });
     app.post('/api/devices/enroll', async (req, res) => {
       const b = req.body || {};
       const r = await enroll({ token: b.token, hostname: b.hostname, pubkey: b.pubkey, ip: req.ip });
