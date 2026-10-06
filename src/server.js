@@ -316,9 +316,9 @@ const MODEL_REGISTRY = [
   },
   {
     id: 'gemini-flash', label: 'Gemini Flash',
-    engine: 'gemini', apiModel: 'gemini-flash-latest',
-    tier: 'balanced', default: false, unavailable: true,
-    description: '⚠️ Unreliable on the current free-tier key — verified hanging with no response 2026-08-26. Prefer Flash Lite.'
+    engine: 'gemini', apiModel: 'gemini-3.8-flash', fallbackApiModels: ['gemini-3.6-flash'],
+    tier: 'balanced', default: false,
+    description: 'Gemini 3.8 Flash, falling back to 3.6 Flash when Google sheds free-tier load. Smarter than Flash Lite; may pause briefly to retry. (The 08-26 "hanging" was 503 load-shedding, re-tested 2026-10-06.)'
   },
   {
     id: 'gemini-pro', label: 'Gemini Pro',
@@ -3589,7 +3589,10 @@ EDIT, DON'T REBUILD: when asked to change something, re-read the file and change
     // apiModel falls back to the default Gemini model's if the resolved model
     // somehow has none (shouldn't happen — every registered gemini entry has one).
     const geminiApiModel = modelInfo.apiModel || getDefaultModel().apiModel;
-    const apiUrl = `${GEMINI_PROXY_URL}/v1beta/models/${geminiApiModel}:generateContent?key=${GEMINI_API_KEY}`;
+    // fallbackApiModels (2026-10-06): tried in order once a model's own
+    // 429/503 retries are spent — see callGemini.
+    const geminiApiModels = [geminiApiModel, ...(modelInfo.fallbackApiModels || [])];
+    const geminiUrlFor = (m) => `${GEMINI_PROXY_URL}/v1beta/models/${m}:generateContent?key=${GEMINI_API_KEY}`;
     // Hardened 2026-08-26 after live failures. Two real faults were reaching the
     // user as raw JS errors:
     //   1. Google/Cloudflare return an HTML error page (404, 429, 5xx, CF 524)
@@ -3647,25 +3650,31 @@ EDIT, DON'T REBUILD: when asked to change something, re-read the file and change
       if (ctrl) ctrl.kill = () => ac.abort();
       const timer = setTimeout(() => ac.abort(), GEMINI_TIMEOUT_MS);
       try {
-        let attempt = 0;
-        while (attempt < 3) {
-          attempt++;
-          const res = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            signal: ac.signal
-          });
-          
-          if (res.status === 429 && attempt < 3) {
-            // Free tier Gemini 1.5 Flash has a 15 RPM limit. Tool loops often hit this.
-            // Sleep for 20 seconds before retrying to let the minute bucket clear.
-            await new Promise(resolve => setTimeout(resolve, 20000));
-            continue;
+        // 429 = the free-tier RPM bucket; 20s lets the minute clear.
+        // 503 = Google shedding free-tier load ("high demand") — added
+        // 2026-10-06: measured 3.8-flash 1/6 OK, 3.6-flash 6/6, so a short
+        // backoff, then the next model in geminiApiModels.
+        let res;
+        for (let mi = 0; mi < geminiApiModels.length; mi++) {
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            res = await fetch(geminiUrlFor(geminiApiModels[mi]), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+              signal: ac.signal
+            });
+            if (res.status !== 429 && res.status !== 503) return res;
+            const lastOverall = mi === geminiApiModels.length - 1 && attempt === 3;
+            if (lastOverall) return res;
+            try { await res.body?.cancel(); } catch (e) { /* discarded retry body */ }
+            if (attempt < 3) await new Promise(resolve => setTimeout(resolve, res.status === 429 ? 20000 : 5000 * attempt));
           }
-          
-          return res;
+          console.log(`[gemini] ${geminiApiModels[mi]} still overloaded after 3 attempts; falling back to ${geminiApiModels[mi + 1]}`);
+          if (ctrl && typeof ctrl.onProgress === 'function') {
+            ctrl.onProgress(`${geminiApiModels[mi]} is overloaded; falling back to ${geminiApiModels[mi + 1]}.`);
+          }
         }
+        return res;
       } catch (e) {
         // An aborted fetch surfaces as a bare AbortError whose message is
         // "This operation was aborted" — meaningless to Alex, and it leaked
