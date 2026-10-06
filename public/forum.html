@@ -24,6 +24,13 @@ nav a.closed{opacity:.5}
 nav a.waiting{border-color:var(--pend)}
 article{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--sev,var(--line));border-radius:14px;padding:16px 20px;margin-bottom:14px;overflow-wrap:anywhere}
 article.closed{opacity:.8}
+article.collapsed{padding-top:10px;padding-bottom:10px;cursor:pointer}
+article.collapsed>:not(.tag):not(h2):not(.meta){display:none}
+article.collapsed h2{font-size:15px;margin:0}
+article.collapsed .meta{margin:2px 0 0}
+article.closed h2{cursor:pointer}
+article.closed h2::before{content:"\25BE  ";color:var(--mute)}
+article.collapsed h2::before{content:"\25B8  "}
 article h2{font-size:18px;margin:0 0 4px;padding-right:130px}
 .meta{color:var(--mute);font-size:13px;margin:0 0 8px}
 .tag{float:right;font-size:12px;color:var(--mute);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
@@ -101,6 +108,7 @@ details.newthread summary{cursor:pointer;color:var(--accent)}
     return j;
   }
 
+  const expanded = new Set();   // closed threads Alex has opened; collapsed by default (Alex, 2026-10-06)
   function render(data, msg) {
     const nav = document.getElementById('nav'), main = document.getElementById('main');
     document.getElementById('h').textContent = (data.project || slug) + ' — Forum';
@@ -117,10 +125,17 @@ details.newthread summary{cursor:pointer;color:var(--accent)}
       a.className = (closed ? 'closed ' : '') + (t.pending ? 'waiting' : '');
       const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = sevColor[t.severity] || 'var(--line)';
       a.append(dot, document.createTextNode(pad(t.nn) + ' ' + t.title + (t.pending ? ' · waiting on Ada' : '')));
-      a.onclick = (e) => { e.preventDefault(); document.getElementById(id).scrollIntoView({ behavior: 'smooth' }); };
+      a.onclick = (e) => { e.preventDefault(); const el = document.getElementById(id); if (el.classList.contains('collapsed')) { expanded.add(t.nn); el.classList.remove('collapsed'); } el.scrollIntoView({ behavior: 'smooth' }); };
       nav.appendChild(a);
 
-      const art = document.createElement('article'); art.id = id; if (closed) art.className = 'closed';
+      const art = document.createElement('article'); art.id = id;
+      if (closed) {
+        art.className = expanded.has(t.nn) || location.hash === '#' + id ? 'closed' : 'closed collapsed';
+        art.addEventListener('click', (e) => {
+          if (art.classList.contains('collapsed')) { art.classList.remove('collapsed'); expanded.add(t.nn); }
+          else if (e.target.closest('h2')) { art.classList.add('collapsed'); expanded.delete(t.nn); }
+        });
+      }
       art.style.setProperty('--sev', sevColor[t.severity] || 'var(--line)');
       const tag = document.createElement('span');
       tag.className = 'tag ' + (closed ? '' : t.pending ? 'waiting' : 'answered');
