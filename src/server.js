@@ -27,7 +27,12 @@ const PORT = process.env.PORT || 3000;
 // 2026-09-23). Trusting only loopback sockets keeps Caddy's real client IP
 // (Caddy connects from 127.0.0.1) while spoofed headers from outside are ignored.
 app.set('trust proxy', 'loopback');
-app.use(cors());
+// CORS allowlist (2026-10-08; was cors() = ACAO * for every origin). The UI and Grimoire are
+// same-origin (no CORS needed); published pages post to their own pages.dev /api/contact and
+// messages are pulled, not pushed; Mac bridge/curl/cron are non-browser. So only our own origin.
+// Anything else gets no Access-Control-Allow-Origin header.
+const CORS_ALLOWED_ORIGINS = ['https://303dashboard.duckdns.org'];
+app.use(cors({ origin: (origin, cb) => cb(null, !!origin && CORS_ALLOWED_ORIGINS.includes(origin)) }));
 app.use(express.json({ limit: '50mb' }));              // must precede mountAuth: /api/login reads req.body
 const { requireAuth, users: userStore } = mountAuth(app, {
   usersFile: path.join(__dirname, '../data/users.json'),   // per instance: live and staging have separate accounts
