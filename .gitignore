@@ -4,3 +4,6 @@ data/*
 !data/.gitkeep
 .DS_Store
 .last-deployed-md5
+
+# local-dev auth credential (never commit)
+.ada-dashboard-auth.json
