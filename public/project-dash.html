@@ -136,6 +136,13 @@ textarea{font:inherit;font-size:.88rem;width:100%;box-sizing:border-box;min-heig
 .ev .who{font-size:.72rem;font-weight:600;color:var(--accent)}
 .ev p{margin:0;font-size:.87rem}
 
+/* Activity: collapsible, closed by default (Alex 2026-11-01) */
+details.actwrap>summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+details.actwrap>summary::-webkit-details-marker{display:none}
+details.actwrap>summary::before{content:"\25B8";color:var(--muted);transition:transform .15s}
+details.actwrap[open]>summary::before{transform:rotate(90deg)}
+details.actwrap[open]>summary{border-radius:10px 10px 0 0;border-bottom-color:transparent}
+.actbody{display:grid;gap:10px;padding-top:10px}
 /* Orders */
 .tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
 table{border-collapse:collapse;width:100%;min-width:560px;font-size:.86rem}
@@ -219,8 +226,13 @@ details.summary summary span{font-family:var(--f-body);font-weight:400;font-size
       <div class="board" id="board"></div>
     </section>
     <section id="actSec" hidden aria-labelledby="actH">
-      <div class="sec-head"><h2 id="actH">Activity</h2><div class="filters" id="filters" role="group" aria-label="Filter by source"></div></div>
-      <div class="log" id="log"></div>
+      <details class="actwrap" id="actDet">
+        <summary><h2 id="actH">Activity</h2><span class="muted small" id="actMeta"></span></summary>
+        <div class="actbody">
+          <div class="filters" id="filters" role="group" aria-label="Filter by source"></div>
+          <div class="log" id="log"></div>
+        </div>
+      </details>
     </section>
   </div>
 
@@ -312,6 +324,7 @@ function renderMain(){
   // Activity
   const act = S.activity || [];
   show($("actSec"), act.length > 0);
+  $("actMeta").textContent = act.length ? `${act.length} ${act.length === 1 ? "entry" : "entries"} · latest ${fmtTime(act[0].at)}` : "";
   drawLog(act);
   $("cols").classList.toggle("single", !(lanes.length && act.length));
 
@@ -441,6 +454,8 @@ async function load(force){
     $("loading").hidden = false;
   }
 }
+try { if (localStorage.getItem("pd-activity-open") === "1") $("actDet").open = true; } catch(e){}
+$("actDet").addEventListener("toggle", () => { try { localStorage.setItem("pd-activity-open", $("actDet").open ? "1" : "0"); } catch(e){} });
 $("back").href = `/#projects/${encodeURIComponent(SLUG)}`;
 if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(SLUG)){ $("loading").textContent = "Add ?project=<slug> to the address."; }
 else {
