@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Project Dashboard</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* project-dash.html — a project's live status dashboard (project-dash.js, 2026-11-01). ?project=<slug>
+   Claude writes through src/project-dash-cli.js; this page writes only answers and checklist ticks. */
+body{margin:0}
+[hidden]{display:none!important}
+*{box-sizing:border-box}
+
+/* Layout: a workflow-canvas feel. Live Claude status, quick report, then what needs Alex, then numbers, pipeline, board, log; the full summary sits collapsed at the bottom. Every block hides when empty. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --sunk:#e9edf2; --line:#d5dbe3;
+  --ink:#16202c; --muted:#5b6878; --accent:#1f5fd1; --accent-soft:#e3ecfb;
+  --good:#1d8a55; --good-soft:#dff3e8; --warn:#b26b00; --warn-soft:#fbeed6;
+  --bad:#c23a32; --bad-soft:#f9e1df; --idle:#7a8594; --idle-soft:#eceff3;
+  --f-display:"Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --f-body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f141b; --surface:#161d27; --sunk:#1c2532; --line:#2a3544;
+  --ink:#e6ebf2; --muted:#93a0b2; --accent:#6f9df5; --accent-soft:#1c2a45;
+  --good:#4cc488; --good-soft:#15301f; --warn:#e5a33b; --warn-soft:#352711;
+  --bad:#f0736a; --bad-soft:#3a1a18; --idle:#8b96a6; --idle-soft:#212a36; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141b; --surface:#161d27; --sunk:#1c2532; --line:#2a3544;
+  --ink:#e6ebf2; --muted:#93a0b2; --accent:#6f9df5; --accent-soft:#1c2a45;
+  --good:#4cc488; --good-soft:#15301f; --warn:#e5a33b; --warn-soft:#352711;
+  --bad:#f0736a; --bad-soft:#3a1a18; --idle:#8b96a6; --idle-soft:#212a36; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5}
+.wrap{max-width:1180px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:22px}
+h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance}
+h1{font-size:1.6rem;font-weight:800;letter-spacing:-.01em}
+h2{font-size:1.02rem;font-weight:700}
+.label{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.small{font-size:.82rem}
+a{color:var(--accent)}
+.notice{background:var(--sunk);border-radius:8px;padding:10px 14px;font-size:.88rem;color:var(--muted)}
+header{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-end;justify-content:space-between}
+.brand{display:flex;gap:12px;align-items:center}
+.mark{width:38px;height:38px;border-radius:9px;background:var(--accent);display:grid;place-items:center}
+.mark span{display:block;width:16px;height:4px;background:var(--surface);border-radius:2px;box-shadow:0 -7px 0 var(--surface),0 7px 0 var(--surface)}
+.meta{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:.85rem;color:var(--muted)}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 10px;font-size:.76rem;font-weight:600;white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.s-live{background:var(--good-soft);color:var(--good)} .s-draft{background:var(--accent-soft);color:var(--accent)}
+.s-blocked{background:var(--bad-soft);color:var(--bad)} .s-waiting{background:var(--warn-soft);color:var(--warn)}
+.s-idle{background:var(--idle-soft);color:var(--idle)}
+section{display:grid;gap:12px;min-width:0}
+.sec-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:10px}
+
+/* Claude status */
+.claude{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 12px;align-items:center;background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:10px;padding:10px 14px}
+.claude .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);grid-row:span 2}
+@media (prefers-reduced-motion:no-preference){.claude .dot{animation:pulse 1.6s ease-in-out infinite}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 45%,transparent)}50%{box-shadow:0 0 0 7px transparent}}
+.claude .task{font-weight:600}
+.claude .since{font-family:var(--f-mono);font-size:.74rem;color:var(--muted);grid-row:span 2;text-align:right}
+.claude .detail{font-size:.84rem;color:var(--muted);grid-column:2}
+
+/* Status report */
+.report{border-left:4px solid var(--accent)}
+.report.h-good{border-left-color:var(--good)} .report.h-warn{border-left-color:var(--warn)} .report.h-bad{border-left-color:var(--bad)}
+.report .headline{font-family:var(--f-display);font-size:1.15rem;font-weight:700;text-wrap:balance}
+.report ul{margin:0;padding-left:18px;display:grid;gap:3px;max-width:75ch}
+
+/* Needs you */
+.needs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:16px;align-items:start}
+.q{border-top:1px solid var(--line);padding-top:12px;display:grid;gap:8px}
+.q:first-of-type{border-top:0;padding-top:0}
+.q .text{font-weight:600}
+.q .ctx{font-size:.82rem;color:var(--muted)}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+button.b{font:inherit;font-size:.84rem;font-weight:600;border-radius:7px;padding:5px 14px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+button.b.yes{background:var(--good);border-color:var(--good);color:var(--surface)}
+button.b.no{background:var(--surface);border-color:var(--bad);color:var(--bad)}
+button.b.primary{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+button.b:disabled{opacity:.5;cursor:default}
+button.link{font:inherit;font-size:.78rem;background:none;border:0;color:var(--accent);cursor:pointer;padding:0;text-decoration:underline}
+button:focus-visible,textarea:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+textarea{font:inherit;font-size:.88rem;width:100%;box-sizing:border-box;min-height:70px;resize:vertical;border:1px solid var(--line);border-radius:7px;padding:8px 10px;background:var(--bg);color:var(--ink)}
+.answered{font-size:.84rem;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.answered b{color:var(--good)}
+.check{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start;padding:6px 0;border-top:1px solid var(--line)}
+.check:first-of-type{border-top:0}
+.check input{width:17px;height:17px;margin-top:2px;accent-color:var(--good);cursor:pointer}
+.check label{cursor:pointer;display:grid;gap:1px}
+.check.done label>span:first-child{text-decoration:line-through;color:var(--muted)}
+.err{color:var(--bad);font-size:.8rem}
+
+/* KPI strip */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:6px;align-content:start}
+.kpi .v{font-family:var(--f-display);font-size:1.7rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}
+.kpi .v small{font-size:.9rem;font-weight:500;color:var(--muted)}
+.bar{height:6px;background:var(--sunk);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.kpi .note{font-size:.8rem;color:var(--muted)}
+
+/* Pipeline */
+.pipe{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+.node{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:grid;gap:8px;align-content:start;min-width:0}
+.node.dim{background:transparent;border-style:dashed}
+.node .gtitle{font-size:.86rem;color:var(--muted);font-style:italic}
+.node .row{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.tiers{display:flex;gap:6px;flex-wrap:wrap}
+.tier{font-family:var(--f-mono);font-size:.76rem;background:var(--sunk);border-radius:4px;padding:1px 6px}
+.next{font-size:.82rem;border-top:1px solid var(--line);padding-top:8px}
+
+/* Two column area */
+.cols{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:22px;align-items:start}
+.cols.single{grid-template-columns:minmax(0,1fr)}
+@media (max-width:860px){.cols{grid-template-columns:minmax(0,1fr)}}
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.lane{background:var(--sunk);border-radius:10px;padding:10px;display:grid;gap:8px;align-content:start}
+.lane h3{font-size:.8rem;font-family:var(--f-body);font-weight:600;display:flex;justify-content:space-between;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 10px;display:grid;gap:5px;font-size:.86rem}
+.tags{display:flex;gap:5px;flex-wrap:wrap}
+.tag{font-size:.7rem;border-radius:4px;padding:0 6px;background:var(--idle-soft);color:var(--muted);font-weight:500}
+.tag.alex{background:var(--warn-soft);color:var(--warn)}
+.tag.ada{background:var(--accent-soft);color:var(--accent)}
+
+/* Activity */
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.filters button{font:inherit;font-size:.78rem;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:3px 10px;cursor:pointer}
+.filters button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.log{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:grid}
+.ev{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;padding:10px 14px;border-top:1px solid var(--line)}
+.ev:first-child{border-top:0}
+.ev time{font-family:var(--f-mono);font-size:.74rem;color:var(--muted);white-space:nowrap;padding-top:2px}
+.ev .who{font-size:.72rem;font-weight:600;color:var(--accent)}
+.ev p{margin:0;font-size:.87rem}
+
+/* Orders */
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:.86rem}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+th{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+/* Summary */
+details.summary{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+details.summary summary{cursor:pointer;font-family:var(--f-display);font-weight:700;font-size:1.02rem}
+details.summary summary span{font-family:var(--f-body);font-weight:400;font-size:.82rem;color:var(--muted);margin-left:8px}
+.sumgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:18px 28px;margin-top:14px}
+.sumgrid h3{font-size:.9rem;margin-bottom:4px}
+.sumgrid p,.sumgrid ul{margin:0;font-size:.87rem;max-width:68ch}
+.sumgrid ul{padding-left:18px;display:grid;gap:2px}
+@media (prefers-reduced-motion:no-preference){.bar i{transition:width .6s ease}}
+
+</style></head><body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="mark" aria-hidden="true"><span></span></div>
+      <div>
+        <h1 id="bizName">tidystack</h1>
+        <div class="muted" id="bizTag">n8n &amp; AI automation · Fiverr</div>
+      </div>
+    </div>
+    <div class="meta"><a id="back" class="small" href="/">← Project hub</a></div>
+    <div class="meta" id="meta" hidden>
+      <span class="pill s-waiting" id="phase"></span>
+      <span>Updated <span class="mono" id="updated"></span> by <b id="updatedBy"></b></span>
+    </div>
+  </header>
+
+  <div class="notice" id="loading">Loading the dashboard…</div>
+
+  <div class="claude" id="claude" hidden role="status" aria-live="polite">
+    <span class="dot" aria-hidden="true"></span>
+    <span class="task" id="cTask"></span>
+    <span class="since" id="cSince"></span>
+    <span class="detail" id="cDetail"></span>
+  </div>
+
+  <section id="reportSec" hidden aria-labelledby="repH">
+    <div class="panel report" id="report">
+      <span class="label" id="repH">Status report</span>
+      <div class="headline" id="repHeadline"></div>
+      <ul id="repLines"></ul>
+    </div>
+  </section>
+
+  <div class="needs" id="needsWrap" hidden>
+    <section id="qSec" hidden aria-labelledby="qH">
+      <div class="panel">
+        <div class="sec-head"><h2 id="qH">Questions for you</h2><span class="mono muted small" id="qCount"></span></div>
+        <div id="queries"></div>
+      </div>
+    </section>
+    <section id="cSec" hidden aria-labelledby="clH">
+      <div class="panel">
+        <div class="sec-head"><h2 id="clH">Your to-do list</h2><span class="mono muted small" id="clCount"></span></div>
+        <div id="checklist"></div>
+      </div>
+    </section>
+  </div>
+
+  <section id="kpiSec" hidden aria-labelledby="kpiH">
+    <h2 id="kpiH" class="label">This month</h2>
+    <div class="kpis" id="kpis"></div>
+  </section>
+
+  <section id="pipeSec" hidden aria-labelledby="pipeH">
+    <div class="sec-head"><h2 id="pipeH">Gig pipeline</h2><span class="muted small">Only gigs with a working demo get published</span></div>
+    <div class="pipe" id="pipe"></div>
+  </section>
+
+  <div class="cols" id="cols">
+    <section id="boardSec" hidden aria-labelledby="boardH">
+      <h2 id="boardH">Work board</h2>
+      <div class="board" id="board"></div>
+    </section>
+    <section id="actSec" hidden aria-labelledby="actH">
+      <div class="sec-head"><h2 id="actH">Activity</h2><div class="filters" id="filters" role="group" aria-label="Filter by source"></div></div>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+
+  <section id="ordSec" hidden aria-labelledby="ordH">
+    <div class="sec-head"><h2 id="ordH">Orders</h2><span class="muted small">Net is after Fiverr's 20% fee</span></div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Order</th><th>Buyer</th><th>Gig · tier</th><th>Status</th><th>Due</th><th class="num">Gross</th><th class="num">Net</th></tr></thead>
+      <tbody id="orders"></tbody>
+    </table></div>
+  </section>
+
+  <details class="summary" id="sumSec" hidden>
+    <summary>Project summary<span id="sumNote"></span></summary>
+    <div class="sumgrid" id="summary"></div>
+  </details>
+</div>
+
+<script>
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const STATUS = {live:["s-live","Live"], draft:["s-draft","Draft"], waiting:["s-waiting","Needs demo"], blocked:["s-blocked","Blocked"], idle:["s-idle","Later"]};
+const money = n => "$" + Number(n||0).toLocaleString("en-US");
+const fmtTime = iso => { const d = new Date(iso); return isNaN(d) ? esc(iso) : d.toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); };
+const show = (el, on) => { el.hidden = !on; };
+
+let main = null, claudeNow = null, queries = [], checks = [];
+let actFilter = "All";
+try { actFilter = localStorage.getItem("tidystack-filter") || "All"; } catch(e){}
+const drafts = {};   // unsaved text answers, keyed by query id
+let readOnly = false;
+
+function renderMain(){
+  $("loading").hidden = true;
+  const S = main || {};
+  const B = S.business || {};
+  if (B.name) $("bizName").textContent = B.name;
+  if (B.tagline) $("bizTag").textContent = B.tagline;
+  show($("meta"), !!B.updated);
+  $("phase").textContent = B.phase || "";
+  $("updated").textContent = B.updated ? fmtTime(B.updated) : "";
+  $("updatedBy").textContent = B.updatedBy || "";
+
+  // Status report
+  const R = S.report || {};
+  const lines = R.lines || [];
+  show($("reportSec"), !!(R.headline || lines.length));
+  $("report").className = "panel report" + (R.health ? " h-" + R.health : "");
+  $("repHeadline").textContent = R.headline || "";
+  $("repLines").innerHTML = lines.map(l => `<li>${esc(l)}</li>`).join("");
+  show($("repLines"), lines.length > 0);
+
+  // KPIs
+  const G = S.goal || {netMonthly:500, feeRate:.2}, M = S.month, L = S.launch, gigs = S.gigs || [];
+  if (M){
+    const gross = Math.round(G.netMonthly / (1 - G.feeRate));
+    const pct = Math.min(100, (M.netEarned||0) / G.netMonthly * 100);
+    const live = gigs.filter(g => g.status === "live").length;
+    const planned = gigs.filter(g => !g.dim).length || 3;
+    const k = [
+      {l:"Net earned", v:`${money(M.netEarned)} <small>/ ${money(G.netMonthly)}</small>`, bar:pct, n:`About ${money(gross)} in orders before the fee`},
+      {l:"Gigs live", v:`${live} <small>/ ${planned} planned</small>`, n:M.gigsNote || ""},
+      {l:"Active orders", v:`${M.activeOrders||0}`, n:M.ordersNote || ""},
+    ];
+    if (L) k.push({l:"Launch checklist", v:`${L.done} <small>/ ${L.total}</small>`, bar:L.done/L.total*100, n:"Fiverr Launch Checklist.md"});
+    $("kpis").innerHTML = k.map(x => `<div class="kpi"><span class="label">${x.l}</span><span class="v">${x.v}</span>${x.bar!=null?`<div class="bar"><i style="width:${x.bar.toFixed(1)}%"></i></div>`:""}${x.n?`<span class="note">${esc(x.n)}</span>`:""}</div>`).join("");
+  }
+  show($("kpiSec"), !!M);
+
+  // Pipeline
+  show($("pipeSec"), gigs.length > 0);
+  $("pipe").innerHTML = gigs.map(g => {
+    const [cls, txt] = STATUS[g.status] || STATUS.idle;
+    return `<div class="node${g.dim?" dim":""}">
+      <div class="row"><h3 style="font-size:.95rem">${esc(g.name)}</h3><span class="pill ${cls}">${txt}</span></div>
+      ${g.title?`<div class="gtitle">${esc(g.title)}</div>`:""}
+      ${(g.tiers||[]).length?`<div class="row"><div class="tiers">${g.tiers.map(t=>`<span class="tier">${esc(t)}</span>`).join("")}</div><span class="mono muted" style="font-size:.74rem">${esc(g.days)}</span></div>`:""}
+      ${g.demo?`<div class="muted" style="font-size:.8rem">Demo: ${esc(g.demo)}</div>`:""}
+      ${g.next?`<div class="next"><b>Next:</b> ${esc(g.next)}</div>`:""}
+    </div>`;
+  }).join("");
+
+  // Board: empty lanes are left out
+  const board = S.board || {};
+  const lanes = [["todo","To do"],["doing","In progress"],["done","Done"]].filter(([k]) => (board[k]||[]).length);
+  show($("boardSec"), lanes.length > 0);
+  $("board").innerHTML = lanes.map(([k,label]) => `<div class="lane"><h3><span>${label}</span><span class="mono">${board[k].length}</span></h3>${board[k].map(c => `<div class="card"><span>${esc(c.t)}</span><div class="tags">${c.who?`<span class="tag ${c.who==="alex"?"alex":"ada"}">${c.who==="alex"?"Alex":"Ada"}</span>`:""}${(c.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div></div>`).join("")}</div>`).join("");
+
+  // Activity
+  const act = S.activity || [];
+  show($("actSec"), act.length > 0);
+  drawLog(act);
+  $("cols").classList.toggle("single", !(lanes.length && act.length));
+
+  // Orders
+  const orders = S.orders || [];
+  const fee = G.feeRate ?? .2;
+  show($("ordSec"), orders.length > 0);
+  $("orders").innerHTML = orders.map(o => `<tr><td class="mono">${esc(o.id)}</td><td>${esc(o.buyer)}</td><td>${esc(o.gig)}</td><td>${esc(o.status)}</td><td>${esc(o.due)}</td><td class="num">${money(o.gross)}</td><td class="num">${money(Math.round(o.gross*(1-fee)))}</td></tr>`).join("");
+
+  // Summary
+  const sum = S.summary || [];
+  show($("sumSec"), sum.length > 0);
+  $("sumNote").textContent = sum.length ? `${sum.length} sections` : "";
+  $("summary").innerHTML = sum.map(s => `<div><h3>${esc(s.h)}</h3>${Array.isArray(s.body)?`<ul>${s.body.map(b=>`<li>${esc(b)}</li>`).join("")}</ul>`:`<p>${esc(s.body)}</p>`}</div>`).join("");
+}
+
+function drawLog(act){
+  const sources = ["All", ...new Set(act.map(a => a.src))];
+  if (!sources.includes(actFilter)) actFilter = "All";
+  $("filters").innerHTML = sources.length > 2 ? sources.map(s => `<button type="button" aria-pressed="${s===actFilter}" data-s="${esc(s)}">${esc(s)}</button>`).join("") : "";
+  $("log").innerHTML = act.filter(a => actFilter==="All" || a.src===actFilter).map(a => `<div class="ev"><time>${fmtTime(a.at)}</time><div><div class="who">${esc(a.src)}</div><p>${esc(a.msg)}</p></div></div>`).join("");
+}
+$("filters").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  actFilter = b.dataset.s; try { localStorage.setItem("tidystack-filter", actFilter); } catch(e){}
+  drawLog((main && main.activity) || []);
+});
+
+function renderClaude(){
+  const C = claudeNow;
+  const on = !!(C && C.active && C.task);
+  show($("claude"), on);
+  if (!on) return;
+  $("cTask").textContent = "Claude is working on: " + C.task;
+  $("cDetail").textContent = [C.detail, C.session ? "Session: " + C.session : ""].filter(Boolean).join(" · ");
+  $("cSince").textContent = C.since ? "since " + fmtTime(C.since) : "";
+}
+
+function renderNeeds(){
+  // Questions: answered ones stay as a one-line receipt until Claude picks them up
+  const qs = queries.slice().sort((a,b) => (a.answer?1:0)-(b.answer?1:0) || String(a.createdAt).localeCompare(String(b.createdAt)));
+  const open = qs.filter(q => !q.answer).length;
+  show($("qSec"), qs.length > 0);
+  $("qCount").textContent = qs.length ? `${open} open` : "";
+  $("queries").innerHTML = qs.map(q => {
+    if (q.answer){
+      const a = q.kind === "yesno" ? (q.answer === "yes" ? "Yes" : "No") : q.answer;
+      return `<div class="q" data-id="${esc(q._id)}"><div class="text">${esc(q.q)}</div><div class="answered"><b>Answered:</b><span>${esc(a)}</span><button type="button" class="link" data-act="reopen">Change</button></div><div class="ctx">Claude will pick this up next session.</div></div>`;
+    }
+    const ctrl = q.kind === "yesno"
+      ? `<div class="btns"><button type="button" class="b yes" data-act="yes"${readOnly?" disabled":""}>Yes</button><button type="button" class="b no" data-act="no"${readOnly?" disabled":""}>No</button></div>`
+      : `<textarea id="ta-${esc(q._id)}" aria-label="Your answer" placeholder="Type your answer"${readOnly?" disabled":""}>${esc(drafts[q._id] ?? "")}</textarea><div class="btns"><button type="button" class="b primary" data-act="save"${readOnly?" disabled":""}>Save answer</button></div>`;
+    return `<div class="q" data-id="${esc(q._id)}"><div class="text">${esc(q.q)}</div>${q.context?`<div class="ctx">${esc(q.context)}</div>`:""}${ctrl}<div class="err" hidden></div></div>`;
+  }).join("");
+
+  // Checklist
+  const cs = checks.slice().sort((a,b) => (a.done?1:0)-(b.done?1:0) || (a.order??99)-(b.order??99));
+  const left = cs.filter(c => !c.done).length;
+  show($("cSec"), cs.length > 0);
+  $("clCount").textContent = cs.length ? `${left} left` : "";
+  $("checklist").innerHTML = cs.map(c => `<div class="check${c.done?" done":""}" data-id="${esc(c._id)}"><input type="checkbox" id="ck-${esc(c._id)}"${c.done?" checked":""}${readOnly?" disabled":""}><label for="ck-${esc(c._id)}"><span>${esc(c.t)}</span>${c.detail?`<span class="muted small">${esc(c.detail)}</span>`:""}</label></div>`).join("");
+
+  show($("needsWrap"), qs.length > 0 || cs.length > 0);
+}
+
+// Keep unsaved typing across live re-renders
+$("queries").addEventListener("input", e => {
+  if (e.target.tagName === "TEXTAREA") drafts[e.target.closest(".q").dataset.id] = e.target.value;
+});
+
+
+const SLUG = (new URLSearchParams(location.search).get("project") || "").toLowerCase();
+const API = `/api/projects/${encodeURIComponent(SLUG)}/dash`;
+let lastVersion = -1, failures = 0;
+async function post(path, body, box){
+  try {
+    const r = await fetch(API + path, {method:"POST", headers:{"Content-Type":"application/json","X-Dash-Confirm":"1"}, body: JSON.stringify(body)});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `Save failed (${r.status}).`);
+    await load(true);
+    return true;
+  } catch(err){
+    const e = box && box.querySelector(".err");
+    if (e){ e.textContent = err.message || "Couldn't save. Check your connection and try again."; e.hidden = false; }
+    else { $("loading").textContent = err.message; $("loading").hidden = false; }
+    return false;
+  }
+}
+$("queries").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const box = b.closest(".q"), id = box.dataset.id, act = b.dataset.act;
+  const path = `/queries/${encodeURIComponent(id)}/answer`;
+  if (act === "yes" || act === "no") post(path, {answer: act}, box);
+  else if (act === "save"){
+    const v = (drafts[id] ?? "").trim();
+    if (!v){ const er = box.querySelector(".err"); er.textContent = "Type an answer first."; er.hidden = false; return; }
+    b.disabled = true;
+    if (await post(path, {answer: v}, box)) delete drafts[id]; else b.disabled = false;
+  }
+  else if (act === "reopen") post(path, {answer: null}, box);
+});
+$("checklist").addEventListener("change", e => {
+  if (e.target.type !== "checkbox") return;
+  const id = e.target.closest(".check").dataset.id;
+  post(`/checklist/${encodeURIComponent(id)}`, {done: e.target.checked});
+});
+async function load(force){
+  try {
+    const r = await fetch(API, {cache:"no-store"});
+    if (r.status === 401 || r.redirected){ location.href = "/"; return; }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `The dashboard could not be loaded (${r.status}).`);
+    failures = 0;
+    if (!force && j.version === lastVersion) return;
+    lastVersion = j.version;
+    main = j.main || {}; claudeNow = j.claude || null;
+    queries = (j.queries || []).map(q => ({...q, _id: q.id}));
+    checks = (j.checklist || []).map(c => ({...c, _id: c.id}));
+    renderMain(); renderClaude();
+    // keep focus and unsaved typing in an open answer box
+    const f = document.activeElement && document.activeElement.id;
+    renderNeeds();
+    if (f && $(f)) $(f).focus();
+  } catch(err){
+    failures++;
+    $("loading").textContent = lastVersion < 0 ? err.message : "Lost contact with the server. Showing the last data received; retrying.";
+    $("loading").hidden = false;
+  }
+}
+$("back").href = `/#projects/${encodeURIComponent(SLUG)}`;
+if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(SLUG)){ $("loading").textContent = "Add ?project=<slug> to the address."; }
+else {
+  load(true);
+  setInterval(() => { if (!document.hidden) load(false); }, 15000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(false); });
+}
+
+</script>
+</body></html>

@@ -15,6 +15,7 @@
 
 const fs = require('fs');
 const forum = require('./forum');
+const projectDash = require('./project-dash');
 const os = require('os');
 const path = require('path');
 
@@ -110,7 +111,7 @@ function create(opts = {}) {
     const pages = (readPages() || []).filter((pg) => pg.project === slug).map((pg) => ({ id: pg.id, title: pg.title, icon: pg.icon }));
     let forumInfo = { open: 0, pending: 0, total: 0 };
     try { forumInfo = forumSummary(slug); } catch { /* forum store unreadable: hub still loads */ }
-    return { status: 200, body: { ...p, statusMd, docs: docs.filter((d) => d.rel !== 'projectStatus.md'), pages, forum: forumInfo } };
+    return { status: 200, body: { ...p, statusMd, docs: docs.filter((d) => d.rel !== 'projectStatus.md'), pages, forum: forumInfo, dash: (() => { try { return projectDash.exists(slug); } catch { return false; } })() } };
   }
 
   function doc(slug, rel) {
