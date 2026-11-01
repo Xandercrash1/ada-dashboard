@@ -35,6 +35,62 @@ const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0
 const nowIso = () => new Date().toISOString();
 const newId = (p) => p + crypto.randomBytes(4).toString('hex');
 const empty = () => ({ version: 0, main: {}, claude: { active: false }, queries: [], checklist: [] });
+const LANES = ['todo', 'blocked', 'doing', 'done'];
+
+/* ---- Blocked lane (Alex, 2026-11-01) --------------------------------------------------------
+ * A blocked board item may carry:
+ *   until: ISO time       — released when the time passes (the page shows a countdown)
+ *   after: [ids]          — released when every listed board task / checklist item is done or gone
+ *   to:    'todo' | 'checklist'  — where it goes when released (default: Alex's items → checklist,
+ *                                   Ada's → the board's To do)
+ * With both until and after, BOTH must be met. With neither, it stays until moved by hand.
+ * Release happens lazily on read (see read()), and is logged to activity. */
+function openIds(s) {
+  const b = s.main.board || {};
+  return new Set([
+    ...['todo', 'blocked', 'doing'].flatMap((k) => (b[k] || []).map((x) => x.id)),
+    ...(s.checklist || []).filter((c) => !c.done).map((c) => c.id),
+  ]);
+}
+function isDue(it, now, open) {
+  const conds = [];
+  if (it.until) conds.push(Date.parse(it.until) <= now);
+  if (Array.isArray(it.after) && it.after.length) conds.push(it.after.every((d) => !open.has(d)));
+  return conds.length > 0 && conds.every(Boolean);
+}
+function dueBlocked(s, now) {
+  const b = (s.main && s.main.board) || {};
+  const open = openIds(s);
+  return (b.blocked || []).filter((it) => isDue(it, now, open));
+}
+function resolveBlocked(s, now) {
+  const b = s.main.board = s.main.board || {};
+  const released = [];
+  // loop: releasing one item can satisfy another item's `after`
+  for (let guard = 0; guard < 20; guard++) {
+    const open = openIds(s);
+    const due = (b.blocked || []).filter((it) => isDue(it, now, open));
+    if (!due.length) break;
+    b.blocked = b.blocked.filter((it) => !due.includes(it));
+    for (const it of due) {
+      const to = it.to || (it.who === 'alex' ? 'checklist' : 'todo');
+      const tags = (it.tags || []).filter((t) => !/^blocked$|^until /i.test(t));
+      if (to === 'checklist') {
+        const order = (s.checklist || []).reduce((m, c) => Math.max(m, c.order || 0), 0) + 1;
+        (s.checklist = s.checklist || []).push({ id: it.id.replace(/^t/, 'c'), t: it.t, detail: it.detail || 'Unblocked automatically.', order, done: false, doneAt: null });
+      } else {
+        const { until, after, to: _to, ...rest } = it;
+        (b.todo = b.todo || []).push({ ...rest, tags });
+      }
+      released.push(it);
+    }
+  }
+  if (released.length) {
+    const a = Array.isArray(s.main.activity) ? s.main.activity : [];
+    s.main.activity = [...released.map((it) => ({ at: new Date(now).toISOString(), src: 'Dashboard', msg: `Unblocked: ${it.t}` })), ...a].slice(0, MAX_ACTIVITY);
+  }
+  return released;
+}
 
 function createDash(root) {
   root = path.resolve(root);
@@ -45,10 +101,18 @@ function createDash(root) {
   };
   const exists = (slug) => fs.existsSync(fileOf(slug));
 
-  function read(slug) {
+  function readRaw(slug) {
     const f = fileOf(slug);
     if (!fs.existsSync(f)) throw new DashError(404, 'This project has no dashboard yet.');
     return JSON.parse(fs.readFileSync(f, 'utf8'));
+  }
+
+  /** Every read first releases blocked items that are due (timer passed or blockers done), so the
+   *  browser, the CLI and every session all see the same unblocked state without a cron job. */
+  function read(slug) {
+    const s = readRaw(slug);
+    if (!dueBlocked(s, Date.now()).length) return s;
+    return update(slug, (st) => { resolveBlocked(st, Date.now()); });
   }
 
   function withLock(slug, fn) {
@@ -123,6 +187,25 @@ function createDash(root) {
     return t;
   };
 
+  function blockFields({ until, after, to }) {
+    const f = {};
+    if (until) {
+      const ms = Date.parse(until);
+      if (Number.isNaN(ms)) throw new DashError(400, `Can't read the time "${until}". Use ISO, e.g. 2026-11-03T05:20:00Z.`);
+      f.until = new Date(ms).toISOString();
+    }
+    if (after) {
+      const ids = (Array.isArray(after) ? after : String(after).split(',')).map((x) => x.trim()).filter(Boolean);
+      if (ids.some((x) => !ID_RE.test(x))) throw new DashError(400, 'after takes task or checklist ids.');
+      if (ids.length) f.after = ids;
+    }
+    if (to) {
+      if (to !== 'todo' && to !== 'checklist') throw new DashError(400, 'to is todo or checklist.');
+      f.to = to;
+    }
+    return f;
+  }
+
   const api = {
     init: (slug, by) => update(slug, (s) => { stamp(s, by); }, { create: true }),
     setMain(slug, key, value, by) {
@@ -180,24 +263,49 @@ function createDash(root) {
       s.checklist = s.checklist.filter((c) => !c.done);
       return gone;
     }),
-    addTask(slug, { t, lane, who, tags }, by) {
+    addTask(slug, { t, lane, who, tags, until, after, to }, by) {
       const L = lane || 'todo';
-      if (!['todo', 'doing', 'done'].includes(L)) throw new DashError(400, 'lane is todo, doing or done.');
+      if (!LANES.includes(L)) throw new DashError(400, `lane is ${LANES.join(', ')}.`);
       return update(slug, (s) => {
         const b = s.main.board = s.main.board || { todo: [], doing: [], done: [] };
         const item = { id: newId('t'), t: text(t, 'task'), who: who === 'alex' ? 'alex' : 'ada', tags: tags || [] };
+        if (L === 'blocked') Object.assign(item, blockFields({ until, after, to }));
         (b[L] = b[L] || []).push(item);
         stamp(s, by);
         return item;
       });
     },
-    moveTask(slug, id, lane, by) {
-      if (!['todo', 'doing', 'done', 'gone'].includes(lane)) throw new DashError(400, 'lane is todo, doing, done or gone.');
+    /** Put an existing task into Blocked (optionally with a timer and/or blocker ids). */
+    block(slug, id, { until, after, to } = {}, by) {
       return update(slug, (s) => {
         const b = s.main.board = s.main.board || { todo: [], doing: [], done: [] };
         for (const k of Object.keys(b)) {
           const i = (b[k] || []).findIndex((x) => x.id === id);
-          if (i >= 0) { const [it] = b[k].splice(i, 1); if (lane !== 'gone') (b[lane] = b[lane] || []).push(it); stamp(s, by); return it; }
+          if (i >= 0) {
+            const [it] = b[k].splice(i, 1);
+            delete it.until; delete it.after; delete it.to;
+            Object.assign(it, blockFields({ until, after, to }));
+            (b.blocked = b.blocked || []).push(it);
+            stamp(s, by);
+            return it;
+          }
+        }
+        throw new DashError(404, 'No such task.');
+      });
+    },
+    moveTask(slug, id, lane, by) {
+      if (![...LANES, 'gone'].includes(lane)) throw new DashError(400, `lane is ${LANES.join(', ')} or gone.`);
+      return update(slug, (s) => {
+        const b = s.main.board = s.main.board || { todo: [], doing: [], done: [] };
+        for (const k of Object.keys(b)) {
+          const i = (b[k] || []).findIndex((x) => x.id === id);
+          if (i >= 0) {
+            const [it] = b[k].splice(i, 1);
+            if (k === 'blocked' && lane !== 'blocked') { delete it.until; delete it.after; delete it.to; }
+            if (lane !== 'gone') (b[lane] = b[lane] || []).push(it);
+            stamp(s, by);
+            return it;
+          }
         }
         throw new DashError(404, 'No such task.');
       });
@@ -224,4 +332,4 @@ function createDash(root) {
 }
 
 const DEFAULT_ROOT = process.env.PROJECT_DASH_DIR || path.join(__dirname, '../data/project-dash');
-module.exports = { ...createDash(DEFAULT_ROOT), createDash, DashError, SLUG_RE, MAIN_KEYS, DEFAULT_ROOT };
+module.exports = { ...createDash(DEFAULT_ROOT), createDash, DashError, SLUG_RE, MAIN_KEYS, DEFAULT_ROOT, resolveBlocked, dueBlocked };

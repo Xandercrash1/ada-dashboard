@@ -119,6 +119,9 @@ textarea{font:inherit;font-size:.88rem;width:100%;box-sizing:border-box;min-heig
 .board{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
 .lane{background:var(--sunk);border-radius:10px;padding:10px;display:grid;gap:8px;align-content:start}
 .lane h3{font-size:.8rem;font-family:var(--f-body);font-weight:600;display:flex;justify-content:space-between;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.lane.blocked{background:var(--warn-soft)}
+.lane.blocked h3{color:var(--warn)}
+.blockline{font-size:.78rem;color:var(--warn);font-weight:500;font-variant-numeric:tabular-nums}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 10px;display:grid;gap:5px;font-size:.86rem}
 .tags{display:flex;gap:5px;flex-wrap:wrap}
 .tag{font-size:.7rem;border-radius:4px;padding:0 6px;background:var(--idle-soft);color:var(--muted);font-weight:500}
@@ -317,9 +320,20 @@ function renderMain(){
 
   // Board: empty lanes are left out
   const board = S.board || {};
-  const lanes = [["todo","To do"],["doing","In progress"],["done","Done"]].filter(([k]) => (board[k]||[]).length);
+  const lanes = [["todo","To do"],["blocked","Blocked"],["doing","In progress"],["done","Done"]].filter(([k]) => (board[k]||[]).length);
   show($("boardSec"), lanes.length > 0);
-  $("board").innerHTML = lanes.map(([k,label]) => `<div class="lane"><h3><span>${label}</span><span class="mono">${board[k].length}</span></h3>${board[k].map(c => `<div class="card"><span>${esc(c.t)}</span><div class="tags">${c.who?`<span class="tag ${c.who==="alex"?"alex":"ada"}">${c.who==="alex"?"Alex":"Ada"}</span>`:""}${(c.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div></div>`).join("")}</div>`).join("");
+  // titles of everything a blocked card might wait on (board tasks + checklist items)
+  const titles = {};
+  for (const k of Object.keys(board)) for (const c of (board[k]||[])) titles[c.id] = c.t;
+  for (const c of checks) titles[c._id] = c.t;
+  const blockLine = (c) => {
+    const parts = [];
+    if (c.until) parts.push(`<span class="countdown" data-until="${esc(c.until)}">${esc(countdown(c.until))}</span>`);
+    if ((c.after||[]).length) parts.push(`Waiting on: ${c.after.map(id => esc(titles[id] || "a finished task")).join(", ")}`);
+    if (!parts.length) parts.push("Blocked until moved by hand");
+    return `<div class="blockline">${parts.join(" · ")}</div>`;
+  };
+  $("board").innerHTML = lanes.map(([k,label]) => `<div class="lane${k==="blocked"?" blocked":""}"><h3><span>${label}</span><span class="mono">${board[k].length}</span></h3>${board[k].map(c => `<div class="card"><span>${esc(c.t)}</span>${k==="blocked"?blockLine(c):""}<div class="tags">${c.who?`<span class="tag ${c.who==="alex"?"alex":"ada"}">${c.who==="alex"?"Alex":"Ada"}</span>`:""}${(c.tags||[]).filter(t => !/^blocked$|^until /i.test(t)).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div></div>`).join("")}</div>`).join("");
 
   // Activity
   const act = S.activity || [];
@@ -352,6 +366,25 @@ $("filters").addEventListener("click", e => {
   actFilter = b.dataset.s; try { localStorage.setItem("tidystack-filter", actFilter); } catch(e){}
   drawLog((main && main.activity) || []);
 });
+
+function countdown(iso){
+  const ms = Date.parse(iso) - Date.now();
+  const when = new Date(iso).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+  if (isNaN(ms)) return "";
+  if (ms <= 0) return `Due now (${when}), unblocking`;
+  const m = Math.floor(ms/60000), d = Math.floor(m/1440), h = Math.floor((m%1440)/60), mm = m%60;
+  const left = d ? `${d}d ${h}h` : h ? `${h}h ${mm}m` : `${mm}m`;
+  return `Unblocks in ${left} (${when})`;
+}
+// tick the countdowns every 30 s without a full re-render; a due item triggers a reload so the server releases it
+setInterval(() => {
+  let due = false;
+  document.querySelectorAll(".countdown[data-until]").forEach(el => {
+    el.textContent = countdown(el.dataset.until);
+    if (Date.parse(el.dataset.until) <= Date.now()) due = true;
+  });
+  if (due && typeof load === "function") load(true);
+}, 30000);
 
 function renderClaude(){
   const C = claudeNow;

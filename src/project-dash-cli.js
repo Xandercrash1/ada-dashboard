@@ -18,8 +18,14 @@
  *   answers <slug>                               answered questions waiting to be picked up
  *   ack <slug> <qid>                             remove a question once its answer is recorded elsewhere
  *   todo <slug> add "item" [--detail D]  |  todo <slug> rm <cid>  |  todo <slug> clear-done
- *   task <slug> add "task" [--lane todo|doing|done] [--who ada|alex] [--tag T,T]
- *   task <slug> move <tid> <todo|doing|done|gone>
+ *   task <slug> add "task" [--lane todo|blocked|doing|done] [--who ada|alex] [--tag T,T]
+ *        [--until <ISO time>] [--after <id,id>] [--to todo|checklist]     (blocked lane only)
+ *   task <slug> block <tid> [--until <ISO time>] [--after <id,id>] [--to todo|checklist]
+ *   task <slug> move <tid> <todo|blocked|doing|done|gone>
+ *
+ * Blocked items release THEMSELVES on the next read once due: --until passes and/or every --after id
+ * (board task or checklist item) is done or gone. Both given = both needed; neither = stays until moved.
+ * Released items go to Alex's checklist if --who alex (else the board's To do), or wherever --to says.
  *
  * `--by S` (or env ADA_SESSION) names who made the change in the header's "Updated by". `--json` everywhere.
  * Env PROJECT_DASH_DIR points the CLI at another store (staging tests).
@@ -85,11 +91,15 @@ function run() {
       const sub = pos[0];
       if (sub === 'add') {
         const tags = typeof args.tag === 'string' ? args.tag.split(',').map((s) => s.trim()).filter(Boolean) : [];
-        const t = dash.addTask(slug, { t: need(pos[1], 'task text'), lane: args.lane, who: args.who, tags }, by);
+        const t = dash.addTask(slug, { t: need(pos[1], 'task text'), lane: args.lane, who: args.who, tags, until: args.until, after: args.after, to: args.to }, by);
         return out(t, `Added ${t.id}.`);
       }
+      if (sub === 'block') {
+        const t = dash.block(slug, need(pos[1], 'task id'), { until: args.until, after: args.after, to: args.to }, by);
+        return out(t, `Blocked ${t.id}${t.until ? ` until ${t.until}` : ''}${t.after ? ` after ${t.after.join(', ')}` : ''}.`);
+      }
       if (sub === 'move') { const t = dash.moveTask(slug, need(pos[1], 'task id'), need(pos[2], 'lane'), by); return out(t, `Moved ${t.id} to ${pos[2]}.`); }
-      throw new dash.DashError(400, 'task add|move');
+      throw new dash.DashError(400, 'task add|block|move');
     }
     default: throw new dash.DashError(400, `Unknown command "${cmd}".`);
   }
