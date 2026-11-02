@@ -3,8 +3,9 @@ const path = require('path');
 const gemini = require('./gemini-client');
 
 // 2026-10-06 (Auto Ticket Processing): analysis moved from local Ollama
-// llama3.2:3b to Gemini Flash (Alex: the local model isn't smart enough).
-// gemini-client handles retries and the 3.8 -> 3.6 -> flash-lite chain.
+// llama3.2:3b to Gemini (Alex: the local model isn't smart enough).
+// gemini-client handles retries and the flash-lite -> 3.6 -> 3.8 chain
+// (Flash Lite first, 2026-11-01, to protect the shared daily quota).
 // The cursor now advances only after a successful analysis, so a night when
 // Gemini is unreachable is retried the next night instead of silently lost.
 

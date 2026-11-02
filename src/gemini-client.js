@@ -5,7 +5,9 @@
 // and 503 ("high demand") intermittently — measured 2026-10-06: 3.8-flash got
 // 1 success in 6, 3.6-flash 6 in 6, flash-lite always fine. The 08-26 "Flash
 // hangs" verdict was this, not a dead model. A daily job doesn't care about
-// latency, so: retry with backoff, then walk down a model chain.
+// latency, so: retry with backoff, then walk down a model chain. The chain
+// starts at Flash Lite (cheapest quota, see DEFAULT_CHAIN) and escalates to
+// 3.6 then 3.8 only if Lite keeps failing.
 //
 // Key: GEMINI_API_KEY from the environment (pm2 sets it), else the file
 // ~/ops/secrets/gemini.key. Cron does not load ~/.bashrc, so a cron job
@@ -14,7 +16,11 @@ const fs = require('fs');
 const path = require('path');
 
 const PROXY_URL = process.env.GEMINI_PROXY_URL || 'https://gemini-proxy.lagasse-alex.workers.dev';
-const DEFAULT_CHAIN = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-flash-lite-latest'];
+// 2026-11-01 (Alex, 2026-10-26: "I don't want it maxing out my daily limit on
+// any of the models"): Flash Lite FIRST. Free tier is ~500 req/day on Lite vs
+// 20 on 3.8-flash, and the key is shared with an n8n demo. 3.6 then 3.8 are
+// only fallbacks when Lite itself fails.
+const DEFAULT_CHAIN = ['gemini-flash-lite-latest', 'gemini-3.6-flash', 'gemini-3.8-flash'];
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 const BACKOFF_MS = [5000, 15000, 45000]; // between attempts on the same model
 
