@@ -9,6 +9,7 @@ const PHOTO_MS = 30000;
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|avif)$/i;
 
 const STYLE = `
+ada-home [hidden] { display: none !important; }
 ada-home { display: block; max-width: 60rem; margin: 0 auto; --h-muted: rgba(226, 232, 240, .65); --h-line: rgba(255, 255, 255, .1); --h-link: #818cf8; --h-surface: rgba(255, 255, 255, .04); --h-ok: #6ee7a8; --h-warn: #fbbf24; }
 [data-theme="light"] ada-home { --h-muted: #64748b; --h-line: rgba(0, 0, 0, .1); --h-link: #4f46e5; --h-surface: rgba(0, 0, 0, .03); --h-ok: #15803d; --h-warn: #b45309; }
 ada-home .h-wrap { display: grid; gap: 32px; padding-bottom: 32px; }
@@ -35,9 +36,9 @@ ada-home .h-link { justify-self: start; min-height: 40px; padding: 0 4px; border
 ada-home .h-notice-title { margin: 0; font-weight: 600; }
 ada-home .h-notice { margin: 0; overflow-wrap: anywhere; }
 ada-home figure { margin: 0; display: grid; gap: 6px; }
-ada-home .h-photo { display: block; width: 100%; padding: 0; border: 0; background: var(--h-surface); color: inherit; border-radius: 10px; cursor: pointer; overflow: hidden; }
+ada-home .h-photo { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; border-radius: 10px; cursor: pointer; overflow: hidden; }
 ada-home .h-photo img { display: block; width: 100%; height: 16rem; object-fit: cover; }
-ada-home .h-photo span { display: block; padding: 32px 16px; font-weight: 600; color: var(--h-link); }
+ada-home .h-photo span { display: block; padding: 16px 0; text-align: left; font-weight: 600; color: var(--h-link); }
 ada-home figcaption { font-size: .875rem; color: var(--h-muted); }
 ada-home .h-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 8px; }
 ada-home .h-tile { min-height: 56px; padding: 8px 14px; text-align: left; font-weight: 500; overflow-wrap: anywhere; border-radius: 10px; border: 1px solid var(--h-line); background: var(--h-surface); color: inherit; cursor: pointer; }
