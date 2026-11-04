@@ -1494,7 +1494,7 @@
 
     function trashItemHtml(item, actionHtml) {
       const icon = item.isDir ? 'fa-folder' : 'fa-file-lines';
-      return `<div class="bg-dark-bg border border-dark-border rounded-xl p-3">
+      return `<div data-trash-item class="bg-dark-bg border border-dark-border rounded-xl p-3">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <p class="text-sm text-white font-semibold break-words"><i class="fa-solid ${icon} text-gray-500 mr-2"></i>${escapeHtml(item.name)}</p>
@@ -1563,6 +1563,33 @@
       loadTrash();
     }
 
+    function askDeleteTrashItem(btn) {
+      const card = btn.closest('[data-trash-item]');
+      if (card.querySelector('[data-trash-confirm]')) return;
+      const box = document.createElement('div');
+      box.dataset.trashConfirm = '1';
+      box.className = 'mt-3 pt-3 border-t border-dark-border';
+      box.setAttribute('role', 'alertdialog');
+      box.innerHTML = `<p class="text-sm text-white font-semibold">Are you sure?</p>
+        <p class="text-xs text-gray-400 mt-1">${escapeHtml(btn.dataset.name)} will be deleted for good. This can't be undone.</p>
+        <div class="flex gap-2 mt-3">
+          <button data-trash-yes data-batch="${escapeHtml(btn.dataset.batch)}" data-name="${escapeHtml(btn.dataset.name)}" onclick="deleteTrashItem(this)" class="flex-1 text-sm font-semibold bg-rose-700 hover:bg-rose-600 text-white px-4 py-3 rounded-xl">Yes, delete</button>
+          <button onclick="this.closest('[data-trash-confirm]').remove()" class="flex-1 text-sm font-semibold bg-dark-card border border-dark-border text-gray-200 px-4 py-3 rounded-xl">Cancel</button>
+        </div>`;
+      card.append(box);
+    }
+
+    async function deleteTrashItem(btn) {
+      btn.disabled = true;
+      trashError('');
+      try {
+        await trashPost('delete', { batch: btn.dataset.batch, name: btn.dataset.name });
+      } catch (e) {
+        trashError(e.message);
+      }
+      loadTrash();
+    }
+
     async function loadTrash() {
       const pendingEl = document.getElementById('trash-pending-list');
       const heldEl = document.getElementById('trash-held-list');
@@ -1578,7 +1605,10 @@
         heldEl.innerHTML = data.held.length
           ? data.held.map(b => `<div>
               <p class="text-xs text-gray-400 mb-2">Cleared ${day(b.clearedAt)}. Deleted for good on ${day(b.deletesAt)}.</p>
-              <div class="space-y-2">${b.items.map(i => trashItemHtml(i, `<button onclick="restoreTrashItem(this)" data-batch="${escapeHtml(b.batch)}" data-name="${escapeHtml(i.name)}" class="flex-shrink-0 text-xs font-semibold bg-dark-card border border-dark-border hover:bg-dark-accent text-gray-200 px-3 py-2 rounded-lg">Restore</button>`)).join('')}</div>
+              <div class="space-y-2">${b.items.map(i => trashItemHtml(i, `<div class="flex-shrink-0 flex flex-col gap-2">
+                <button onclick="restoreTrashItem(this)" data-batch="${escapeHtml(b.batch)}" data-name="${escapeHtml(i.name)}" class="text-xs font-semibold bg-dark-card border border-dark-border hover:bg-dark-accent text-gray-200 px-3 py-2 rounded-lg">Restore</button>
+                <button onclick="askDeleteTrashItem(this)" data-batch="${escapeHtml(b.batch)}" data-name="${escapeHtml(i.name)}" class="text-xs font-semibold bg-dark-card border border-rose-700 text-rose-400 hover:bg-dark-accent px-3 py-2 rounded-lg">Delete now</button>
+              </div>`)).join('')}</div>
             </div>`).join('')
           : '<p class="text-sm text-gray-400">Nothing in holding.</p>';
         showTrashClearButton();

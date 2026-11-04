@@ -7,6 +7,7 @@
  * The VPS has no system trash, so Clear never deletes. It moves the items into a dated batch in ~/ops/trash-held,
  * and ~/ops/trash-purge.py deletes a batch for good once it is HOLD_DAYS old. Restore moves one item back to the
  * Trash Pending list. Putting it back where it came from is still a session's job, since that's usually the vault.
+ * Delete removes one held item right away, for when Alex doesn't want to wait out the hold.
  *
  * Only the live checkout touches the real folders. Any other tree (staging) works in data/trash-test/.
  */
@@ -112,10 +113,22 @@ function create({ pendingDir, heldDir } = defaultDirs()) {
     return { batch, moved: moving };
   }
 
-  function restore(batch, name) {
+  // Names are matched against the batch's own listing, so a request can't reach outside it.
+  function heldItemDir(batch, name) {
     if (typeof batch !== 'string' || !BATCH_RE.test(batch)) throw new TrashError(400, 'Unknown batch.');
     const dir = path.join(heldDir, batch);
     if (typeof name !== 'string' || !listItems(dir).some((i) => i.name === name)) throw new TrashError(404, 'That item is not in holding.');
+    return dir;
+  }
+
+  function dropBatchIfEmpty(dir) {
+    if (listItems(dir).length) return;
+    fs.rmSync(path.join(dir, MANIFEST), { force: true });
+    fs.rmdirSync(dir);
+  }
+
+  function restore(batch, name) {
+    const dir = heldItemDir(batch, name);
     const target = path.join(pendingDir, name);
     fs.mkdirSync(pendingDir, { recursive: true });
     if (fs.existsSync(target)) throw new TrashError(409, 'Trash Pending already has an item with that name.');
@@ -125,11 +138,15 @@ function create({ pendingDir, heldDir } = defaultDirs()) {
     const line = entry ? entry.raw : `- **\`${name}\`** — ${NO_REASON}`;
     const manifest = path.join(pendingDir, MANIFEST);
     if (!fs.existsSync(manifest) || !fs.readFileSync(manifest, 'utf8').includes(line)) fs.appendFileSync(manifest, `${line}\n`);
-    if (!listItems(dir).length) {
-      fs.rmSync(path.join(dir, MANIFEST), { force: true });
-      fs.rmdirSync(dir);
-    }
+    dropBatchIfEmpty(dir);
     return { restored: name };
+  }
+
+  function deleteNow(batch, name) {
+    const dir = heldItemDir(batch, name);
+    fs.rmSync(path.join(dir, name), { recursive: true });
+    dropBatchIfEmpty(dir);
+    return { deleted: name };
   }
 
   function mount(app, { isAdminReq }) {
@@ -144,9 +161,10 @@ function create({ pendingDir, heldDir } = defaultDirs()) {
     app.get('/api/trash-pending', adminOnly, guard(() => list()));
     app.post('/api/trash-pending/clear', adminOnly, confirm, guard((req) => clear(req.body && req.body.names)));
     app.post('/api/trash-pending/restore', adminOnly, confirm, guard((req) => restore(req.body && req.body.batch, req.body && req.body.name)));
+    app.post('/api/trash-pending/delete', adminOnly, confirm, guard((req) => deleteNow(req.body && req.body.batch, req.body && req.body.name)));
   }
 
-  return { list, clear, restore, mount };
+  return { list, clear, restore, deleteNow, mount };
 }
 
 module.exports = { create, HOLD_DAYS };
