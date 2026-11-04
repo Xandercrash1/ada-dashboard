@@ -6,6 +6,7 @@ const TZ = 'America/New_York';
 const MAX_TASKS = 5;
 const STALE_MS = 30000;
 const PHOTO_MS = 30000;
+const WHEEL_MS = 250;   // a trackpad fires many wheel events per swipe
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|avif)$/i;
 
 const STYLE = `
@@ -40,6 +41,11 @@ ada-home .h-photo { display: block; width: 100%; padding: 0; border: 0; backgrou
 ada-home .h-photo img { display: block; width: auto; height: auto; max-width: 100%; max-height: 70vh; border-radius: 10px; }
 ada-home .h-photo span { display: block; padding: 16px 0; text-align: left; font-weight: 600; color: var(--h-link); }
 ada-home figcaption { font-size: .875rem; color: var(--h-muted); }
+ada-home .h-confirm { display: grid; gap: 8px; }
+ada-home .h-confirm p { margin: 0; }
+ada-home .h-confirm div { display: flex; flex-wrap: wrap; gap: 8px; }
+ada-home .h-confirm button { min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-surface); color: inherit; font-weight: 600; cursor: pointer; }
+ada-home .h-confirm button.go { background: var(--h-link); border-color: var(--h-link); color: var(--bg); }
 ada-home .h-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 8px; }
 ada-home .h-tile { min-height: 56px; padding: 8px 14px; text-align: left; font-weight: 500; overflow-wrap: anywhere; border-radius: 10px; border: 1px solid var(--h-line); background: var(--h-surface); color: inherit; cursor: pointer; }
 ada-home .h-tile:hover { border-color: var(--h-link); }
@@ -93,7 +99,11 @@ class HomeView extends HTMLElement {
             <button type="button" class="h-photo" data-r="pick" aria-label="Add photos">
               <img data-r="img" alt="A shared house photo" hidden><span data-r="empty">Add the first photo</span>
             </button>
-            <figcaption data-r="pcap">Everyone with an account sees these photos. Tap or click to add yours.</figcaption>
+            <figcaption data-r="pcap" aria-live="polite" hidden></figcaption>
+            <div class="h-confirm" data-r="confirm" hidden>
+              <p data-r="ctext"></p>
+              <div><button type="button" class="go" data-r="cgo"></button><button type="button" data-r="cno">Cancel</button></div>
+            </div>
             <input type="file" data-r="file" accept="image/*" multiple hidden>
           </figure>
         </section>
@@ -106,8 +116,10 @@ class HomeView extends HTMLElement {
     this.r.nedit.onclick = () => window.openAnnouncementModal();
     this.r.all.onclick = () => window.switchTab('todo');
     this.r.pick.onclick = () => this.r.file.click();
-    this.r.file.onchange = () => this.upload([...this.r.file.files]);
-    this.photoTimer = setInterval(() => this.nextPhoto(), PHOTO_MS);
+    this.r.file.onchange = () => this.confirmUpload([...this.r.file.files]);
+    this.r.cno.onclick = () => this.closeConfirm();
+    this.r.pick.addEventListener('wheel', e => this.wheelPhoto(e), { passive: false });
+    this.startPhotoTimer();
   }
 
   disconnectedCallback() { clearInterval(this.photoTimer); }
@@ -252,14 +264,47 @@ class HomeView extends HTMLElement {
     if (photos.length) this.r.img.src = photos[this.photoAt % photos.length].path;
   }
 
+  startPhotoTimer() {
+    clearInterval(this.photoTimer);
+    this.photoTimer = setInterval(() => this.nextPhoto(), PHOTO_MS);
+  }
+
   nextPhoto() {
     if (document.hidden || !this.photos || this.photos.length < 2 || this.classList.contains('hidden')) return;
     this.photoAt = (this.photoAt + 1) % this.photos.length;
     this.drawPhoto();
   }
 
+  // Scrolling over the photo steps through them. With one photo the page scrolls as usual.
+  wheelPhoto(e) {
+    if (!this.photos || this.photos.length < 2 || !e.deltaY) return;
+    e.preventDefault();
+    const now = Date.now();
+    if (now - (this.wheelAt || 0) < WHEEL_MS) return;
+    this.wheelAt = now;
+    const n = this.photos.length;
+    this.photoAt = (this.photoAt + (e.deltaY > 0 ? 1 : n - 1)) % n;
+    this.drawPhoto();
+    this.startPhotoTimer();
+  }
+
+  confirmUpload(files) {
+    if (!files.length) return;
+    this.r.pcap.hidden = true;
+    this.r.ctext.textContent = `Everyone with an account will see ${files.length === 1 ? 'this photo' : 'these photos'}.`;
+    this.r.cgo.textContent = files.length === 1 ? 'Add photo' : `Add ${files.length} photos`;
+    this.r.cgo.onclick = () => { this.closeConfirm(); this.upload(files); };
+    this.r.confirm.hidden = false;
+  }
+
+  closeConfirm() {
+    this.r.confirm.hidden = true;
+    this.r.file.value = '';
+  }
+
   async upload(files) {
-    const cap = this.r.pcap, normal = cap.textContent;
+    const cap = this.r.pcap;
+    cap.hidden = false;
     let added = 0, failed = 0;
     for (const file of files) {
       cap.textContent = `Adding ${files.length === 1 ? 'your photo' : `photo ${added + failed + 1} of ${files.length}`}…`;
@@ -279,10 +324,8 @@ class HomeView extends HTMLElement {
         if (res.ok) added++; else failed++;
       } catch (e) { failed++; }
     }
-    this.r.file.value = '';
-    cap.textContent = failed
-      ? `${plural(failed, 'photo')} didn’t upload. Try a JPG or PNG, or a smaller file.`
-      : normal;
+    cap.textContent = failed ? `${plural(failed, 'photo')} didn’t upload. Try a JPG or PNG, or a smaller file.` : '';
+    cap.hidden = !failed;
     if (!added) return;
     const fresh = await getJson('/api/media/files?library=default').catch(() => null);
     if (Array.isArray(fresh)) {
