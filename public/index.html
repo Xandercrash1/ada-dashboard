@@ -34,7 +34,7 @@
     (function () {
       const nativeFetch = window.fetch.bind(window);
       const PAGES_OK = [/^\/api\/me(\/password)?$/, /^\/api\/pages(\/|$)/, /^\/api\/homepage$/, /^\/api\/templates(\/|$)/, /^\/api\/widgets\/sanitize$/,
-        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/todo(\/|$)/, /^\/api\/media\/(libraries|files)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/login$/, /^\/api\/logout$/];
+        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/todo(\/|$)/, /^\/api\/media\/(libraries|files|upload)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/login$/, /^\/api\/logout$/];
       window.fetch = async function (input, init) {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];

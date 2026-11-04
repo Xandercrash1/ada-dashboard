@@ -5,6 +5,8 @@
 const TZ = 'America/New_York';
 const MAX_TASKS = 5;
 const STALE_MS = 30000;
+const PHOTO_MS = 30000;
+const IMAGE_RE = /\.(jpe?g|png|webp|gif|avif)$/i;
 
 const STYLE = `
 ada-home { display: block; max-width: 60rem; margin: 0 auto; --h-muted: rgba(226, 232, 240, .65); --h-line: rgba(255, 255, 255, .1); --h-link: #818cf8; --h-surface: rgba(255, 255, 255, .04); --h-ok: #6ee7a8; --h-warn: #fbbf24; }
@@ -33,7 +35,9 @@ ada-home .h-link { justify-self: start; min-height: 40px; padding: 0 4px; border
 ada-home .h-notice-title { margin: 0; font-weight: 600; }
 ada-home .h-notice { margin: 0; overflow-wrap: anywhere; }
 ada-home figure { margin: 0; display: grid; gap: 6px; }
-ada-home figure img { display: block; width: 100%; max-height: 22rem; object-fit: cover; border-radius: 10px; }
+ada-home .h-photo { display: block; width: 100%; padding: 0; border: 0; background: var(--h-surface); color: inherit; border-radius: 10px; cursor: pointer; overflow: hidden; }
+ada-home .h-photo img { display: block; width: 100%; height: 16rem; object-fit: cover; }
+ada-home .h-photo span { display: block; padding: 32px 16px; font-weight: 600; color: var(--h-link); }
 ada-home figcaption { font-size: .875rem; color: var(--h-muted); }
 ada-home .h-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 8px; }
 ada-home .h-tile { min-height: 56px; padding: 8px 14px; text-align: left; font-weight: 500; overflow-wrap: anywhere; border-radius: 10px; border: 1px solid var(--h-line); background: var(--h-surface); color: inherit; cursor: pointer; }
@@ -84,7 +88,13 @@ class HomeView extends HTMLElement {
           <p class="h-notice-title" data-r="ntitle" hidden></p>
           <p class="h-notice" data-r="ntext" hidden></p>
           <button type="button" class="h-link" data-r="nedit" hidden>Edit announcement</button>
-          <figure data-r="photo" hidden><img data-r="img" alt="Photo of the day"><figcaption>Photo of the day</figcaption></figure>
+          <figure>
+            <button type="button" class="h-photo" data-r="pick" aria-label="Add photos">
+              <img data-r="img" alt="A shared house photo" hidden><span data-r="empty">Add the first photo</span>
+            </button>
+            <figcaption data-r="pcap">Everyone with an account sees these photos. Tap or click to add yours.</figcaption>
+            <input type="file" data-r="file" accept="image/*" multiple hidden>
+          </figure>
         </section>
       </div>
       <section aria-labelledby="h-pages"><h2 id="h-pages">Your pages</h2><div class="h-tiles" data-r="tiles"></div></section>
@@ -94,7 +104,12 @@ class HomeView extends HTMLElement {
     this.querySelectorAll('[data-r]').forEach(n => { this.r[n.dataset.r] = n; });
     this.r.nedit.onclick = () => window.openAnnouncementModal();
     this.r.all.onclick = () => window.switchTab('todo');
+    this.r.pick.onclick = () => this.r.file.click();
+    this.r.file.onchange = () => this.upload([...this.r.file.files]);
+    this.photoTimer = setInterval(() => this.nextPhoto(), PHOTO_MS);
   }
+
+  disconnectedCallback() { clearInterval(this.photoTimer); }
 
   // Called each time Home is drawn. Skips the network if it just loaded.
   async show() {
@@ -212,7 +227,8 @@ class HomeView extends HTMLElement {
       getJson('/api/media/files?library=default').catch(() => [])
     ]);
     this.announcement = doc && doc.announcement;
-    this.photos = Array.isArray(files) ? files : [];
+    this.photos = Array.isArray(files) ? files.filter(f => IMAGE_RE.test(f.filename)) : [];
+    this.photoAt = Math.floor(Math.random() * this.photos.length);
     this.drawHouse();
   }
 
@@ -224,13 +240,57 @@ class HomeView extends HTMLElement {
     this.r.ntitle.textContent = title; this.r.ntitle.hidden = !title;
     this.r.ntext.textContent = text; this.r.ntext.hidden = !text;
     this.r.nedit.hidden = !this.isAdmin;
+    this.drawPhoto();
+    this.r.house.hidden = false;
+  }
+
+  drawPhoto() {
     const photos = this.photos || [];
-    if (photos.length) {
-      const day = Math.floor(Date.now() / 86400000);
-      this.r.img.src = photos[day % photos.length].path;
+    this.r.img.hidden = !photos.length;
+    this.r.empty.hidden = !!photos.length;
+    if (photos.length) this.r.img.src = photos[this.photoAt % photos.length].path;
+  }
+
+  nextPhoto() {
+    if (document.hidden || !this.photos || this.photos.length < 2 || this.classList.contains('hidden')) return;
+    this.photoAt = (this.photoAt + 1) % this.photos.length;
+    this.drawPhoto();
+  }
+
+  async upload(files) {
+    const cap = this.r.pcap, normal = cap.textContent;
+    let added = 0, failed = 0;
+    for (const file of files) {
+      cap.textContent = `Adding ${files.length === 1 ? 'your photo' : `photo ${added + failed + 1} of ${files.length}`}…`;
+      try {
+        const base64 = await new Promise((ok, no) => {
+          const rd = new FileReader();
+          rd.onload = () => ok(rd.result);
+          rd.onerror = no;
+          rd.readAsDataURL(file);
+        });
+        // The timestamp keeps two phones' IMG_0001.jpg from overwriting each other.
+        const res = await fetch('/api/media/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ library: 'default', filename: `${Date.now()}-${file.name}`, base64 })
+        });
+        if (res.ok) added++; else failed++;
+      } catch (e) { failed++; }
     }
-    this.r.photo.hidden = !photos.length;
-    this.r.house.hidden = !(title || text || photos.length || this.isAdmin);
+    this.r.file.value = '';
+    cap.textContent = failed
+      ? `${plural(failed, 'photo')} didn’t upload. Try a JPG or PNG, or a smaller file.`
+      : normal;
+    if (!added) return;
+    const fresh = await getJson('/api/media/files?library=default').catch(() => null);
+    if (Array.isArray(fresh)) {
+      const known = new Set((this.photos || []).map(f => f.path));
+      this.photos = fresh.filter(f => IMAGE_RE.test(f.filename));
+      const first = this.photos.findIndex(f => !known.has(f.path));
+      if (first >= 0) this.photoAt = first;
+      this.drawPhoto();
+    }
   }
 
   async loadPages() {

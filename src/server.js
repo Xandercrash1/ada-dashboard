@@ -1258,6 +1258,7 @@ function authorizeRole(req, res, next) {
     if (!taskVisibleTo(req, todoStore.readTasks().find(t => t.id === mm[1]))) return deny();
     if (mm[2] ? m === 'POST' : (m === 'PATCH' || m === 'DELETE')) return next();
   }
+  if (p === '/api/media/upload' && m === 'POST') return next();   // the handler limits pages users to images in the shared library
   if (m === 'GET' && ['/api/weather', '/api/glance', '/api/media/libraries', '/api/media/files', '/api/agent/models'].includes(p)) return next();
   if (p === '/api/agent/sessions' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/agent\/sessions\/([^/]+)(?:\/(chat|job))?$/.exec(p))) {
@@ -4823,15 +4824,22 @@ app.post('/api/media/upload', async (req, res) => {
     if (!matches || matches.length !== 3) return res.status(400).json({ error: 'Invalid base64 string format' });
 
     const mimeType = matches[1];
+    // Home's photo strip lets every account add photos: images only, into the shared
+    // library. sharp re-encodes them below, so nothing but a picture reaches /media.
+    if (!isAdminReq(req) && (cleanLib !== 'default' || !mimeType.startsWith('image/') || mimeType === 'image/svg+xml')) {
+      return res.status(403).json({ error: 'Only photos can be added here.' });
+    }
     const buffer = Buffer.from(matches[2], 'base64');
     
     // Compress images automatically
     if (mimeType.startsWith('image/')) {
       const sharp = require('sharp');
-      const finalName = cleanName.replace(/\.[^/.]+$/, "") + ".webp";
+      const stamp = isAdminReq(req) ? '' : `${Date.now()}-`;   // a pages user can't overwrite an existing photo
+      const finalName = stamp + cleanName.replace(/\.[^/.]+$/, "") + ".webp";
       const targetPath = path.join(libDir, finalName);
       
       await sharp(buffer)
+        .rotate()   // phone photos: apply the EXIF orientation before the metadata is dropped
         .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 80 })
         .toFile(targetPath);
