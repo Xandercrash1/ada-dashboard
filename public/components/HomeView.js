@@ -36,8 +36,8 @@ ada-home .h-link { justify-self: start; min-height: 40px; padding: 0 4px; border
 ada-home .h-notice-title { margin: 0; font-weight: 600; }
 ada-home .h-notice { margin: 0; overflow-wrap: anywhere; }
 ada-home figure { margin: 0; display: grid; gap: 6px; }
-ada-home .h-photo { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; border-radius: 10px; cursor: pointer; overflow: hidden; }
-ada-home .h-photo img { display: block; width: 100%; height: 16rem; object-fit: cover; }
+ada-home .h-photo { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
+ada-home .h-photo img { display: block; width: auto; height: auto; max-width: 100%; max-height: 70vh; border-radius: 10px; }
 ada-home .h-photo span { display: block; padding: 16px 0; text-align: left; font-weight: 600; color: var(--h-link); }
 ada-home figcaption { font-size: .875rem; color: var(--h-muted); }
 ada-home .h-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 8px; }
