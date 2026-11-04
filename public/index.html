@@ -276,10 +276,12 @@
     
     <!-- TAB 0: HOME -->
     <section id="view-home" class="space-y-6">
+      <!-- The Home tab: one fixed page for every account (components/HomeView.js). Custom pages keep everything below. -->
+      <ada-home id="home-view" class="hidden"></ada-home>
       <ada-glance id="home-glance-banner" class="block mb-6"></ada-glance>
 
       <!-- Agent-designed widget cards (homepage.json .widgets). Hidden when empty. -->
-            <div class="flex flex-wrap items-center justify-between gap-y-2 mb-4">
+            <div id="canvas-header" class="flex flex-wrap items-center justify-between gap-y-2 mb-4">
         <h2 class="text-gray-200 font-semibold text-lg flex items-center gap-2">
           <i id="canvas-title-icon" class="fa-solid fa-layer-group text-indigo-400"></i> <span id="canvas-title-text">Dashboard</span>
         </h2>
@@ -6857,7 +6859,26 @@ ${body}
       else if (e.target && e.target.id === 'section-library-modal') closeSectionLibrary();
     });
 
+    // Home is the fixed page in <ada-home>; the canvas below only draws custom pages.
+    // homepage.json's widgets stay on disk, unused.
+    function syncHomeView() {
+      const onHome = currentCanvasPage === 'home';
+      const home = document.getElementById('home-view');
+      home.classList.toggle('hidden', !onHome);
+      ['home-glance-banner', 'canvas-header'].forEach(id => document.getElementById(id).classList.toggle('hidden', onHome));
+      if (!onHome) return false;
+      document.getElementById('builder-page-host').classList.add('hidden');
+      document.getElementById('home-widgets').classList.add('hidden');
+      // The component is a module, so it can arrive after the first draw.
+      customElements.whenDefined('ada-home').then(() => {
+        if (homepageDoc) home.setAnnouncement(homepageDoc.announcement);
+        home.show();
+      });
+      return true;
+    }
+
     function renderHomepage() {
+      if (syncHomeView()) return;
       const pageInfo = customPages.find(p => p.id === currentCanvasPage);
       const titleText = pageInfo ? pageInfo.title : 'Dashboard';
       const titleIcon = pageInfo ? pageInfo.icon : 'fa-layer-group';
