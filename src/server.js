@@ -1277,6 +1277,7 @@ registerPageBuilder(app, { readPagesRegistry, getPageDocPath, readJsonStoreOrThr
 app.get('/api/me', (req, res) => res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : 'pages' }));
 deviceEnrollment.mountAdmin(app, { isAdminReq });
 require('./projects').create().mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
+require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
 app.post('/api/me/password', (req, res) => {
   const name = ownerName(req);

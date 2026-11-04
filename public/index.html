@@ -498,6 +498,9 @@
           <button onclick="switchServerSubTab('users')" id="subtab-btn-users" title="Users" aria-label="Users" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
             <i class="fa-solid fa-users text-sky-400"></i> <span class="hidden sm:inline">Users</span>
           </button>
+          <button onclick="switchServerSubTab('trash')" id="subtab-btn-trash" title="Trash Pending" aria-label="Trash Pending" class="flex-shrink-0 px-4 py-2 rounded-lg text-gray-400 hover:text-white flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-trash-can text-orange-400"></i> <span class="hidden sm:inline">Trash</span>
+          </button>
         </div>
 
         <button onclick="refreshTelemetry()" class="flex-shrink-0 text-xs bg-dark-bg border border-dark-border hover:bg-dark-accent text-gray-300 px-3.5 py-2 rounded-xl transition-colors flex items-center gap-1.5">
@@ -789,6 +792,21 @@
       </div>
 
       <!-- Users (fb-1790201502191) — admin only -->
+      <div id="server-sub-trash" class="hidden space-y-4">
+        <div class="bg-dark-card border border-dark-border rounded-2xl p-5">
+          <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-trash-can text-orange-400 mr-2"></i>Trash Pending</h3>
+          <p class="text-xs text-gray-400 mt-1">What Ada has set aside on this server. Clearing moves it to holding, and it's deleted for good after 30 days.</p>
+          <p id="trash-error" class="hidden text-xs text-rose-400 mt-3" role="alert"></p>
+          <div id="trash-pending-list" class="space-y-2 mt-4"></div>
+          <div id="trash-clear-box" class="mt-4"></div>
+        </div>
+        <div class="bg-dark-card border border-dark-border rounded-2xl p-5">
+          <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-box-archive text-gray-400 mr-2"></i>In holding</h3>
+          <p class="text-xs text-gray-400 mt-1">Restore puts an item back on the list above. To return it to where it came from, ask Ada.</p>
+          <div id="trash-held-list" class="space-y-4 mt-4"></div>
+        </div>
+      </div>
+
       <div id="server-sub-users" class="hidden space-y-4">
         <div class="bg-dark-card border border-dark-border rounded-2xl p-5">
           <div class="flex items-center justify-between mb-3">
@@ -1438,7 +1456,8 @@
       try { localStorage.setItem('ada_serverSubTab', sub); } catch (e) {}
       if (sub === 'users') loadUsers();
       if (sub === 'publishing') loadPublishing();
-      ['health', 'agents', 'feedback', 'scheduled', 'users', 'publishing'].forEach(s => {
+      if (sub === 'trash') loadTrash();
+      ['health', 'agents', 'feedback', 'scheduled', 'users', 'publishing', 'trash'].forEach(s => {
         document.getElementById(`server-sub-${s}`).classList.add('hidden');
         const btn = document.getElementById(`subtab-btn-${s}`);
         if (btn) {
@@ -1461,6 +1480,113 @@
       }
       if (sub === 'feedback') {
         loadFeedback();
+      }
+    }
+
+    // ===================== TRASH PENDING (src/trash-pending.js) =====================
+    let trashNames = [];
+
+    function trashSize(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1048576) return `${Math.round(bytes / 1024)} KB`;
+      return `${(bytes / 1048576).toFixed(1)} MB`;
+    }
+
+    function trashItemHtml(item, actionHtml) {
+      const icon = item.isDir ? 'fa-folder' : 'fa-file-lines';
+      return `<div class="bg-dark-bg border border-dark-border rounded-xl p-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-sm text-white font-semibold break-words"><i class="fa-solid ${icon} text-gray-500 mr-2"></i>${escapeHtml(item.name)}</p>
+            <p class="text-xs text-gray-400 mt-1 break-words">${escapeHtml(item.reason)}</p>
+            <p class="text-xs text-gray-500 mt-1">${trashSize(item.size)}</p>
+          </div>
+          ${actionHtml}
+        </div>
+      </div>`;
+    }
+
+    function trashError(msg) {
+      const el = document.getElementById('trash-error');
+      el.textContent = msg || '';
+      el.classList.toggle('hidden', !msg);
+    }
+
+    async function trashPost(route, body) {
+      const r = await fetch(`/api/trash-pending/${route}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Trash-Confirm': '1' },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'That didn\u2019t work. Try again.');
+      return data;
+    }
+
+    function showTrashClearButton() {
+      const box = document.getElementById('trash-clear-box');
+      box.innerHTML = trashNames.length
+        ? `<button onclick="askClearTrash()" class="w-full sm:w-auto text-sm font-semibold bg-orange-700 hover:bg-orange-600 text-white px-4 py-3 rounded-xl">Clear ${trashNames.length === 1 ? '1 item' : `all ${trashNames.length} items`}</button>`
+        : '';
+    }
+
+    function askClearTrash() {
+      const count = trashNames.length === 1 ? 'this item' : `these ${trashNames.length} items`;
+      document.getElementById('trash-clear-box').innerHTML = `<div class="bg-dark-bg border border-orange-700 rounded-xl p-3">
+        <p class="text-sm text-white">Move ${count} to holding? They'll be deleted for good after 30 days unless you restore them.</p>
+        <div class="flex gap-2 mt-3">
+          <button id="trash-clear-yes" onclick="confirmClearTrash()" class="flex-1 text-sm font-semibold bg-orange-700 hover:bg-orange-600 text-white px-4 py-3 rounded-xl">Yes, clear</button>
+          <button onclick="showTrashClearButton()" class="flex-1 text-sm font-semibold bg-dark-card border border-dark-border text-gray-200 px-4 py-3 rounded-xl">Cancel</button>
+        </div>
+      </div>`;
+    }
+
+    async function confirmClearTrash() {
+      document.getElementById('trash-clear-yes').disabled = true;
+      trashError('');
+      try {
+        await trashPost('clear', { names: trashNames });
+      } catch (e) {
+        trashError(e.message);
+      }
+      loadTrash();
+    }
+
+    async function restoreTrashItem(btn) {
+      btn.disabled = true;
+      trashError('');
+      try {
+        await trashPost('restore', { batch: btn.dataset.batch, name: btn.dataset.name });
+      } catch (e) {
+        trashError(e.message);
+      }
+      loadTrash();
+    }
+
+    async function loadTrash() {
+      const pendingEl = document.getElementById('trash-pending-list');
+      const heldEl = document.getElementById('trash-held-list');
+      try {
+        const r = await fetch('/api/trash-pending');
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error);
+        trashNames = data.pending.map(i => i.name);
+        pendingEl.innerHTML = data.pending.length
+          ? data.pending.map(i => trashItemHtml(i, '')).join('')
+          : '<p class="text-sm text-gray-400">Nothing waiting to be cleared.</p>';
+        const day = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        heldEl.innerHTML = data.held.length
+          ? data.held.map(b => `<div>
+              <p class="text-xs text-gray-400 mb-2">Cleared ${day(b.clearedAt)}. Deleted for good on ${day(b.deletesAt)}.</p>
+              <div class="space-y-2">${b.items.map(i => trashItemHtml(i, `<button onclick="restoreTrashItem(this)" data-batch="${escapeHtml(b.batch)}" data-name="${escapeHtml(i.name)}" class="flex-shrink-0 text-xs font-semibold bg-dark-card border border-dark-border hover:bg-dark-accent text-gray-200 px-3 py-2 rounded-lg">Restore</button>`)).join('')}</div>
+            </div>`).join('')
+          : '<p class="text-sm text-gray-400">Nothing in holding.</p>';
+        showTrashClearButton();
+      } catch (e) {
+        trashError('Couldn\u2019t load Trash Pending. Reload the page, or ask Ada.');
+        pendingEl.innerHTML = '';
+        heldEl.innerHTML = '';
+        document.getElementById('trash-clear-box').innerHTML = '';
       }
     }
 
