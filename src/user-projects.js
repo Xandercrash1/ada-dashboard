@@ -19,7 +19,7 @@ const SITE_TIMEOUT_MS = 300000;
 const SITES_PER_DAY = 30;
 const MAX_RUNNING = 2;
 const MAX_SITE_BYTES = 1024 * 1024;
-const KEEP_VERSIONS = 6;
+const KEEP_VERSIONS = 20;
 const MAX_LISTS = 30;
 const MAX_ENTRIES = 2000;
 const MAX_ENTRY_BYTES = 20 * 1024;
@@ -319,12 +319,14 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
       const p = find(req, res, load());
       if (!p) return;
       const editing = req.query.edit === '1' && p.owner === ownerName(req);
-      const source = (editing && newestDraft(p.id)) || newestVersion(p.id);
+      // Only the owner can look back at an older version.
+      const old = req.query.version && p.owner === ownerName(req) && versions(p.id).includes(String(req.query.version)) ? path.join(versionsDir(p.id), String(req.query.version)) : null;
+      const source = old || (editing && newestDraft(p.id)) || newestVersion(p.id);
       if (!source) return res.status(404).json({ error: 'No site yet.' });
       let html = fs.readFileSync(source, 'utf8');
       const photo = p.hasImage && fs.existsSync(imagePath(p.id)) ? `data:image/webp;base64,${fs.readFileSync(imagePath(p.id)).toString('base64')}` : BLANK_PIXEL;
       html = injectAfterHead(html.split('{{PHOTO}}').join(photo), RUNTIME);
-      if (editing) html = /<\/body>/i.test(html) ? html.replace(/<\/body>(?![\s\S]*<\/body>)/i, `${EDITOR}</body>`) : html + EDITOR;
+      if (editing && !old) html = /<\/body>/i.test(html) ? html.replace(/<\/body>(?![\s\S]*<\/body>)/i, `${EDITOR}</body>`) : html + EDITOR;
       res.set({ 'Content-Security-Policy': SITE_CSP, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'private, no-cache' }).type('html').send(html);
     }));
 
@@ -481,6 +483,21 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
       const d = newestDraft(p.id);
       if (!d) return res.status(400).json({ error: 'There is nothing to undo.' });
       fs.rmSync(d, { force: true });
+      res.json(view(touch(p.id, {}), who));
+    }));
+
+    app.get('/api/user-projects/:id/versions', guard((req, res) => {
+      const p = findOwned(req, res, load());
+      if (p) res.json(versions(p.id).reverse().map((name) => ({ name, at: new Date(Number(name.slice(0, -5))).toISOString() })));
+    }));
+    // Going back makes a draft like any other change, so Save makes it live and Undo takes it back.
+    app.post('/api/user-projects/:id/versions/:name/restore', guard((req, res) => {
+      const who = ownerName(req);
+      const p = findOwned(req, res, load());
+      if (!p) return;
+      if (!versions(p.id).includes(req.params.name)) return res.status(404).json({ error: 'That version is gone.' });
+      fs.mkdirSync(draftsDir(p.id), { recursive: true });
+      fs.copyFileSync(path.join(versionsDir(p.id), req.params.name), path.join(draftsDir(p.id), stamp()));
       res.json(view(touch(p.id, {}), who));
     }));
 

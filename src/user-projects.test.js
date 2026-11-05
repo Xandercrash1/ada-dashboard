@@ -82,3 +82,35 @@ test('project notes leave out lines that could hold a credential', () => {
   assert.ok(c.notes.includes('https://keys.example'));
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('older versions can be listed and restored as a draft, and a bad name is refused', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'up-'));
+  const mod = require('./user-projects').create({ dataDir: dir, run: async () => '' });
+  const routes = {};
+  const app = {}; ['get', 'post', 'patch', 'delete'].forEach((m) => { app[m] = (u, f) => { routes[`${m} ${u}`] = f; }; });
+  let who = 'alex';
+  mod.mount(app, { ownerName: () => who, isAdminReq: () => true });
+  const call = async (key, params, body) => {
+    let out; const res = { status(c) { this.code = c; return this; }, json(b) { out = { code: this.code || 200, body: b }; return out; } };
+    await routes[key]({ params, body, query: {} }, res);
+    return out;
+  };
+  const page = (n) => `<!doctype html><html><body>${n}</body></html>`;
+  const p = (await call('post /api/user-projects', {}, { name: 'P', kind: 'splash' })).body;
+  for (const n of ['one', 'two']) {
+    await call('post /api/user-projects/:id/html', { id: p.id }, { html: page(n) });
+    await call('post /api/user-projects/:id/save', { id: p.id }, {});
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  const list = (await call('get /api/user-projects/:id/versions', { id: p.id })).body;
+  assert.strictEqual(list.length, 2);
+  assert.ok(list[0].name > list[1].name);
+  const restored = (await call('post /api/user-projects/:id/versions/:name/restore', { id: p.id, name: list[1].name })).body;
+  assert.strictEqual(restored.drafts, 1);
+  const draftDir = path.join(dir, 'user-project-sites', p.id, 'drafts');
+  assert.ok(fs.readFileSync(path.join(draftDir, fs.readdirSync(draftDir)[0]), 'utf8').includes('one'));
+  assert.strictEqual((await call('post /api/user-projects/:id/versions/:name/restore', { id: p.id, name: '../../user-projects.json' })).code, 404);
+  who = 'someone-else';
+  assert.strictEqual((await call('get /api/user-projects/:id/versions', { id: p.id })).code, 404);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

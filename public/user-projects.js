@@ -334,11 +334,35 @@
     save.onclick = finish('save');
     const discard = el('button', { type: 'button', id: 'up-discard', class: quiet }, p.hasSite ? 'Discard changes' : 'Discard');
     discard.onclick = finish('discard');
-    const undo = el('button', { type: 'button', id: 'up-undo', class: quiet, disabled: !p.drafts }, 'Undo Ada\'s last change');
+    const undo = el('button', { type: 'button', id: 'up-undo', class: quiet, disabled: !p.drafts }, 'Undo last change');
     undo.onclick = async () => {
       try { state.p = await api(`/api/user-projects/${p.id}/undo`, 'POST', {}); state.flash = ''; if (!state.p.drafts && !state.p.hasSite) state.editing = false; }
       catch (e) { state.flash = e.message; }
       draw(page, state);
+    };
+    const historyBox = el('div', { id: 'up-history', class: 'grid gap-1' });
+    historyBox.hidden = true;
+    const history = el('button', { type: 'button', id: 'up-history-btn', class: quiet, disabled: !p.versions }, 'History');
+    history.onclick = async () => {
+      if (!historyBox.hidden) { historyBox.hidden = true; frame.src = src; status.textContent = ''; return; }
+      let list;
+      try { list = await api(`/api/user-projects/${p.id}/versions`); }
+      catch (e) { status.textContent = e.message; return; }
+      const row = (v, i) => {
+        const when = new Date(v.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+        const look = el('button', { type: 'button', class: quiet }, 'Preview');
+        look.onclick = () => { frame.src = `/api/user-projects/${encodeURIComponent(p.id)}/site?version=${encodeURIComponent(v.name)}`; status.textContent = `Showing the version from ${when}. Close History to go back to your working copy.`; };
+        const back = el('button', { type: 'button', class: quiet }, 'Go back to this');
+        back.onclick = async () => {
+          try { state.p = await api(`/api/user-projects/${p.id}/versions/${encodeURIComponent(v.name)}/restore`, 'POST', {}); state.flash = `Back to the version from ${when}. Press Save to keep it, or Undo to change your mind.`; }
+          catch (e) { state.flash = e.message; }
+          draw(page, state);
+        };
+        return el('div', { class: 'flex flex-wrap items-center justify-between gap-2 py-1 border-b border-gray-200 dark:border-dark-border last:border-0' },
+          el('span', { class: 'text-sm' }, `${when}${i === 0 ? ' (last saved)' : ''}`), el('div', { class: 'flex flex-wrap gap-2' }, look, back));
+      };
+      historyBox.replaceChildren(el('p', { class: note }, 'The last 20 saved versions. Things people added to the page, such as list entries and photos, stay as they are.'), ...list.map(row));
+      historyBox.hidden = false;
     };
     const ask = el('textarea', { id: 'up-ask', class: input, rows: 2, maxLength: 2000, placeholder: 'Add a page for costs, or make the colours warmer' });
     const go = el('button', { type: 'button', id: 'up-ask-go', class: primary }, 'Send');
@@ -356,7 +380,8 @@
       status, log,
       el('div', { class: 'flex flex-wrap items-end gap-2' },
         el('div', { class: 'grid gap-1 flex-1 min-w-[12rem]' }, el('label', { htmlFor: 'up-ask', class: note }, 'Ask Ada to change something'), ask), go),
-      el('div', { class: 'flex flex-wrap gap-2' }, save, discard, undo, ...photoControls(page, state, p.hasImage ? 'Change photo' : 'Add a photo'))));
+      el('div', { class: 'flex flex-wrap gap-2' }, save, discard, undo, history, ...photoControls(page, state, p.hasImage ? 'Change photo' : 'Add a photo')),
+      historyBox));
     return out;
   }
 
