@@ -5,7 +5,7 @@
 const TZ = 'America/New_York';
 const MAX_TASKS = 5;
 const STALE_MS = 30000;
-const PHOTO_MS = 30000;
+const PHOTO_MS = 120000;
 const WHEEL_MS = 250;   // a trackpad fires many wheel events per swipe
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|avif)$/i;
 
