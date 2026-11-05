@@ -32,11 +32,12 @@
 
   // ------------------------------------------------------------ new project box
   let dialog;
+  let dialogProject = null;
   function buildDialog() {
     dialog = el('dialog', { id: 'up-dialog', class: `${card} p-5 text-gray-900 dark:text-gray-100 w-[min(30rem,calc(100vw-32px))]` });
     dialog.innerHTML = `
       <form id="up-form" method="dialog" class="grid gap-4">
-        <h3 class="text-lg font-semibold">New project</h3>
+        <h3 id="up-title" class="text-lg font-semibold">New project</h3>
         <div class="grid gap-1"><label for="up-name" class="${note}">Name</label><input id="up-name" class="${input}" maxlength="120" autocomplete="off"></div>
         <fieldset class="grid gap-2"><legend class="${note} mb-2">Start with</legend>
           <label class="flex gap-3 p-3 rounded-lg border border-gray-300 dark:border-dark-border cursor-pointer"><input type="radio" name="up-kind" id="up-kind-splash" value="splash" checked class="mt-1"><span><span class="block font-medium">Splash page</span><span class="${note}">A website built from your description, with its own tabs and design.</span></span></label>
@@ -70,8 +71,10 @@
     q('#up-form').addEventListener('submit', (e) => { e.preventDefault(); createFromDialog(true); });
     dialog.sync = sync;
   }
-  function openNew() {
+  function openNew(project) {
     if (!dialog) buildDialog();
+    dialogProject = project || null;
+    dialog.querySelector('#up-title').textContent = project ? `New page for ${project.name}` : 'New project';
     dialog.querySelector('#up-form').reset();
     dialog.querySelector('#up-error').hidden = true;
     dialog.sync();
@@ -88,7 +91,7 @@
     if (kind === 'splash' && wantDraft && !about) { say('Tell Ada what it should do, or choose Start blank.'); q('#up-about').focus(); return; }
     q('#up-create').disabled = q('#up-blank').disabled = true;
     try {
-      const p = await api('/api/user-projects', 'POST', { name, kind, text: kind === 'splash' ? about : '' });
+      const p = await api('/api/user-projects', 'POST', { name, kind, text: kind === 'splash' ? about : '', ...(dialogProject ? { project: dialogProject.slug } : {}) });
       const photo = q('#up-photo').files[0];
       let photoError = '';
       if (kind === 'splash' && photo) {
@@ -106,7 +109,7 @@
   // ------------------------------------------------------------ list
   async function renderList(host) {
     const add = el('button', { type: 'button', id: 'up-new', class: primary }, 'New project');
-    add.onclick = openNew;
+    add.onclick = () => openNew();
     const body = el('div', { class: 'grid gap-5' });
     host.replaceChildren(el('div', { class: 'grid gap-3' }, el('div', null, add), body));
     let all;
@@ -122,7 +125,7 @@
     const group = (title, list) => el('div', { class: 'grid gap-2' },
       el('h3', { class: 'text-xs uppercase tracking-wide text-gray-400' }, title),
       el('div', { class: `${card} overflow-hidden` }, ...list.map(row)));
-    const mine = all.filter((p) => p.mine);
+    const mine = all.filter((p) => p.mine && !p.project);   // pages of a vault project are listed on its hub
     const shared = all.filter((p) => !p.mine);
     const parts = [];
     if (mine.length) parts.push(group('Your projects', mine));
@@ -144,7 +147,7 @@
     const page = el('div', { class: 'grid gap-5' });
     const state = { p, saveTimer: null, undo: null, flash: sessionStorage.getItem('up-photo-error') || '' };
     sessionStorage.removeItem('up-photo-error');
-    root.replaceChildren(el('a', { href: '#projects', class: 'text-indigo-400 hover:text-indigo-300 text-sm' }, el('i', { class: 'fa-solid fa-arrow-left' }), ' All projects'), page);
+    root.replaceChildren(el('a', { href: p.project ? `#projects/${encodeURIComponent(p.project)}` : '#projects', class: 'text-indigo-400 hover:text-indigo-300 text-sm' }, el('i', { class: 'fa-solid fa-arrow-left' }), p.project ? ` ${p.projectName}` : ' All projects'), page);
     draw(page, state);
     if (pendingDrafts.has(id)) {
       const about = pendingDrafts.get(id);
@@ -444,5 +447,20 @@
     return out;
   }
 
-  window.AdaUserProjects = { renderList, show };
+  // The pages made for one vault project, with the button to add another.
+  async function renderProjectPages(host, project) {
+    const add = el('button', { type: 'button', id: 'up-new-page', class: primary }, 'New page');
+    add.onclick = () => openNew(project);
+    const head = el('div', { class: 'flex items-center justify-between gap-3' }, el('div', { class: 'text-xs uppercase tracking-wide text-gray-400' }, 'Pages Ada built'), add);
+    const body = el('div', { class: 'mt-2 grid gap-1 text-sm' });
+    host.replaceChildren(head, body);
+    try {
+      const pages = (await api('/api/user-projects')).filter((p) => p.mine && p.project === project.slug);
+      if (pages.length) body.replaceChildren(...pages.map((p) => el('a', { href: `#projects/mine/${encodeURIComponent(p.id)}`, class: 'text-indigo-400 hover:text-indigo-300 break-words' }, p.name)));
+      else body.replaceChildren(el('p', { class: note }, 'Nothing yet. Describe a page and Ada builds it knowing about this project.'));
+      return pages;
+    } catch (e) { body.replaceChildren(el('p', { class: 'text-sm text-rose-500' }, e.message)); }
+  }
+
+  window.AdaUserProjects = { renderList, renderProjectPages, show };
 })();

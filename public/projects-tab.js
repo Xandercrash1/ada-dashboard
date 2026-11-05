@@ -94,33 +94,24 @@
         <div class="text-sm text-gray-400 mt-1">Threads that need your decision. Write replies and press Submit; Ada answers there.</div></a>
       <div class="${card} p-5"><div class="text-xs uppercase tracking-wide text-gray-400 mb-2">Project status</div>
         <div class="${prose}">${h.statusMd ? md(h.statusMd) : '<p class="text-gray-400">No projectStatus.md yet.</p>'}</div></div>
-      <div class="${card} p-5"><div class="flex items-center justify-between"><div class="text-xs uppercase tracking-wide text-gray-400">Pages (${(h.pages || []).length})</div>
-        <button id="pj-new-page" class="${btn} bg-indigo-600 hover:bg-indigo-500 text-white"><i class="fa-solid fa-plus"></i> New project page</button></div>
-        ${(h.pages || []).length ? `<ul class="mt-2 space-y-1 text-sm">${h.pages.map((pg) => `<li><a href="#" data-open-page="${esc(pg.id)}" class="text-indigo-400 hover:text-indigo-300"><i class="fa-solid ${esc(/^fa-[a-z0-9-]+$/.test(pg.icon || '') ? pg.icon : 'fa-file')}"></i> ${esc(pg.title)}</a></li>`).join('')}</ul>`
-          : '<p class="text-gray-400 text-sm mt-2">No dashboard pages yet. New docs for this project can be built as pages here.</p>'}
-        <div id="pj-msg" class="text-sm text-gray-400 mt-2"></div></div>
+      <div class="${card} p-5"><div id="pj-built-pages"></div>
+        ${(h.pages || []).length ? `<div id="pj-older-pages"><div class="text-xs uppercase tracking-wide text-gray-400 mt-4">Older pages</div><ul class="mt-2 space-y-1 text-sm">${h.pages.map((pg) => `<li><a href="#" data-open-page="${esc(pg.id)}" class="text-indigo-400 hover:text-indigo-300">${esc(pg.title)}</a></li>`).join('')}</ul></div>` : ''}</div>
       <div class="${card} p-5"><div class="text-xs uppercase tracking-wide text-gray-400">Documents (${h.docs.length})</div>${lists || '<p class="text-gray-400 text-sm mt-2">No other documents.</p>'}</div>`;
     root().querySelectorAll('[data-open-page]').forEach((a) => { a.onclick = (e) => { e.preventDefault(); openPage(a.dataset.openPage); }; });
-    document.getElementById('pj-new-page').onclick = () => createProjectPage(h).catch((e) => { document.getElementById('pj-msg').textContent = e.message; });
+    // An older page moved to the new builder is listed once, as its new copy.
+    window.AdaUserProjects.renderProjectPages(document.getElementById('pj-built-pages'), { slug, name: h.name }).then((built) => {
+      const moved = new Set((built || []).map((p) => p.migratedFrom).filter(Boolean));
+      root().querySelectorAll('[data-open-page]').forEach((a) => { if (moved.has(a.dataset.openPage)) a.closest('li').remove(); });
+      const list = document.getElementById('pj-older-pages');
+      if (list && !list.querySelector('li')) list.remove();
+    });
   }
 
   // ------------------------------------------------------------ project pages
-  // A project page is a normal dashboard page tagged with `project`: no top-bar tab, listed on the hub.
-  // It starts with a short intro linking back here; status and docs stay in the vault (one home each).
+  // Older dashboard pages tagged with `project`: no top-bar tab, listed on the hub.
   async function openPage(id) {
     if (typeof loadCustomPages === 'function' && !(window.customPages || []).some?.((p) => p.id === id)) { try { await loadCustomPages(); } catch {} }
     if (typeof switchTab === 'function') switchTab(id);
-  }
-  async function createProjectPage(h) {
-    let id = ('proj-' + h.slug).slice(0, 64).replace(/-+$/, '');
-    const taken = new Set(((await api('/api/pages')).pages || []).map((p) => p.id));
-    for (let i = 2; taken.has(id); i++) id = ('proj-' + h.slug).slice(0, 60).replace(/-+$/, '') + '-' + i;
-    await api('/api/pages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, title: h.name, icon: 'fa-diagram-project', project: h.slug }) });
-    const intro = `<p>Dashboard page for <strong>${esc(h.name)}</strong>. Build new, interactive docs and tools for this project here.</p>`
-      + `<p><a href="#projects/${esc(h.slug)}" class="text-indigo-400 hover:text-indigo-300 underline">Status &amp; documents → ${esc(h.name)} hub</a></p>`;
-    await api(`/api/pages/${id}/content`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ widgets: [{ id: 'project-intro', title: 'About this page', icon: 'fa-circle-info', html: intro }] }) });
-    if (typeof loadCustomPages === 'function') await loadCustomPages();
-    return openPage(id);
   }
 
   // ------------------------------------------------------------ doc

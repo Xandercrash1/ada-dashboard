@@ -663,97 +663,7 @@ const DEFAULT_HOMEPAGE = {
   widgets: []
 };
 
-// --- Page Builder v2 (fb-1790201502141): page sections + design tokens ---
-// `pageSections` (NOT `sections` — that key already holds the built-in Home
-// toggles {stats, quickLinks}) is an ordered list of full-width blocks. A
-// `grid` section holds widgets (w.section = its id; unassigned widgets go to
-// the first grid). A page without pageSections renders exactly as before.
-const PAGE_SECTION_TYPES = ['hero', 'features', 'grid', 'gallery', 'pricing', 'cta', 'text', 'footer', 'header',
-  'split', 'testimonials', 'faq', 'team', 'stats', 'logos', 'steps', 'video', 'map', 'contact', 'form'];
-// Props that end up inside CSS url(...) or <img src>: http(s) or /media only,
-// no quotes/parens/whitespace (fb-1790206467677).
 const SAFE_IMAGE_URL_RE = /^(https?:\/\/[^\s"'()<>\\]{1,400}|\/media\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9._-]{1,120})$/;
-const SECTION_STYLE_RULES = {
-  'sec-bg': /^(alt|brand|gradient|image)$/, 'sec-width': /^(contained|full)$/, 'sec-pad': /^(s|m|l|xl)$/,
-  'sec-anchor': /^[a-z][a-z0-9-]{0,39}$/
-};
-const PAGE_SECTIONS_MAX = 30;
-
-// List props (feature cards, plans, images, links) are one string, one item
-// per line. Agents naturally send arrays — of strings or of objects — so those
-// are converted to the line format instead of silently dropped
-// (fb-1790201502182: gpt-4o-mini's first page lost every list this way).
-const pick = (o, keys) => { for (const k of keys) if (o && o[k] !== undefined && o[k] !== null && typeof o[k] !== 'object') return String(o[k]).trim(); return ''; };
-const LIST_ITEM_FORMAT = {
-  items: (o) => { const icon = (pick(o, ['icon']).match(/fa-[a-z0-9-]+/g) || []).filter(c => !/^fa-(solid|regular|brands|light)$/.test(c))[0] || ''; return [icon, pick(o, ['title', 'name', 'heading']), pick(o, ['text', 'description', 'body', 'subtitle'])].filter((v, i) => v || i === 1).join(' | '); },
-  plans: (o) => { const feats = Array.isArray(o.features) ? o.features.map(String).join('; ') : pick(o, ['features', 'description']); return [(o.featured || o.highlight || o.popular ? '*' : '') + pick(o, ['name', 'title']), pick(o, ['price', 'cost']), feats, pick(o, ['button', 'cta', 'buttonLabel', 'label']), pick(o, ['link', 'href', 'url'])].join(' | '); },
-  images: (o) => [pick(o, ['src', 'url', 'image', 'href']), pick(o, ['caption', 'alt', 'title'])].join(' | '),
-  links: (o) => [pick(o, ['label', 'text', 'title', 'name']), pick(o, ['url', 'href', 'link'])].join(' | '),
-  fields: (o) => { const opts = Array.isArray(o.options) ? o.options.map(String).join(', ') : pick(o, ['options', 'choices']); return [pick(o, ['label', 'question', 'name', 'title']) + (o.required ? '*' : ''), pick(o, ['type']) || (opts ? 'choice' : 'short'), opts].filter((v, i) => v || i < 2).join(' | '); }
-};
-function coercePropValue(key, v) {
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-  if (Array.isArray(v)) {
-    const fmt = LIST_ITEM_FORMAT[key];
-    return v.slice(0, 24).map(x => (x && typeof x === 'object') ? (fmt ? fmt(x) : Object.values(x).filter(y => typeof y !== 'object').join(' | ')) : String(x ?? '')).map(l => l.replace(/\n/g, ' ').trim()).filter(Boolean).join('\n');
-  }
-  return null;
-}
-
-function sanitizePageSections(raw) {
-  if (!Array.isArray(raw)) return undefined;
-  const out = [];
-  const seen = new Set();
-  for (const sec of raw.slice(0, PAGE_SECTIONS_MAX)) {
-    if (!sec || typeof sec !== 'object' || !PAGE_SECTION_TYPES.includes(sec.type)) continue;
-    let id = (typeof sec.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(sec.id)) ? sec.id : `sec-${Date.now()}-${out.length}`;
-    if (seen.has(id)) id = `${id.slice(0, 56)}-${out.length}`;
-    seen.add(id);
-    const props = {};
-    if (sec.props && typeof sec.props === 'object' && !Array.isArray(sec.props)) {
-      for (const [k, v] of Object.entries(sec.props).slice(0, 30)) {
-        // Props become HTML attributes: never event handlers or attributes that
-        // restyle/re-identify the element.
-        if (!/^[a-z][a-z0-9-]{0,39}$/.test(k) || /^on/.test(k) || ['style', 'id', 'class', 'is', 'slot'].includes(k)) continue;
-        const cv = coercePropValue(k, v);
-        if (cv === null) continue;
-        if ((k === 'image' || k === 'logo' || k === 'sec-bg-image') && cv && !SAFE_IMAGE_URL_RE.test(cv.trim())) continue;
-        if (SECTION_STYLE_RULES[k] && !SECTION_STYLE_RULES[k].test(cv)) continue;
-        props[k] = cv.slice(0, 5000);
-      }
-    }
-    const clean = { id, type: sec.type, props };
-    if (sec.hidden === true) clean.hidden = true;
-    out.push(clean);
-  }
-  return out;
-}
-
-// Values end up in CSS custom properties, so they are validated tightly:
-// hex colours, a font-family character set with no ; ( ) or url, and enums.
-const TOKEN_RULES = {
-  preset: /^[a-z0-9-]{1,32}$/,
-  fontHeading: /^[A-Za-z0-9 ,'"-]{1,120}$/,
-  fontBody: /^[A-Za-z0-9 ,'"-]{1,120}$/,
-  scale: /^(compact|normal|large)$/,
-  density: /^(compact|normal|airy)$/,
-  radius: /^(none|sm|md|lg|xl)$/,
-  brand: /^#[0-9a-fA-F]{3,8}$/,
-  surface: /^#[0-9a-fA-F]{3,8}$/,
-  text: /^#[0-9a-fA-F]{3,8}$/,
-  muted: /^#[0-9a-fA-F]{3,8}$/,
-};
-function sanitizeTokens(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const out = {};
-  for (const [k, re] of Object.entries(TOKEN_RULES)) {
-    if (typeof raw[k] === 'string' && re.test(raw[k])) out[k] = raw[k];
-  }
-  return Object.keys(out).length ? out : undefined;
-}
-
-// Page SEO settings (fb-1790206467753): plain text, safe image URLs, a flag.
 function sanitizePageMeta(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const txt = (v, n) => typeof v === 'string' ? v.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, n) : '';
@@ -766,34 +676,16 @@ function sanitizePageMeta(raw) {
   return Object.keys(out).length ? out : undefined;
 }
 
-// Custom-page docs keep their free-form widgets, but the Page Builder fields
-// go through the same sanitizers as the homepage (fb-1790201502182). Returns
+// Custom-page docs keep their free-form widgets, and their meta goes through a
+// sanitizer (fb-1790201502182). Returns
 // what was dropped so the Designer can be told.
 function sanitizePageDocFields(doc) {
   const report = [];
   if (!doc || typeof doc !== 'object') return { doc: { widgets: [] }, report: ['document was not an object'] };
-  if ('pageSections' in doc) {
-    const before = Array.isArray(doc.pageSections) ? doc.pageSections : [];
-    const ps = sanitizePageSections(doc.pageSections) || [];
-    if (ps.length < before.length) report.push(`dropped ${before.length - ps.length} section(s) with an unknown type or bad shape (allowed types: ${PAGE_SECTION_TYPES.join(', ')})`);
-    before.forEach((b, i) => {
-      const kept = ps.find(x => x.id === b.id) || null;
-      if (kept && b && b.props && typeof b.props === 'object') {
-        const lost = Object.keys(b.props).filter(k => !(k in kept.props));
-        if (lost.length) report.push(`section ${kept.id}: dropped props ${lost.join(', ')}`);
-      }
-    });
-    if (ps.length) doc.pageSections = ps; else delete doc.pageSections;
-  }
-  if ('tokens' in doc) {
-    const tk = sanitizeTokens(doc.tokens);
-    const lost = doc.tokens && typeof doc.tokens === 'object' ? Object.keys(doc.tokens).filter(k => !tk || !(k in tk)) : [];
-    if (lost.length) report.push(`tokens: dropped invalid ${lost.join(', ')}`);
-    if (tk) doc.tokens = tk; else delete doc.tokens;
-  }
+  delete doc.pageSections; delete doc.tokens;
   if ('meta' in doc) { const mt = sanitizePageMeta(doc.meta); if (mt) doc.meta = mt; else delete doc.meta; }
   if (!Array.isArray(doc.widgets)) doc.widgets = [];
-  doc.widgets.forEach(w => { if (w && w.section !== undefined && !(typeof w.section === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(w.section))) { delete w.section; report.push(`widget ${w.id}: invalid section id removed`); } });
+  doc.widgets.forEach(w => { if (w) delete w.section; });
   return { doc, report };
 }
 
@@ -802,7 +694,7 @@ function sanitizePageDocFields(doc) {
 // (the hand-written list once told it lib= for photo-frame; the attribute is
 // library=). Cached by the components directory's mtimes.
 const vm = require('vm');
-let componentCatalogCache = { key: '', value: { sections: [], widgets: [] } };
+let componentCatalogCache = { key: '', value: { widgets: [] } };
 function extractArrayLiteral(src, start) {
   let depth = 0, inStr = null;
   for (let i = start; i < src.length; i++) {
@@ -820,7 +712,7 @@ function readComponentCatalog() {
   try { files = fs.readdirSync(dir).filter(f => f.endsWith('.js')); } catch (e) { return componentCatalogCache.value; }
   const key = files.map(f => { try { return f + fs.statSync(path.join(dir, f)).mtimeMs; } catch (e) { return f; } }).join('|');
   if (key === componentCatalogCache.key) return componentCatalogCache.value;
-  const out = { sections: [], widgets: [] };
+  const out = { widgets: [] };
   for (const f of files) {
     let src = '';
     try { src = fs.readFileSync(path.join(dir, f), 'utf8'); } catch (e) { continue; }
@@ -832,8 +724,7 @@ function readComponentCatalog() {
     try { schema = vm.runInNewContext('(' + lit + ')', {}, { timeout: 50 }); } catch (e) { continue; }
     if (!Array.isArray(schema)) continue;
     const tag = def[1];
-    if (tag.startsWith('ada-section-')) out.sections.push({ type: tag.slice('ada-section-'.length), tag, schema });
-    else out.widgets.push({ tag, schema });
+    out.widgets.push({ tag, schema });
   }
   componentCatalogCache = { key, value: out };
   return out;
@@ -865,7 +756,6 @@ function sanitizeHomepageWidget(w, index) {
     html: typeof w.html === 'string' ? w.html.slice(0, 20000) : '',
     hidden: w.hidden === true
   };
-  if (typeof w.section === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(w.section)) clean.section = w.section;
   // Per-widget settings a component persists itself (e.g. <ada-todo> section
   // toggles). Was silently dropped here, so they never survived a homepage
   // save or an import. Plain object, size-capped.
@@ -913,10 +803,6 @@ function sanitizeHomepage(raw) {
     if (HOMEPAGE_ACCENTS.includes(raw.pageTheme.accent)) pt.accent = raw.pageTheme.accent;
     if (Object.keys(pt).length) doc.pageTheme = pt;
   }
-  const ps = sanitizePageSections(raw.pageSections);
-  if (ps && ps.length) doc.pageSections = ps;
-  const tk = sanitizeTokens(raw.tokens);
-  if (tk) doc.tokens = tk;
   if (raw.glanceTheme && typeof raw.glanceTheme === 'object') {
     doc.glanceTheme = {
       theme: HOMEPAGE_THEMES.includes(raw.glanceTheme.theme) ? raw.glanceTheme.theme : 'glass',
@@ -947,7 +833,7 @@ app.get('/api/homepage', (req, res) => {
 // the file directly instead.
 app.put('/api/homepage', (req, res) => {
   const current = readHomepage();
-  const { announcement, widgets, sections, updatedBy, pageTheme, glanceTheme, expectedUpdatedAt, pageSections, tokens } = req.body || {};
+  const { announcement, widgets, sections, updatedBy, pageTheme, glanceTheme, expectedUpdatedAt } = req.body || {};
   // Optimistic concurrency (fb-1789015021701): a client that says which
   // version it loaded is refused if the page moved on since. Callers that
   // send nothing (agents, older clients) keep last-write-wins.
@@ -971,8 +857,6 @@ app.put('/api/homepage', (req, res) => {
     // Explicit null clears the preset (sanitizeHomepage drops a null).
     ...(pageTheme !== undefined ? { pageTheme } : {}),
     ...(glanceTheme !== undefined ? { glanceTheme } : {}),
-    ...(pageSections !== undefined ? { pageSections } : {}),
-    ...(tokens !== undefined ? { tokens } : {}),
     updatedAt: new Date().toISOString(),
     updatedBy: typeof updatedBy === 'string' && updatedBy ? updatedBy : 'dashboard'
   });
@@ -1134,7 +1018,6 @@ function isAdminUserName(name) {
   const u = userStore && userStore.find(name || 'alex');
   return !name || name === 'alex' || (u && u.role === 'admin');
 }
-function templateVisibleTo(user, t) { return !!t && ((t.owner || 'alex') === user.username || isAdminUserName(t.owner)); }
 function sessionOwnedBy(user, s) { return !!s && s.owner === user.username; }
 
 // User tags on TODO tasks (fb-1790204578669). Alex (admin) sees every task; a
@@ -1198,10 +1081,8 @@ function restrictWidget(w, i) {
 }
 function restrictPageDoc(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  const { doc, report } = sanitizePageDocFields({ pageSections: src.pageSections, tokens: src.tokens, meta: src.meta, widgets: [] });
+  const { doc, report } = sanitizePageDocFields({ meta: src.meta, widgets: [] });
   const out = { widgets: (Array.isArray(src.widgets) ? src.widgets : []).slice(0, 60).map(restrictWidget).filter(Boolean) };
-  if (doc.pageSections) out.pageSections = doc.pageSections;
-  if (doc.tokens) out.tokens = doc.tokens;
   if (doc.meta) out.meta = doc.meta;
   const themed = sanitizeHomepage({ pageTheme: src.pageTheme, glanceTheme: src.glanceTheme });
   if (themed.pageTheme) out.pageTheme = themed.pageTheme;
@@ -1242,12 +1123,6 @@ function authorizeRole(req, res, next) {
     if (m === 'POST' || m === 'DELETE') return pageOwnedBy(u, mm[1]) ? next() : deny();
   }
   if (p === '/api/homepage' && m === 'GET') return next();
-  if (p === '/api/templates' && (m === 'GET' || m === 'POST')) return next();
-  if ((mm = /^\/api\/templates\/([^/]+)$/.exec(p))) {
-    const t = readTemplate(mm[1]);
-    if (m === 'GET') return templateVisibleTo(u, t) ? next() : deny();
-    if (m === 'DELETE') return (t && t.owner === u.username) ? next() : deny();
-  }
   if (p === '/api/widgets/sanitize' && m === 'POST') return next();
   // TODO tasks — the handlers filter every list to the user's own tags (fb-1790204578669)
   if (['/api/todo', '/api/todo/projects', '/api/todo/completed', '/api/todo/people'].includes(p) && m === 'GET') return next();
@@ -1274,8 +1149,9 @@ function authorizeRole(req, res, next) {
 
 app.get('/api/me', (req, res) => res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : 'pages' }));
 deviceEnrollment.mountAdmin(app, { isAdminReq });
-require('./projects').create().mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
-require('./user-projects').create({ dataDir: DATA_DIR }).mount(app, { ownerName });   // New project button: splash pages and documents
+const vaultProjects = require('./projects').create();
+vaultProjects.mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
+require('./user-projects').create({ dataDir: DATA_DIR, projectContext: vaultProjects.context }).mount(app, { ownerName, isAdminReq });   // New project button: splash pages and documents
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
 app.post('/api/me/password', (req, res) => {
@@ -1719,7 +1595,7 @@ app.get('/api/pages/:id/history', (req, res) => {
   if (!fs.existsSync(dir)) return res.json([]);
   const list = fs.readdirSync(dir).filter(f => /^\d+\.json$/.test(f)).sort().reverse().map(f => {
     let meta = {};
-    try { const v = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); meta = { by: v.by, sections: (v.doc.pageSections || []).length, widgets: (v.doc.widgets || []).length }; } catch (e) {}
+    try { const v = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); meta = { by: v.by, widgets: (v.doc.widgets || []).length }; } catch (e) {}
     return { ver: f.replace('.json', ''), at: new Date(parseInt(f, 10)).toISOString(), ...meta };
   });
   res.json(list);
@@ -1822,7 +1698,7 @@ app.patch('/api/pages/:id', (req, res) => {
 });
 
 app.post('/api/pages', (req, res) => {
-  const { id, templateId } = req.body;
+  const { id } = req.body;
   // Ids become file names and titles/icons are rendered into the tab bar:
   // validated for everyone (fb-1790201502191).
   const title = typeof req.body.title === 'string' ? req.body.title.replace(/[<>]/g, '').trim().slice(0, 60) : '';
@@ -1834,22 +1710,13 @@ app.post('/api/pages', (req, res) => {
   const pages = readPagesRegistry();
   if (pages.some(p => p.id === id)) return res.status(400).json({ error: 'Page ID already exists' });
 
-  // Optional starting content (fb-1789015021674). Resolved BEFORE the page is
-  // registered so a bad template id cannot leave a half-created page behind.
-  let startDoc = { widgets: [] };
-  if (templateId) {
-    const tpl = readTemplate(templateId);
-    if (!tpl || (!isAdminReq(req) && !templateVisibleTo(req.user, tpl))) return res.status(400).json({ error: 'Template not found' });
-    startDoc = { ...(isAdminReq(req) ? tpl.doc : restrictPageDoc(tpl.doc).doc), updatedAt: new Date().toISOString() };
-  }
-  
   const project = isAdminReq(req) && PROJECT_SLUG_RE.test(req.body.project || '') ? req.body.project : undefined;   // project pages: no top-bar tab
   pages.push({ id, title, icon, owner: ownerName(req), shared: false, ...(project ? { project } : {}) });
   writePagesRegistry(pages);
   
   const docPath = getPageDocPath(id);
-  if (!fs.existsSync(docPath) || templateId) {
-    writeFileAtomic(docPath, JSON.stringify(startDoc, null, 2));
+  if (!fs.existsSync(docPath)) {
+    writeFileAtomic(docPath, JSON.stringify({ widgets: [] }, null, 2));
   }
   
   res.json({ success: true, page: { id, title, icon, owner: ownerName(req), shared: false, ...(project ? { project } : {}) } });
@@ -1926,97 +1793,6 @@ app.post('/api/widgets/sanitize', (req, res) => {
   clean.id = 'widget-' + Date.now() + Math.floor(Math.random() * 1000);
   res.json({ widget: JSON.parse(JSON.stringify(clean)) }); // drops undefined keys
 });
-
-// Templates: data/templates/<tpl-epoch-ms>.json = { id, name, createdAt,
-// sourcePage, doc: { widgets, pageTheme?, glanceTheme? } }. Widget ids are
-// kept as-is: only one page renders at a time, and DocBody [widget: id]
-// shortcodes point at them.
-const TEMPLATES_DIR = path.join(DATA_DIR, 'templates');
-const TEMPLATE_ID_RE = /^tpl-\d{10,16}$/;
-const TEMPLATE_MAX_WIDGETS = 100;
-
-function sanitizeTemplateDoc(raw) {
-  const src = (raw && typeof raw === 'object') ? raw : {};
-  const widgets = (Array.isArray(src.widgets) ? src.widgets : [])
-    .slice(0, TEMPLATE_MAX_WIDGETS).map(sanitizeHomepageWidget).filter(Boolean)
-    .map(w => JSON.parse(JSON.stringify(w)));
-  const themed = sanitizeHomepage({ pageTheme: src.pageTheme, glanceTheme: src.glanceTheme });
-  const doc = { widgets };
-  if (themed.pageTheme) doc.pageTheme = themed.pageTheme;
-  const ps = sanitizePageSections(src.pageSections);
-  if (ps && ps.length) doc.pageSections = ps;
-  const tk = sanitizeTokens(src.tokens);
-  if (tk) doc.tokens = tk;
-  if (src.glanceTheme && themed.glanceTheme) doc.glanceTheme = themed.glanceTheme;
-  return doc;
-}
-
-function readTemplate(id) {
-  if (typeof id !== 'string' || !TEMPLATE_ID_RE.test(id)) return null;
-  const file = path.join(TEMPLATES_DIR, `${id}.json`);
-  if (!fs.existsSync(file)) return null;
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return null; }
-}
-
-app.get('/api/templates', (req, res) => {
-  try {
-    if (!fs.existsSync(TEMPLATES_DIR)) return res.json([]);
-    const list = fs.readdirSync(TEMPLATES_DIR)
-      .filter(f => TEMPLATE_ID_RE.test(f.replace(/\.json$/, '')))
-      .map(f => readTemplate(f.replace(/\.json$/, '')))
-      .filter(Boolean)
-      .map(t => ({ id: t.id, name: t.name, owner: t.owner || 'alex', kind: t.kind || 'page', createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: (t.doc.widgets || []).length, sectionType: t.kind === 'section' ? ((t.doc.pageSections || [])[0] || {}).type : undefined }))
-      .filter(t => !req.query.kind || t.kind === req.query.kind)
-      .filter(t => isAdminReq(req) || templateVisibleTo(req.user, t))
-      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-    res.json(list);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/templates/:id', (req, res) => {
-  const t = readTemplate(req.params.id);
-  if (!t) return res.status(404).json({ error: 'Template not found' });
-  res.json(t);
-});
-
-app.post('/api/templates', (req, res) => {
-  const { name, doc, sourcePage } = req.body || {};
-  // kind 'section' (Page Builder v2 phase 2, fb-1790201502161): one reusable
-  // section, listed in the Section Library instead of New Page.
-  const kind = req.body && req.body.kind === 'section' ? 'section' : 'page';
-  const cleanName = typeof name === 'string' ? name.trim().slice(0, 80) : '';
-  if (!cleanName) return res.status(400).json({ error: 'Template name required' });
-  const cleanDoc = isAdminReq(req) ? sanitizeTemplateDoc(doc) : restrictPageDoc(doc).doc;
-  if (!cleanDoc.widgets.length && !(cleanDoc.pageSections || []).length) return res.status(400).json({ error: 'This page has no widgets or sections to save' });
-  if (kind === 'section' && (cleanDoc.widgets.length || (cleanDoc.pageSections || []).length !== 1 || cleanDoc.pageSections[0].type === 'grid')) {
-    return res.status(400).json({ error: 'A section template is exactly one non-grid section' });
-  }
-  const t = {
-    id: 'tpl-' + Date.now(),
-    name: cleanName,
-    owner: ownerName(req),
-    kind,
-    createdAt: new Date().toISOString(),
-    sourcePage: typeof sourcePage === 'string' ? sourcePage.slice(0, 64) : null,
-    doc: cleanDoc
-  };
-  try {
-    if (!fs.existsSync(TEMPLATES_DIR)) fs.mkdirSync(TEMPLATES_DIR);
-    writeFileAtomic(path.join(TEMPLATES_DIR, `${t.id}.json`), JSON.stringify(t, null, 2));
-    res.status(201).json({ id: t.id, name: t.name, kind, createdAt: t.createdAt, sourcePage: t.sourcePage, widgetCount: cleanDoc.widgets.length });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/templates/:id', (req, res) => {
-  if (!readTemplate(req.params.id)) return res.status(404).json({ error: 'Template not found' });
-  fs.unlinkSync(path.join(TEMPLATES_DIR, `${req.params.id}.json`));
-  res.json({ success: true });
-});
-
 
 // --- 5. INTERACTIVE AGENT SESSIONS & CONVERSATION ENGINE ---
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -2372,9 +2148,7 @@ function executeLocalTool(toolName, args, role, sessionId) {
           ({ doc: parsed, report } = restrictPageDoc(parsed));
           parsed.updatedAt = new Date().toISOString();
         } else if (pageId === 'home') {
-          const before = JSON.stringify(parsed);
           parsed = sanitizeHomepage({ ...parsed, updatedAt: new Date().toISOString(), updatedBy: 'designer' });
-          if ((parsed.pageSections || []).length !== (JSON.parse(before).pageSections || []).length) report.push('some sections were dropped (unknown type or bad shape)');
         } else {
           ({ doc: parsed, report } = sanitizePageDocFields(parsed));
           parsed.updatedAt = new Date().toISOString();
@@ -3507,19 +3281,7 @@ ${(() => { const cat = readComponentCatalog(); return cat.widgets.map(w => `- <$
 (The attribute lists above are generated from the components' own code — trust them over memory.)
 If the user wants a widget that isn't in the library, tell them to ask the Architect to build the Custom Element first! Changes appear instantly on save.
 
-PAGE SECTIONS (Page Builder v2) — use these to build real, polished pages (landing pages, portfolios, event pages, anything "professional"). The document may hold "pageSections": an ordered list rendered top to bottom:
-  [{ "id": "sec-hero1", "type": "<type>", "props": { "<attr>": "<string>" } }]
-Section types and their props (generated from the section components' code):
-${readComponentCatalog().sections.map(x => `- ${x.type}: ${x.schema.map(describeSchemaField).join('; ')}`).join('\n')}
-- grid: holds widgets. props: heading (optional).
-LIST PROPS are ONE string, one item per line ("\\n" between lines), fields separated by " | " — fill them with real content, never leave them to the defaults. Examples:
-  features.items: "fa-bread-slice | Baked daily | Out of the oven before 7am\\nfa-leaf | Local flour | Milled 20 miles away"
-  pricing.plans:  "Small box | $12 | 4 pastries; Mix and match | Order | /order\\n*Family box | $28 | 10 pastries; Free coffee | Order | /order"
-  gallery.images: "https://example.com/a.jpg | Caption"   footer.links: "Instagram | https://instagram.com/x\\nContact | mailto:hi@x.com"
-  (Arrays are converted to this format, but a string is preferred.) A widget joins a grid with "section": "<grid section id>"; widgets without "section" go to the first grid.
-RULES: every prop value is a STRING. Only the listed props exist; unknown types/props are DROPPED by the server's sanitizer. Props are shown as TEXT — never put HTML in them (lists use the line formats in the labels). Links: https://, /path, #anchor or mailto: only. Ids: letters, digits, - and _. When a page has widgets but no pageSections and you add sections, ALSO add a grid section so the existing widgets keep a home.
-LOOK — "tokens": { "preset": "default|midnight|glass|minimalist|neon|sunset|rose", "fontHeading"/"fontBody": a CSS font stack (good pairs: 'Playfair Display' + 'Source Sans 3'; 'Fraunces' + 'Inter'; 'Nunito'; 'Poppins'; 'Inter'), "scale": "compact|normal|large", "density": "compact|normal|airy", "radius": "none|sm|md|lg|xl", "brand"/"surface"/"text"/"muted": "#rrggbb" }. Choose a coherent palette with readable contrast (text on surface; buttons pick black or white text automatically). Fonts that load: Inter, Playfair Display, Source Sans 3, Fraunces, Nunito, Poppins, JetBrains Mono, Lato, Montserrat, Roboto, Open Sans, Merriweather, Lora, Raleway, DM Sans, DM Serif Display — use these names exactly, first in the stack.
-EDIT, DON'T REBUILD: when asked to change something, re-read the file and change only that — keep every other section, widget and token exactly as it was. Your write_file result includes a "sanitizer" report; if it says anything was dropped, fix it and write again. The user can undo your change from the builder.`
+EDIT, DON'T REBUILD: when asked to change something, re-read the file and change only that — keep every other widget exactly as it was. Your write_file result includes a "sanitizer" report; if it says anything was dropped, fix it and write again. The user can undo your change from the page's History.`
   };
 
   const systemInstruction = rolePrompts[session.role] || rolePrompts.debugger;

@@ -24,6 +24,10 @@ const REGISTRY = 'Projects/REGISTRY.md';
 const DOC_EXT = /\.(md|txt)$/i;
 const MAX_DOCS = 300;
 const MAX_DOC_BYTES = 512 * 1024;
+const MAX_CONTEXT_CHARS = 16 * 1024;
+const MAX_CONTEXT_SITES = 60;
+const URL_RE = /https?:\/\/[^\s<>()"'`\]]+/g;
+const SECRET_LINE = /pass(word|wd|phrase)|api[ _-]?key|secret|token|credential|private key|\b(ssn|pin)\b/i;
 
 const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
@@ -114,6 +118,29 @@ function create(opts = {}) {
     return { status: 200, body: { ...p, statusMd, docs: docs.filter((d) => d.rel !== 'projectStatus.md'), pages, forum: forumInfo, dash: (() => { try { return projectDash.exists(slug); } catch { return false; } })() } };
   }
 
+  // A project's own notes, for building pages that belong to it. Lines that could hold a credential stay out.
+  function context(slug) {
+    const p = find(slug), dir = projectDir(p);
+    if (!p) return null;
+    if (!dir || !fs.existsSync(dir)) return { slug, name: p.name, notes: '' };   // lives on one device: no notes here
+    const sites = new Set();
+    const parts = ['projectStatus.md', 'memory.md'].map((name) => {
+      const file = safeResolve(dir, name);
+      if (!file || !fs.existsSync(file)) return '';
+      const raw = fs.readFileSync(file, 'utf8');
+      for (const u of raw.match(URL_RE) || []) { try { sites.add(new URL(u).origin); } catch { /* not a real address */ } }
+      const kept = raw.split('\n').filter((l) => !SECRET_LINE.test(l)).join('\n').trim();
+      if (!kept) return '';
+      // Notes grow at the bottom, so a long file keeps both its start and its newest part.
+      const half = MAX_CONTEXT_CHARS / 2;
+      return `${name}:\n${kept.length > MAX_CONTEXT_CHARS ? `${kept.slice(0, half)}\n[...]\n${kept.slice(-half)}` : kept}`;
+    }).filter(Boolean);
+    // Site addresses only, so a link still works when its line was left out above. Never a path or query.
+    if (sites.size) parts.push(`Web addresses in these notes:\n${[...sites].slice(0, MAX_CONTEXT_SITES).join('\n')}`);
+    const notes = parts.join('\n\n');
+    return { slug, name: p.name, notes };
+  }
+
   function doc(slug, rel) {
     const p = find(slug), dir = projectDir(p);
     if (!dir || !fs.existsSync(dir)) return { status: 404, body: { error: 'Unknown project.' } };
@@ -191,7 +218,7 @@ function create(opts = {}) {
     app.get('/api/one-ada/start', adminOnly, guard(() => start()));
   }
 
-  return { mount, list, hub, doc, start, vaultHead, forumList, forumSubmit, forumCreate, forumGet, forumCloseReopen, forumAllList };
+  return { mount, list, hub, doc, context, start, vaultHead, forumList, forumSubmit, forumCreate, forumGet, forumCloseReopen, forumAllList };
 }
 
 module.exports = { create, readRegistry, safeResolve, slugify };

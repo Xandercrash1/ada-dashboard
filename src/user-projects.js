@@ -137,6 +137,9 @@ function parseSite(stdout) {
   const outer = JSON.parse(stdout);
   if (outer.is_error) throw new Error('model error');
   const html = String(outer.result || '').trim().replace(/^```(?:html)?\s*/i, '').replace(/\s*```$/, '');
+  return checkSite(html);
+}
+function checkSite(html) {
   if (!/^<!doctype html/i.test(html) || !/<\/html>\s*$/i.test(html)) throw new Error('not a whole HTML document');
   if (Buffer.byteLength(html) > MAX_SITE_BYTES) throw new Error('site too large');
   return html;
@@ -153,7 +156,7 @@ function runClaude(prompt) {
   });
 }
 
-function create({ dataDir, run = runClaude }) {
+function create({ dataDir, run = runClaude, projectContext = () => null }) {
   const file = path.join(dataDir, 'user-projects.json');
   const imageDir = path.join(dataDir, 'user-project-images');
   const siteDir = path.join(dataDir, 'user-project-sites');
@@ -218,7 +221,7 @@ function create({ dataDir, run = runClaude }) {
     });
   }
 
-  function mount(app, { ownerName }) {
+  function mount(app, { ownerName, isAdminReq = () => false }) {
     const guard = (fn) => async (req, res) => {
       try { await fn(req, res); }
       catch (e) { if (!e.status) console.error('[user-projects]', e.message); res.status(e.status || 500).json({ error: e.status ? e.message : 'Something went wrong saving that.' }); }
@@ -245,10 +248,13 @@ function create({ dataDir, run = runClaude }) {
       const name = text(body.name, 120).trim();
       if (!name) return res.status(400).json({ error: 'Give the project a name.' });
       if (!['splash', 'doc'].includes(body.kind)) return res.status(400).json({ error: 'Choose a splash page or a document.' });
+      // Only admins can read vault projects, so only they can tie a page to one.
+      const belongsTo = body.project ? projectContext(text(body.project, 120)) : null;
+      if (body.project && (!belongsTo || !isAdminReq(req))) return res.status(400).json({ error: 'That project is not available.' });
       const all = load();
       if (all.filter((p) => p.owner === who).length >= MAX_PROJECTS_PER_USER) return res.status(400).json({ error: 'You have reached the project limit.' });
       const now = new Date().toISOString();
-      const p = { id: `up-${crypto.randomBytes(8).toString('hex')}`, owner: who, kind: body.kind, name, text: text(body.text, 4000), blocks: [], links: [], html: '', share: false, hasImage: false, hasSite: false, createdAt: now, updatedAt: now };
+      const p = { id: `up-${crypto.randomBytes(8).toString('hex')}`, owner: who, kind: body.kind, name, text: text(body.text, 4000), blocks: [], links: [], html: '', share: false, hasImage: false, hasSite: false, ...(belongsTo ? { project: belongsTo.slug, projectName: belongsTo.name } : {}), ...(typeof body.migratedFrom === 'string' && isAdminReq(req) ? { migratedFrom: text(body.migratedFrom, 64) } : {}), createdAt: now, updatedAt: now };
       all.push(p);
       save(all);
       res.json(view(p, who));
@@ -400,6 +406,11 @@ function create({ dataDir, run = runClaude }) {
       res.json({ url: `data:image/webp;base64,${fs.readFileSync(f).toString('base64')}` });
     }));
 
+    const contextLine = (p) => {
+      const c = p.project ? projectContext(p.project) : null;
+      if (!c || !c.notes) return '';
+      return `\n\nThis page belongs to their existing project "${c.name}". Its notes are below, so you know what they mean when they mention something from it. These notes count as facts they gave you, including any web addresses. Use only what this page needs. Leave out private details, and never put a password, key or token on the page.\n<project-notes>\n${c.notes}\n</project-notes>`;
+    };
     const photoLine = (p) => (p.hasImage ? 'This project has a photo. Use it with {{PHOTO}}.' : 'This project has no photo.');
 
     app.post('/api/user-projects/:id/draft', guard((req, res) => {
@@ -410,7 +421,7 @@ function create({ dataDir, run = runClaude }) {
       const about = text((req.body || {}).about, 4000).trim();
       if (!about) return res.status(400).json({ error: 'Tell Ada what the project is about first.' });
       const typed = p.blocks.filter((b) => b.title.trim() || b.body.trim()).map((b) => `${b.title}: ${b.body}`).join('\n');
-      startBuild(p, who, `Project name: ${p.name}\n\nWhat they told you about it:\n${about}${typed ? `\n\nThey also wrote:\n${typed}` : ''}\n\n${photoLine(p)}\n\nBuild the site.`);
+      startBuild(p, who, `Project name: ${p.name}${contextLine(p)}\n\nWhat they told you about it:\n${about}${typed ? `\n\nThey also wrote:\n${typed}` : ''}\n\n${photoLine(p)}\n\nBuild the site.`);
       res.status(202).json(view(p, who));
     }));
 
@@ -423,8 +434,29 @@ function create({ dataDir, run = runClaude }) {
       const source = newestDraft(p.id) || newestVersion(p.id);
       if (!source) return res.status(400).json({ error: 'There is no site to change yet.' });
       const current = fs.readFileSync(source, 'utf8');
-      startBuild(p, who, `Project name: ${p.name}\n\n${photoLine(p)}\n\nThe site as it is now:\n${current}\n\nWhat they want changed:\n${want}\n\nReturn the whole updated HTML document. Keep everything they didn't ask to change. New facts may come only from what they wrote.`);
+      startBuild(p, who, `Project name: ${p.name}${contextLine(p)}\n\n${photoLine(p)}\n\nThe site as it is now:\n${current}\n\nWhat they want changed:\n${want}\n\nReturn the whole updated HTML document. Keep everything they didn't ask to change. New facts may come only from what they wrote.`);
       res.status(202).json(view(p, who));
+    }));
+
+    // The page's source, for agent sessions. A new source goes in as a draft; Save is what makes it live.
+    app.get('/api/user-projects/:id/html', guard((req, res) => {
+      const p = findOwned(req, res, load());
+      if (!p) return;
+      const source = newestDraft(p.id) || newestVersion(p.id);
+      if (!source) return res.status(404).json({ error: 'No site yet.' });
+      res.type('text/plain').send(fs.readFileSync(source, 'utf8'));
+    }));
+    app.post('/api/user-projects/:id/html', guard((req, res) => {
+      const who = ownerName(req);
+      const p = findOwned(req, res, load());
+      if (!p) return;
+      if (!isAdminReq(req)) return res.status(403).json({ error: 'Not available for your account.' });
+      let html;
+      try { html = checkSite(String((req.body || {}).html || '').trim()); }
+      catch (e) { return res.status(400).json({ error: 'That is not a whole HTML page under 1 MB.' }); }
+      fs.mkdirSync(draftsDir(p.id), { recursive: true });
+      fs.writeFileSync(path.join(draftsDir(p.id), stamp()), html);
+      res.json(view(touch(p.id, {}), who));
     }));
 
     // Clicked-on wording goes straight into the working copy; Save is what makes it live.

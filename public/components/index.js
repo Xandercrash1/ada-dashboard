@@ -19,23 +19,3 @@ import './KanbanWidget.js';
 import './WeatherWidget.js';
 import './HomeView.js';
 
-// Page Builder v2 sections (fb-1790201502141)
-import "./HeroSection.js";
-import "./FeaturesSection.js";
-import "./GallerySection.js";
-import "./PricingSection.js";
-import "./CtaSection.js";
-import "./TextSection.js";
-import "./FooterSection.js";
-import "./HeaderSection.js";
-import "./SplitSection.js";
-import "./TestimonialsSection.js";
-import "./FaqSection.js";
-import "./TeamSection.js";
-import "./StatsSection.js";
-import "./LogosSection.js";
-import "./StepsSection.js";
-import "./VideoSection.js";
-import "./MapSection.js";
-import "./ContactSection.js";
-import "./FormSection.js";
