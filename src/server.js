@@ -1258,6 +1258,7 @@ function authorizeRole(req, res, next) {
     if (!taskVisibleTo(req, todoStore.readTasks().find(t => t.id === mm[1]))) return deny();
     if (mm[2] ? m === 'POST' : (m === 'PATCH' || m === 'DELETE')) return next();
   }
+  if (/^\/api\/user-projects(\/|$)/.test(p)) return next();   // src/user-projects.js checks owner and sharing on every route
   if (p === '/api/media/upload' && m === 'POST') return next();   // the handler limits pages users to images in the shared library
   if (m === 'GET' && ['/api/weather', '/api/glance', '/api/media/libraries', '/api/media/files', '/api/agent/models'].includes(p)) return next();
   if (p === '/api/agent/sessions' && (m === 'GET' || m === 'POST')) return next();
@@ -1278,6 +1279,7 @@ registerPageBuilder(app, { readPagesRegistry, getPageDocPath, readJsonStoreOrThr
 app.get('/api/me', (req, res) => res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : 'pages' }));
 deviceEnrollment.mountAdmin(app, { isAdminReq });
 require('./projects').create().mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
+require('./user-projects').create({ dataDir: DATA_DIR }).mount(app, { ownerName });   // New project button: splash pages and documents
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
 app.post('/api/me/password', (req, res) => {

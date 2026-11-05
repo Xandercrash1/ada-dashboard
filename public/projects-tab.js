@@ -55,13 +55,17 @@
         <div class="flex gap-2 items-center mt-0.5">${where}${needs}${p.deviceOnly ? `<span class="text-xs text-gray-400">device-only parts: ${esc(p.deviceOnly)}</span>` : ''}</div></div>
         <div class="flex gap-2 flex-shrink-0">${docs}${web}</div></div>`;
     };
+    const me = window.ME || await window.__meReady;
+    const admin = !(me && me.role === 'pages');   // accounts see only the projects they made or were shared
     root().innerHTML = `
       <div class="flex items-center justify-between"><h2 class="text-xl font-semibold text-gray-900 dark:text-white"><i class="fa-solid fa-diagram-project text-indigo-400"></i> Projects</h2>
-        <span class="text-xs text-gray-400">${rows.length} projects · from the vault's Projects/REGISTRY.md</span></div>
-      <a href="#projects/start" class="block ${card} p-4 hover:border-indigo-500 transition-colors">
+        ${admin ? `<span class="text-xs text-gray-400">${rows.length} projects · from the vault's Projects/REGISTRY.md</span>` : ''}</div>
+      <div id="pj-mine"></div>
+      ${admin ? `<a href="#projects/start" class="block ${card} p-4 hover:border-indigo-500 transition-colors">
         <div class="font-semibold text-gray-900 dark:text-white"><i class="fa-solid fa-plug text-indigo-400"></i> One Ada — Start</div>
         <div class="text-sm text-gray-400 mt-1">Join a new machine to Ada: setup instructions, enrollment token, approved devices.</div></a>
-      <div class="${card} overflow-hidden">${rows.map(row).join('') || '<div class="p-4 text-gray-400 text-sm">No projects in the registry.</div>'}</div>`;
+      <div class="${card} overflow-hidden">${rows.map(row).join('') || '<div class="p-4 text-gray-400 text-sm">No projects in the registry.</div>'}</div>` : ''}`;
+    window.AdaUserProjects.renderList(document.getElementById('pj-mine'));
   }
 
   // ------------------------------------------------------------ hub
@@ -200,6 +204,8 @@
     if (!location.hash.startsWith('#projects')) return showList();
     if (!h) return showList();
     if (h === 'start') return showStart();
+    const mine = /^mine\/([a-z0-9-]+)$/.exec(h);
+    if (mine) return window.AdaUserProjects.show(root(), mine[1]);
     const m = /^([a-z0-9-]+)(?:\/doc\/(.+))?$/.exec(h);
     if (!m) return showList();
     return m[2] ? showDoc(m[1], m[2]) : showHub(m[1]);
