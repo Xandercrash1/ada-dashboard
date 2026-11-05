@@ -105,7 +105,7 @@ class HomeView extends HTMLElement {
             <input type="file" data-r="file" accept="image/*" multiple hidden>
             <dialog data-r="ask" aria-labelledby="h-ask">
               <h3 id="h-ask">Add a photo?</h3>
-              <p>Everyone with an account will see it on the home screen.</p>
+              <p>Everyone with an account will see it on the homepage.</p>
               <div class="h-actions"><button type="button" data-r="ano">Cancel</button><button type="button" class="go" data-r="ago">Choose photos</button></div>
             </dialog>
           </figure>
