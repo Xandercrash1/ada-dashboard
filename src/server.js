@@ -1,5 +1,5 @@
 const express = require('express');
-const { registerPageBuilder, builderRouteAllowed, homeBuilderLive, cleanDocHtml, DOC_ID_RE } = require('./page-builder');   // Page Builder v3 (GrapesJS)
+const { cleanDocHtml, DOC_ID_RE } = require('./doc-html');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
@@ -68,7 +68,6 @@ const SESSIONS_FILE = path.join(DATA_DIR, 'agent_sessions.json');
 const SCHEDULED_FILE = path.join(DATA_DIR, 'scheduled_prompts.json');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
 const HOMEPAGE_FILE = path.join(DATA_DIR, 'homepage.json');
-const HOME_BUILDER_FILE = path.join(DATA_DIR, 'homepage-builder.json');   // Page Builder v3 content for Home
 const PAGES_REGISTRY_FILE = path.join(DATA_DIR, 'pages.json');
 const PAGES_DIR = path.join(DATA_DIR, 'pages');
 if (!fs.existsSync(PAGES_DIR)) fs.mkdirSync(PAGES_DIR);
@@ -940,7 +939,7 @@ function readHomepage() {
 // `path` is included so the UI can hand a designer agent the exact file for
 // THIS tree (staging vs live serve different data dirs).
 app.get('/api/homepage', (req, res) => {
-  res.json({ ...readHomepage(), path: HOMEPAGE_FILE, ...(homeBuilderLive(HOME_BUILDER_FILE) ? { builderLive: true } : {}) });
+  res.json({ ...readHomepage(), path: HOMEPAGE_FILE });
 });
 
 // Partial update: send `announcement` and/or `widgets`; omitted keys keep
@@ -1113,7 +1112,7 @@ app.post('/api/terminal/exec', (req, res) => {
 // --- ROLES: limited 'pages' accounts (fb-1790201502191) ---------------------
 const PAGES_USER_DESIGNER_MODEL = 'gpt-4o-mini';
 // Alex is 'admin'. Household members get role 'pages': their own pages (plus
-// shared ones and Home, read-only), the Page Builder and a Designer for their
+// shared ones and Home, read-only) and a Designer for their
 // own pages — nothing else. DENY BY DEFAULT: authorizeRole lists the only
 // routes a pages user can reach; every handler below additionally filters by
 // owner. Loopback/local tools resolve to a 'system' admin in auth.js.
@@ -1220,7 +1219,6 @@ function authorizeRole(req, res, next) {
   let mm;
   if (p === '/api/me' && m === 'GET') return next();
   if (p === '/api/me/password' && m === 'POST') return next();
-  { const b = builderRouteAllowed(req, pageVisibleTo, pageOwnedBy); if (b !== null) return b ? next() : deny(); }   // Page Builder v3
   if (p === '/api/pages' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/pages\/([^/]+)\/content$/.exec(p))) {
     if (m === 'GET') return pageVisibleTo(u, mm[1]) ? next() : deny();
@@ -1273,8 +1271,6 @@ function authorizeRole(req, res, next) {
   }
   return deny();
 }
-
-registerPageBuilder(app, { readPagesRegistry, getPageDocPath, readJsonStoreOrThrow, writeFileAtomic, snapshotBeforeWrite, isAdminReq, ownerName, isAdminUserName, homeBuilderFile: HOME_BUILDER_FILE, readHomepage });
 
 app.get('/api/me', (req, res) => res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : 'pages' }));
 deviceEnrollment.mountAdmin(app, { isAdminReq });
@@ -1863,14 +1859,11 @@ app.get('/api/pages/:id/content', (req, res) => {
   const id = req.params.id;
   // Sanitized on READ too (fb-1790201502182): the Designer's Claude engine
   // writes the file directly, bypassing every write-path check.
-  if (id === 'home') return res.json({ ...readHomepage(), ...(homeBuilderLive(HOME_BUILDER_FILE) ? { builderLive: true } : {}) });
+  if (id === 'home') return res.json(readHomepage());
   const docPath = getPageDocPath(id);
   if (!fs.existsSync(docPath)) return res.json({ widgets: [] });
   const doc = sanitizePageDocFields(readJsonStoreOrThrow(docPath)).doc;
-  // Page Builder v3 content is served (cleaned) only by /api/pages/:id/builder.
-  const builderLive = !!(doc.builder && doc.builder.live);
   delete doc.builder;
-  if (builderLive) doc.builderLive = true;
   res.json(doc);
 });
 
@@ -1909,11 +1902,9 @@ app.post('/api/pages/:id/content', (req, res) => {
       }
     }
     let saveDoc = doc;
-    delete saveDoc.builder; delete saveDoc.builderLive;
+    delete saveDoc.builder;
     if (!isAdminReq(req)) saveDoc = restrictPageDoc(doc).doc;   // pages users never store raw HTML
     else sanitizePageDocFields(saveDoc);
-    // Page Builder v3 content is written only by the builder routes: keep what's on disk.
-    try { const onDisk = fs.existsSync(docPath) ? readJsonStoreOrThrow(docPath) : null; if (onDisk && onDisk.builder) saveDoc.builder = onDisk.builder; } catch (e) {}
     saveDoc.updatedAt = new Date().toISOString();
     snapshotBeforeWrite(id, docPath, ownerName(req));
     writeFileAtomic(docPath, JSON.stringify(saveDoc, null, 2));
