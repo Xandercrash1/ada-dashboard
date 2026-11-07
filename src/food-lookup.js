@@ -51,14 +51,25 @@ function normalize(f) {
   };
 }
 
-// USDA's own order puts "Bananas, dehydrated" before "Banana, raw". Plain foods first: names that start
-// with the words asked for, then raw or plain ones, then the shortest names.
+// USDA's own order puts "Bananas, dehydrated" before "Banana, raw" and "Egg burrito" before "Eggs, whole".
+// Plain foods first: the asked-for words as the food's own name (its first one or two comma parts),
+// then plain or raw forms, and prepared or processed foods (snacks, baby food, fast food) last.
+const GOOD = /\b(raw|plain|whole|nfs|cooked|boiled|boneless|skinless|unsweetened|fresh)\b/;
+const BAD = /\b(snacks?|babyfood|baby|cookies?|crackers?|bread|cakes?|candies|dessert|flour|powder|dehydrated|fast food|supplement|lunchmeat|deli|dry mix|nesquik)\b/;
+const words = (t) => String(t).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map((w) => (w.length > 3 && /[^s]s$/.test(w) ? w.slice(0, -1) : w));
 function rank(foods, query) {
-  const q = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const q = words(query);
+  const same = (a, b) => a.length === b.length && a.every((w) => b.includes(w));
   const score = (f) => {
     const n = f.name.toLowerCase();
-    const first = n.split(',')[0];
-    return (q.every((w) => first.includes(w)) ? 0 : 4) + (first.startsWith(q[0]) ? 0 : 2) + (/\b(raw|plain|cooked)\b/.test(n) ? 0 : 1) + n.length / 200;
+    const parts = n.split(',').map(words);
+    const head = parts[0] || [], head2 = head.concat(parts[1] || []);
+    let s = q.every((w) => head2.includes(w)) ? 0 : 6;
+    if (same(head, q) || same(head2, q)) s -= 3;
+    s += 0.8 * head.filter((w) => !q.includes(w)).length;
+    if (GOOD.test(n)) s -= 1;
+    if (BAD.test(n)) s += 2;
+    return s + n.length / 200;
   };
   return foods.map((f, i) => ({ f, s: score(f), i })).sort((a, b) => a.s - b.s || a.i - b.i).map((x) => x.f);
 }

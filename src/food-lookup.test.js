@@ -70,6 +70,14 @@ function fakeFetch(status, foods) {
     assert.deepStrictEqual(rank(names, 'banana').map((f) => f.name)[0], 'Banana, raw');
     assert.strictEqual(rank(names, 'banana').slice(-1)[0].name, 'Bread, banana');
   });
+  await t('real USDA names: the plain food wins', () => {
+    const top = (q, names) => rank(names.map((name) => ({ name })), q)[0].name;
+    assert.strictEqual(top('egg', ['Egg, Benedict', 'Egg burrito', 'Bagels, egg', 'Eggs, Grade A, Large, egg white', 'Eggs, Grade A, Large, egg whole', 'Egg omelet or scrambled egg, made with butter']), 'Eggs, Grade A, Large, egg whole');
+    assert.strictEqual(top('chicken breast', ['Lunchmeat, chicken breast, sliced', 'Chicken breast, rotisserie, skin not eaten', 'Chicken breast tenders, breaded, cooked, microwaved', 'Chicken, breast, boneless, skinless, raw']), 'Chicken, breast, boneless, skinless, raw');
+    assert.strictEqual(top('brown rice', ['Beans and brown rice', 'Brown rice, puffed', 'Snacks, rice cakes, brown rice, corn', 'Rice, brown, cooked, as ingredient']), 'Rice, brown, cooked, as ingredient');
+    assert.strictEqual(top('oatmeal', ['Oatmeal, multigrain', 'Oatmeal, NFS', 'Bread, oatmeal', 'Oatmeal, fast food, plain']), 'Oatmeal, NFS');
+    assert.strictEqual(top('milk', ['Coconut milk', 'Crackers, milk', 'Milk, human', 'Milk, whole']), 'Milk, whole');
+  });
   await t('rate limit gives a plain message', async () => {
     await assert.rejects(create({ fetchImpl: fakeFetch(429, []) }).lookup('banana'), (e) => e.status === 429 && /Too many lookups/.test(e.message));
   });
