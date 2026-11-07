@@ -1152,6 +1152,7 @@ deviceEnrollment.mountAdmin(app, { isAdminReq });
 const vaultProjects = require('./projects').create();
 vaultProjects.mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
 require('./user-projects').create({ dataDir: DATA_DIR, projectContext: vaultProjects.context }).mount(app, { ownerName, isAdminReq });   // New project button: splash pages and documents
+require('./food-lookup').create().mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
 app.post('/api/me/password', (req, res) => {

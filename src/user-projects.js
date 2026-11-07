@@ -49,6 +49,7 @@ Rules for the file:
   \`await gear.add({name:'Tent', packed:false})\` returns the new entry. Fields must be plain JSON.
   \`await gear.update(entry.id, {packed:true})\` merges fields and returns the entry. \`await gear.remove(entry.id)\` deletes it.
   Photos: use a normal <input type="file" accept="image/*">, then \`const photoId = await ada.savePhoto(file)\` and store photoId in an entry's fields. To show one, set an img's src to \`await ada.photoUrl(photoId)\`.
+  Food nutrients: \`await ada.lookupFood('banana')\` (or \`ada.lookupFood('cheddar', {brands:true})\` for packaged foods) returns up to 8 USDA matches, each \`{id, name, brand, per100:{calories, protein, carbs, fat, fiber, sugar, sodium}, portions:[{label, grams}]}\`, with per100 values per 100 g (sodium in mg). Scale by grams/100. Lookups are limited, so call it only when someone asks.
   Every ada call can fail, so catch errors and show a short plain message. Use entries for data, not for page text.
 - Keep the page's own wording in the HTML or in plain string literals, so the owner can edit it by clicking on it.
 - If the project has a photo, use the exact text {{PHOTO}} as an image's src. Otherwise use no photos.
@@ -67,7 +68,8 @@ addEventListener('message',function(e){var d=e.data;if(e.source!==parent||!d||d.
 function call(op,a){return new Promise(function(ok,no){var id=++n;w[id]=[ok,no];parent.postMessage({ada:id,op:op,args:a},'*');});}
 window.ada={list:function(l){return{all:function(){return call('all',{list:l});},add:function(v){return call('add',{list:l,value:v});},update:function(i,v){return call('update',{list:l,entry:i,value:v});},remove:function(i){return call('remove',{list:l,entry:i});}};},
 savePhoto:function(f){return new Promise(function(ok,no){var r=new FileReader();r.onerror=function(){no(new Error('Could not read that file.'));};r.onload=function(){call('savePhoto',{base64:r.result}).then(ok,no);};r.readAsDataURL(f);});},
-photoUrl:function(i){return call('photoUrl',{photo:i});}};
+photoUrl:function(i){return call('photoUrl',{photo:i});},
+lookupFood:function(q,o){return call('lookupFood',{q:q,brands:!!(o&&o.brands)});}};
 })();</script>`;
 
 // Added only for the owner in edit mode. Plain text in a leaf element becomes editable; buttons and

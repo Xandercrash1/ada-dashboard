@@ -298,6 +298,7 @@
       else if (op === 'remove') result = await api(`${list}/${encodeURIComponent(args.entry)}`, 'DELETE');
       else if (op === 'savePhoto') result = (await api(`${base}/photos`, 'POST', { base64: args.base64 })).id;
       else if (op === 'photoUrl') result = (await api(`${base}/photos/${encodeURIComponent(args.photo)}`)).url;
+      else if (op === 'lookupFood') result = await api(`/api/food-lookup?q=${encodeURIComponent(args.q || '')}${args.brands ? '&brands=1' : ''}`);
       else error = 'Not available.';
     } catch (err) { error = err.message; }
     e.source.postMessage({ adaReply: e.data.ada, result, error }, '*');
