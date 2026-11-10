@@ -1286,21 +1286,34 @@ function bundlePublishDir(dir, filesByName, pageLinkMap, warnings, opts) {
 }
 async function deployToPages(c, project, dir, isNew, filesByName) {
   const pre = await contactFormPrereqs(c, project, filesByName);
-  if (isNew) {
-    const cr = await cfApi(c, 'POST', `/accounts/${c.accountId}/pages/projects`, { name: project, production_branch: 'main' });
-    if (!cr.ok) throw new Error('Could not create the Cloudflare project: ' + cfErr(cr));
+  // A first publish that fails anywhere must not leave an empty project or a
+  // Turnstile widget behind (2026-11-09: a form on a first publish did both).
+  const undoNew = async () => {
+    if (!isNew) return;
+    await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${project}`).catch(() => {});
+    if (pre) await removeTurnstile(c, project).catch(() => {});
+  };
+  let fnRoot = false, out;
+  try {
+    if (isNew) {
+      const cr = await cfApi(c, 'POST', `/accounts/${c.accountId}/pages/projects`, { name: project, production_branch: 'main' });
+      if (!cr.ok) throw new Error('Could not create the Cloudflare project: ' + cfErr(cr));
+    }
+    fnRoot = await prepareContactForms(c, project, dir, filesByName, pre);
+    out = await new Promise((resolve) => {
+      execFile(WRANGLER_BIN, ['pages', 'deploy', dir, '--project-name', project, '--branch', 'main', '--commit-dirty=true'], {
+        cwd: fnRoot || PUBLISH_TMP, timeout: 180000, maxBuffer: 4 * 1024 * 1024,
+        env: { PATH: process.env.PATH, HOME: '/home/ubuntu', CLOUDFLARE_API_TOKEN: c.token, CLOUDFLARE_ACCOUNT_ID: c.accountId, WRANGLER_SEND_METRICS: 'false', CI: '1' }
+      }, (err, stdout, stderr) => resolve({ err, text: `${stdout || ''}\n${stderr || ''}` }));
+    });
+  } catch (e) {
+    if (fnRoot) fs.rmSync(fnRoot, { recursive: true, force: true });
+    await undoNew();
+    throw e;
   }
-  const fnRoot = await prepareContactForms(c, project, dir, filesByName, pre);
-  const out = await new Promise((resolve) => {
-    execFile(WRANGLER_BIN, ['pages', 'deploy', dir, '--project-name', project, '--branch', 'main', '--commit-dirty=true'], {
-      cwd: fnRoot || PUBLISH_TMP, timeout: 180000, maxBuffer: 4 * 1024 * 1024,
-      env: { PATH: process.env.PATH, HOME: '/home/ubuntu', CLOUDFLARE_API_TOKEN: c.token, CLOUDFLARE_ACCOUNT_ID: c.accountId, WRANGLER_SEND_METRICS: 'false', CI: '1' }
-    }, (err, stdout, stderr) => resolve({ err, text: `${stdout || ''}\n${stderr || ''}` }));
-  });
   if (fnRoot) fs.rmSync(fnRoot, { recursive: true, force: true });
   if (out.err) {
-    // A first deploy that fails would leave an empty project behind.
-    if (isNew) await cfApi(c, 'DELETE', `/accounts/${c.accountId}/pages/projects/${project}`).catch(() => {});
+    await undoNew();
     throw new Error('Deploy failed: ' + out.text.replace(new RegExp(c.token, 'g'), '***').trim().split('\n').slice(-4).join(' '));
   }
   return `https://${project}.pages.dev`;
@@ -1383,12 +1396,20 @@ async function contactFormPrereqs(c, project, filesByName) {
   if (!filesByName || !Object.values(filesByName).some(h => /data-contact-form/.test(h))) return null;
   return { nsId: await ensureContactKv(c), w: await ensureTurnstile(c, project) };
 }
+const PATCH_RETRY_WAITS = [1500, 3000, 6000, 10000];
 async function prepareContactForms(c, project, dir, filesByName, pre) {
   if (!pre) return false;
   const { nsId, w } = pre;
-  const cfg = await cfApi(c, 'PATCH', `/accounts/${c.accountId}/pages/projects/${project}`, { deployment_configs: { production: {
+  const body = { deployment_configs: { production: {
     kv_namespaces: { CONTACT: { namespace_id: nsId } },
-    env_vars: { TURNSTILE_SECRET: { type: 'secret_text', value: w.secret }, PROJECT: { type: 'plain_text', value: project } } } } });
+    env_vars: { TURNSTILE_SECRET: { type: 'secret_text', value: w.secret }, PROJECT: { type: 'plain_text', value: project } } } } };
+  // A just-created project can answer "Project not found" for a few seconds.
+  let cfg;
+  for (const wait of [0, ...PATCH_RETRY_WAITS]) {
+    if (wait) await new Promise(r => setTimeout(r, wait));
+    cfg = await cfApi(c, 'PATCH', `/accounts/${c.accountId}/pages/projects/${project}`, body);
+    if (cfg.ok || !(cfg.status === 404 || /not found/i.test(cfErr(cfg)))) break;
+  }
   if (!cfg.ok) throw new Error('Could not connect the form to its message store: ' + cfErr(cfg));
   // Wrangler compiles ./functions from its WORKING directory, not from the
   // upload folder — so the Function lives in a sibling root that becomes cwd
