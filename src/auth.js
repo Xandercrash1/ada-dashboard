@@ -349,11 +349,17 @@ function makeRequireAuth(getSecret, exempt, users, revoked) {
 
 // ---------------------------------------------------------------------
 // User store (fb-1790201502191). data/users.json:
-//   [{ username, role: 'admin'|'pages', salt, passwordHash, pv, disabled, createdAt }]
+//   [{ username, role: 'admin'|'303'|'guest', salt, passwordHash, pv, disabled, createdAt,
+//      displayName, color, avatar }]
+// Roles (Alex, 2026-11-09): admin (no limits), 303 (household), guest. The old
+// 'pages' role reads as guest.
 // Absent file = one admin, 'alex', whose password is the original
 // credentials file's — so enabling users changes nothing for Alex.
 // ---------------------------------------------------------------------
 const USERNAME_RE = /^[a-z][a-z0-9_-]{1,31}$/;
+const ROLES = ['admin', '303', 'guest'];
+const COLOR_RE = /^#[0-9a-f]{6}$/;
+const cleanDisplayName = (v) => String(v || '').replace(/[<>"'`\\\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
 function createUserStore(usersFile, creds) {
   let cache = null;
   const seed = () => [{ username: 'alex', role: 'admin', salt: creds.salt, passwordHash: creds.passwordHash, pv: 0, createdAt: creds.createdAt || null }];
@@ -361,6 +367,7 @@ function createUserStore(usersFile, creds) {
     if (cache) return cache;
     try { cache = fs.existsSync(usersFile) ? JSON.parse(fs.readFileSync(usersFile, 'utf8')) : seed(); } catch (e) { cache = seed(); }
     if (!Array.isArray(cache) || !cache.some(u => u.role === 'admin')) cache = seed();
+    cache.forEach(u => { if (!ROLES.includes(u.role)) u.role = 'guest'; });   // 'pages' (and anything unknown) is guest
     return cache;
   };
   const save = (list) => {
@@ -368,7 +375,20 @@ function createUserStore(usersFile, creds) {
     fs.writeFileSync(usersFile, JSON.stringify(list, null, 2), { mode: 0o600 });
     cache = list;
   };
-  const pub = (u) => ({ username: u.username, role: u.role, disabled: !!u.disabled, createdAt: u.createdAt || null });
+  const pub = (u) => ({ username: u.username, role: u.role, disabled: !!u.disabled, createdAt: u.createdAt || null,
+    displayName: u.displayName || u.username, color: u.color || null, avatar: u.avatar || null });
+  const setProfile = (u, { displayName, color, avatar }) => {
+    if (displayName !== undefined) {
+      const d = cleanDisplayName(displayName);
+      if (!d) throw new Error('Display name: 1–40 characters.');
+      u.displayName = d;
+    }
+    if (color !== undefined) {
+      if (color !== null && !COLOR_RE.test(String(color))) throw new Error('Colour must look like #a1b2c3.');
+      u.color = color;
+    }
+    if (avatar !== undefined) u.avatar = avatar;   // server-made path only (server.js writes it)
+  };
   const setPw = (u, password) => {
     const salt = crypto.randomBytes(16);
     u.salt = salt.toString('hex');
@@ -378,18 +398,19 @@ function createUserStore(usersFile, creds) {
   return {
     find: (name) => load().find(u => u.username === String(name || '').toLowerCase()) || null,
     list: () => load().map(pub),
-    create: ({ username, password, role }) => {
+    create: ({ username, password, role, displayName, color }) => {
       const name = String(username || '').trim().toLowerCase();
       if (!USERNAME_RE.test(name)) throw new Error('Username: 2–32 characters, lowercase letters, digits, - or _, starting with a letter.');
       if (typeof password !== 'string' || password.length < 8) throw new Error('Password must be at least 8 characters.');
       const list = load().slice();
       if (list.some(u => u.username === name)) throw new Error('That username is taken.');
-      const u = { username: name, role: role === 'admin' ? 'admin' : 'pages', pv: -1, createdAt: new Date().toISOString() };
+      const u = { username: name, role: ROLES.includes(role) ? role : 'guest', pv: -1, createdAt: new Date().toISOString() };
+      setProfile(u, { displayName: displayName === undefined ? name : displayName, color });
       setPw(u, password);
       list.push(u); save(list);
       return pub(u);
     },
-    update: (name, { password, disabled }) => {
+    update: (name, { password, disabled, role, displayName, color, avatar }) => {
       const list = load().map(u => ({ ...u }));
       const u = list.find(x => x.username === String(name || '').toLowerCase());
       if (!u) throw new Error('No such user.');
@@ -402,6 +423,12 @@ function createUserStore(usersFile, creds) {
         u.disabled = !!disabled;
         if (disabled) u.pv = (u.pv || 0) + 1;     // end its sessions
       }
+      if (role !== undefined && role !== u.role) {
+        if (!ROLES.includes(role)) throw new Error('Unknown role.');
+        if (u.role === 'admin' && list.filter(x => x.role === 'admin' && !x.disabled).length <= 1) throw new Error('Cannot change the last admin.');
+        u.role = role;
+      }
+      setProfile(u, { displayName, color, avatar });
       save(list);
       return pub(u);
     },
@@ -664,4 +691,6 @@ module.exports = {
   getClientIp,
   COOKIE_NAME,
   SESSION_TTL_MS,
+  ROLES,
+  USERNAME_RE,
 };

@@ -111,7 +111,7 @@ class HomeView extends HTMLElement {
           </figure>
         </section>
       </div>
-      <section aria-labelledby="h-pages"><h2 id="h-pages">Your pages</h2><div class="h-tiles" data-r="tiles"></div></section>
+      <section aria-labelledby="h-pages" data-r="pages"><h2 id="h-pages">Your pages</h2><div class="h-tiles" data-r="tiles"></div></section>
       <section aria-labelledby="h-admin" data-r="admin" hidden><h2 id="h-admin">Admin</h2><div class="h-status" data-r="status"></div></section>
     </div>`;
     this.r = {};
@@ -133,8 +133,15 @@ class HomeView extends HTMLElement {
   async show() {
     if (Date.now() - this.loadedAt < STALE_MS) return;
     this.loadedAt = Date.now();
-    this.me = (window.ME || await window.__meReady) || { username: '', role: 'pages' };
+    this.me = (window.ME || await window.__meReady) || { username: '', role: 'guest' };
     this.isAdmin = this.me.role === 'admin';
+    // Guests see Home only (Alex, 2026-11-09): no photo adding, no page tiles.
+    if (this.me.role === 'guest') {
+      this.r.pick.onclick = null;
+      this.r.pick.setAttribute('aria-label', 'House photos');
+      this.r.empty.textContent = 'No photos yet';
+      this.r.pages.hidden = true;
+    }
     this.drawHeader();
     this.loadWeather();
     this.loadTasks();
@@ -153,7 +160,8 @@ class HomeView extends HTMLElement {
   drawHeader() {
     const hour = parseInt(new Date().toLocaleString('en-US', { timeZone: TZ, hour: 'numeric', hour12: false }), 10);
     const part = hour >= 4 && hour < 12 ? 'morning' : hour >= 12 && hour < 18 ? 'afternoon' : 'evening';
-    const name = this.me.username ? this.me.username[0].toUpperCase() + this.me.username.slice(1) : '';
+    const name = this.me.displayName && this.me.displayName !== this.me.username ? this.me.displayName
+      : (this.me.username ? this.me.username[0].toUpperCase() + this.me.username.slice(1) : '');
     this.r.hello.textContent = `Good ${part}${name ? ', ' + name : ''}`;
     this.dateText = new Date().toLocaleDateString('en-US', { timeZone: TZ, weekday: 'long', month: 'long', day: 'numeric' });
     this.r.date.textContent = this.dateText;

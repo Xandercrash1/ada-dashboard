@@ -56,7 +56,7 @@
         <div class="flex gap-2 flex-shrink-0">${docs}${web}</div></div>`;
     };
     const me = window.ME || await window.__meReady;
-    const admin = !(me && me.role === 'pages');   // accounts see only the projects they made or were shared
+    const admin = !(me && me.role && me.role !== 'admin');   // accounts see only the projects they made or were shared
     root().innerHTML = `
       <div class="flex items-center justify-between"><h2 class="text-xl font-semibold text-gray-900 dark:text-white"><i class="fa-solid fa-diagram-project text-indigo-400"></i> Projects</h2>
         ${admin ? `<span class="text-xs text-gray-400">${rows.length} projects · from the vault's Projects/REGISTRY.md</span>` : ''}</div>

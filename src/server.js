@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const { exec, spawn, execFile } = require('child_process');
 const crypto = require('crypto');
-const { mountAuth } = require('./auth');
+const { mountAuth, getClientIp } = require('./auth');
 const todoEngine = require('./todo-engine');
 const todoStore = require('./todo-store');
 const todoValidate = require('./todo-validate');
@@ -53,10 +53,35 @@ const deviceEnrollment = require('./devices').create({
 });
 deviceEnrollment.mountPublic(app);
 require("./forum").mountPublic(app);   // forum email bounce link (public same-site hop, like the device-approval page)
+// Invite and reset links: the link page and its two API calls work signed out (the token is the credential).
+const invites = require('./invites').create({
+  dataDir: path.join(__dirname, '../data'), users: userStore,
+  baseUrl: String(PORT) === '3000' ? 'https://303dashboard.duckdns.org' : `http://localhost:${PORT}`,
+  pageFile: path.join(__dirname, '../public/invite.html'),
+});
+invites.mountPublic(app, { getClientIp });
 app.use(requireAuth);                 // everything below requires a session
 app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1790201502191), defined below
 app.use(express.static(path.join(__dirname, '../public')));
 const MEDIA_DIR = path.join(__dirname, '../data/media');
+// Media split (Plan — Roles § Media library): admins see everything. Others see the
+// shared Home library ('default'), profile pictures, and images of pages they can see.
+// Alex's other libraries are admin-only.
+function mediaLibraryVisible(req, lib) {
+  if (isAdminReq(req)) return true;
+  if (lib === 'avatars' || lib === 'page-home') return true;
+  if (lib === 'default') return true;
+  const m = /^page-([a-z0-9][a-z0-9-]{0,63})$/.exec(lib);
+  return !!m && req.user.role !== 'guest' && pageVisibleTo(req.user, m[1]);
+}
+app.use('/media', (req, res, next) => {
+  if (isAdminReq(req)) return next();
+  let p;
+  try { p = decodeURIComponent(req.path); } catch (e) { return res.status(400).end(); }
+  if (/[\\\0]/.test(p)) return res.status(404).end();
+  const lib = path.posix.normalize(p).split('/')[1] || '';
+  return mediaLibraryVisible(req, lib) ? next() : res.status(404).end();
+});
 app.use('/media', express.static(MEDIA_DIR));
 
 // Directories
@@ -1102,10 +1127,17 @@ function authorizeRole(req, res, next) {
   const u = req.user, m = req.method, p = req.path;
   const deny = () => res.status(403).json({ error: 'Not available for your account.' });
   if (!p.startsWith('/api/') && p.toLowerCase().startsWith('/api')) return deny();   // '/API/...' and the like never get past the wall
-  if (!p.startsWith('/api/')) return (m === 'GET' || m === 'HEAD') ? next() : deny();   // the app shell, components, media files
+  if (!p.startsWith('/api/')) return (m === 'GET' || m === 'HEAD') ? next() : deny();   // the app shell, components, media files (the /media guard narrows those)
   let mm;
   if (p === '/api/me' && m === 'GET') return next();
   if (p === '/api/me/password' && m === 'POST') return next();
+  if ((p === '/api/me/profile' && m === 'PATCH') || (p === '/api/me/avatar' && m === 'POST')) return next();
+  // Guest: the homepage only for now (Alex, 2026-11-09). Permissions get added case by case.
+  if (u.role === 'guest') {
+    if (m === 'GET' && ['/api/homepage', '/api/weather', '/api/glance', '/api/people', '/api/media/files'].includes(p)) return next();   // media files: the list is filtered to what a guest may open
+    return deny();
+  }
+  if (p === '/api/people' && m === 'GET') return next();
   if (p === '/api/pages' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/pages\/([^/]+)\/content$/.exec(p))) {
     if (m === 'GET') return pageVisibleTo(u, mm[1]) ? next() : deny();
@@ -1153,7 +1185,39 @@ function authorizeRole(req, res, next) {
   return deny();
 }
 
-app.get('/api/me', (req, res) => res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : 'pages' }));
+app.get('/api/me', (req, res) => {
+  const u = userStore && userStore.find(ownerName(req));
+  const pub = u ? userStore.list().find(x => x.username === u.username) : null;
+  res.json({ username: ownerName(req), role: isAdminReq(req) ? 'admin' : req.user.role,
+    displayName: pub ? pub.displayName : ownerName(req), color: pub ? pub.color : null, avatar: pub ? pub.avatar : null });
+});
+// Names, colours and pictures of enabled accounts, so people can tell each other apart.
+app.get('/api/people', (req, res) => res.json((userStore ? userStore.list() : []).filter(u => !u.disabled)
+  .map(u => ({ username: u.username, displayName: u.displayName, color: u.color, avatar: u.avatar }))));
+app.patch('/api/me/profile', (req, res) => {
+  const { displayName, color } = req.body || {};
+  if (!userStore || !userStore.find(ownerName(req))) return res.status(400).json({ error: 'No account to update.' });
+  try {
+    const out = userStore.update(ownerName(req), { displayName, color: color === '' ? null : color });
+    res.json({ displayName: out.displayName, color: out.color, avatar: out.avatar });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/me/avatar', async (req, res) => {
+  const name = ownerName(req);
+  if (!userStore || !userStore.find(name)) return res.status(400).json({ error: 'No account to update.' });
+  const b = req.body || {};
+  try {
+    if (b.remove === true) { userStore.update(name, { avatar: null }); fs.rmSync(path.join(MEDIA_DIR, 'avatars', `${name}.webp`), { force: true }); return res.json({ avatar: null }); }
+    const mm = /^data:(image\/(?:png|jpeg|webp|gif|heic|heif));base64,(.+)$/.exec(String(b.base64 || ''));
+    if (!mm) return res.status(400).json({ error: 'Choose a photo (PNG, JPEG, WebP or GIF).' });
+    const dir = path.join(MEDIA_DIR, 'avatars');
+    fs.mkdirSync(dir, { recursive: true });
+    await require('sharp')(Buffer.from(mm[2], 'base64')).rotate().resize(256, 256, { fit: 'cover' }).webp({ quality: 80 }).toFile(path.join(dir, `${name}.webp`));
+    const avatar = `/media/avatars/${name}.webp?v=${Date.now()}`;
+    userStore.update(name, { avatar });
+    res.json({ avatar });
+  } catch (e) { res.status(400).json({ error: 'That picture could not be used.' }); }
+});
 deviceEnrollment.mountAdmin(app, { isAdminReq });
 const vaultProjects = require('./projects').create();
 vaultProjects.mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
@@ -1168,16 +1232,21 @@ app.post('/api/me/password', (req, res) => {
   try { userStore.update(name, { password: nextPw }); res.json({ ok: true, relogin: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-// Users admin (admin only — authorizeRole never lets a pages user reach these)
+// Users admin (admin only — authorizeRole never lets a non-admin reach these)
+invites.mountAdmin(app, { isAdminReq, ownerName });
 app.get('/api/users', (req, res) => res.json(userStore ? userStore.list() : []));
 app.post('/api/users', (req, res) => {
-  try { res.status(201).json(userStore.create({ username: req.body && req.body.username, password: req.body && req.body.password, role: 'pages' })); }
+  const role = ['303', 'guest'].includes(req.body && req.body.role) ? req.body.role : 'guest';
+  try { res.status(201).json(userStore.create({ username: req.body && req.body.username, password: req.body && req.body.password, role })); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.patch('/api/users/:username', (req, res) => {
-  const { password, disabled } = req.body || {};
-  if (req.params.username === ownerName(req) && disabled) return res.status(400).json({ error: 'You cannot disable your own account.' });
-  try { res.json(userStore.update(req.params.username, { password, disabled })); }
+  const { password, disabled, role } = req.body || {};
+  if (req.params.username === ownerName(req) && (disabled || role !== undefined)) return res.status(400).json({ error: 'You cannot disable your own account or change its role.' });
+  if (role !== undefined && !['303', 'guest'].includes(role)) return res.status(400).json({ error: 'Role must be 303 or guest.' });
+  const target = userStore.find(req.params.username);
+  if (role !== undefined && target && target.role === 'admin') return res.status(400).json({ error: 'Admin accounts keep their role.' });
+  try { res.json(userStore.update(req.params.username, { password, disabled, role })); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -4536,7 +4605,7 @@ app.get('/api/media/libraries', (req, res) => {
     const items = fs.readdirSync(MEDIA_DIR, { withFileTypes: true });
     const libs = items.filter(i => i.isDirectory()).map(i => i.name);
     if (!libs.includes('default')) libs.unshift('default');
-    res.json(libs);
+    res.json(libs.filter(l => mediaLibraryVisible(req, l)));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4551,7 +4620,8 @@ app.get('/api/media/files', (req, res) => {
     // A library is a folder NAME: "../.." listed arbitrary server directories
     // (fb-1790201502191 — pages users can reach this route for the photo frame).
     if (library && library !== 'all' && !/^[A-Za-z0-9_-]{1,64}$/.test(library)) return res.status(400).json({ error: 'Invalid library' });
-    const libs = (library && library !== 'all') ? [library] : fs.readdirSync(MEDIA_DIR, { withFileTypes: true }).filter(i => i.isDirectory()).map(i => i.name);
+    const libs = ((library && library !== 'all') ? [library] : fs.readdirSync(MEDIA_DIR, { withFileTypes: true }).filter(i => i.isDirectory()).map(i => i.name))
+      .filter(l => mediaLibraryVisible(req, l));   // media split: a non-admin lists only what they may open
     
     for (const lib of libs) {
       const libPath = path.join(MEDIA_DIR, lib);
