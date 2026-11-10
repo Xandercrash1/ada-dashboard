@@ -2,7 +2,7 @@
  * user-projects.js — projects made with the "New project" button on the Projects tab.
  *
  * A project is a splash page or a document, stored on the server in data/user-projects.json.
- * Only its owner sees it until they share it with everyone who has an account. Building a site
+ * Only its owner (and an admin) sees it until the owner shares it with people or roles (src/sharing.js). Building a site
  * is optional and runs a one-shot `claude -p` with no tools, so a description can only ever
  * produce a file. That file is someone else's code to every other viewer, so it is only ever
  * served with a sandbox CSP: it can't reach the dashboard, its cookies or the network.
@@ -13,6 +13,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const sanitizeHtml = require('sanitize-html');
+const sharing = require('./sharing');
 
 const SITE_MODEL = 'claude-sonnet-5-5';   // Haiku's sites were mostly placeholders in a side-by-side test, 2026-11-04
 const SITE_TIMEOUT_MS = 300000;
@@ -130,7 +131,6 @@ function cleanFields(body) {
   if ('blocks' in body) out.blocks = cleanBlocks(body.blocks);
   if ('links' in body) out.links = cleanLinks(body.links);
   if ('html' in body) out.html = sanitizeHtml(text(body.html, 500000), DOC_HTML);
-  if ('share' in body) out.share = body.share === true;
   return out;
 }
 
@@ -180,10 +180,10 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
   const newestDraft = (id) => { const d = drafts(id); return d.length ? path.join(draftsDir(id), d[d.length - 1]) : null; };
   const newestVersion = (id) => { const v = versions(id); return v.length ? path.join(versionsDir(id), v[v.length - 1]) : null; };
   const versions = (id) => { try { return fs.readdirSync(versionsDir(id)).filter((n) => n.endsWith('.html')).sort(); } catch (e) { return []; } };
-  const canSee = (p, who) => p.owner === who || p.share === true;
   const view = (p, who) => {
     const job = p.owner === who ? jobs.get(p.id) : null;
-    return { ...p, mine: p.owner === who, versions: versions(p.id).length, drafts: p.owner === who ? drafts(p.id).length : 0, job: job ? { state: job.state, error: job.error || '' } : null };
+    const v = sharing.view(p);
+    return { ...p, ...v, share: v.sharedWith.length > 0, mine: p.owner === who, versions: versions(p.id).length, drafts: p.owner === who ? drafts(p.id).length : 0, job: job ? { state: job.state, error: job.error || '' } : null };
   };
   const touch = (id, fields) => {
     const all = load();
@@ -223,14 +223,14 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
     });
   }
 
-  function mount(app, { ownerName, isAdminReq = () => false }) {
+  function mount(app, { ownerName, isAdminReq = () => false, people = () => [] }) {
     const guard = (fn) => async (req, res) => {
       try { await fn(req, res); }
       catch (e) { if (!e.status) console.error('[user-projects]', e.message); res.status(e.status || 500).json({ error: e.status ? e.message : 'Something went wrong saving that.' }); }
     };
     const find = (req, res, all) => {
       const p = all.find((x) => x.id === req.params.id);
-      if (!p || !canSee(p, ownerName(req))) { res.status(404).json({ error: 'That project is not here.' }); return null; }
+      if (!p || !sharing.canSee(req.user, p)) { res.status(404).json({ error: 'That project is not here.' }); return null; }
       return p;
     };
     const findOwned = (req, res, all) => {
@@ -241,7 +241,7 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
 
     app.get('/api/user-projects', guard((req, res) => {
       const who = ownerName(req);
-      res.json(load().filter((p) => canSee(p, who)).map((p) => view(p, who)));
+      res.json(load().filter((p) => sharing.canSee(req.user, p)).map((p) => view(p, who)));
     }));
 
     app.post('/api/user-projects', guard((req, res) => {
@@ -256,7 +256,7 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
       const all = load();
       if (all.filter((p) => p.owner === who).length >= MAX_PROJECTS_PER_USER) return res.status(400).json({ error: 'You have reached the project limit.' });
       const now = new Date().toISOString();
-      const p = { id: `up-${crypto.randomBytes(8).toString('hex')}`, owner: who, kind: body.kind, name, text: text(body.text, 4000), blocks: [], links: [], html: '', share: false, hasImage: false, hasSite: false, ...(belongsTo ? { project: belongsTo.slug, projectName: belongsTo.name } : {}), ...(typeof body.migratedFrom === 'string' && isAdminReq(req) ? { migratedFrom: text(body.migratedFrom, 64) } : {}), createdAt: now, updatedAt: now };
+      const p = { id: `up-${crypto.randomBytes(8).toString('hex')}`, owner: who, kind: body.kind, name, text: text(body.text, 4000), blocks: [], links: [], html: '', sharedWith: [], hasImage: false, hasSite: false, ...(belongsTo ? { project: belongsTo.slug, projectName: belongsTo.name } : {}), ...(typeof body.migratedFrom === 'string' && isAdminReq(req) ? { migratedFrom: text(body.migratedFrom, 64) } : {}), createdAt: now, updatedAt: now };
       all.push(p);
       save(all);
       res.json(view(p, who));
@@ -269,9 +269,16 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
 
     app.patch('/api/user-projects/:id', guard((req, res) => {
       const all = load();
-      const p = findOwned(req, res, all);
+      const body = req.body || {};
+      const fields = cleanFields(body);
+      // Sharing alone is open to the owner and admins; every other change is the owner's.
+      const p = Object.keys(fields).length ? findOwned(req, res, all) : find(req, res, all);
       if (!p) return;
-      const fields = cleanFields(req.body || {});
+      // Older screens send share: true/false, meaning every 303 account or nobody.
+      const wanted = 'sharedWith' in body ? body.sharedWith : typeof body.share === 'boolean' ? (body.share ? ['@303'] : []) : undefined;
+      if (!Object.keys(fields).length && wanted === undefined) return res.json(view(p, ownerName(req)));
+      const refused = sharing.change(req.user, p, wanted, people());
+      if (refused) return res.status(refused.status).json({ error: refused.error });
       if ('name' in fields && !fields.name) delete fields.name;
       Object.assign(p, fields, { updatedAt: new Date().toISOString() });
       save(all);

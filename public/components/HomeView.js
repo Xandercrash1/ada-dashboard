@@ -135,12 +135,11 @@ class HomeView extends HTMLElement {
     this.loadedAt = Date.now();
     this.me = (window.ME || await window.__meReady) || { username: '', role: 'guest' };
     this.isAdmin = this.me.role === 'admin';
-    // Guests see Home only (Alex, 2026-11-09): no photo adding, no page tiles.
+    // Guests (Alex, 2026-11-09): no photo adding, and only the pages and tasks shared with them, read-only.
     if (this.me.role === 'guest') {
       this.r.pick.onclick = null;
       this.r.pick.setAttribute('aria-label', 'House photos');
       this.r.empty.textContent = 'No photos yet';
-      this.r.pages.hidden = true;
     }
     this.drawHeader();
     this.loadWeather();
@@ -196,7 +195,7 @@ class HomeView extends HTMLElement {
       const li = el('li'), label = el('label', 'h-task'), box = el('input'), name = el('span', '', t.name);
       box.type = 'checkbox';
       box.checked = this.doneIds.has(t.id);
-      box.disabled = box.checked;
+      box.disabled = box.checked || this.me.role === 'guest';
       box.onchange = () => this.complete(t, box);
       label.append(box, name);
       if (t.late) label.append(el('span', 'h-late', 'Overdue'));
@@ -340,11 +339,13 @@ class HomeView extends HTMLElement {
   async loadPages() {
     let pages = [];
     try { pages = (await getJson('/api/pages')).pages || []; } catch (e) { /* the built-in tiles still work */ }
+    const guest = this.me.role === 'guest';
     const built = this.isAdmin
       ? [['todo', 'Tasks'], ['projects', 'Projects'], ['tools', 'Scripts']]
-      : [['todo', 'Tasks']];
+      : guest ? [] : [['todo', 'Tasks']];
     // Project pages live on their project's hub, as in the top bar.
     const own = pages.filter(p => !p.project).map(p => [p.id, p.title]);
+    this.r.pages.hidden = guest && !own.length;
     this.r.tiles.replaceChildren(...[...built, ...own].map(([id, title]) => {
       const b = el('button', 'h-tile', title);
       b.type = 'button';

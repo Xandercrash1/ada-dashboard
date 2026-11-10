@@ -117,7 +117,8 @@
     catch (e) { body.replaceChildren(el('p', { class: 'text-sm text-rose-500' }, e.message)); return; }
     const row = (p) => {
       const kind = p.kind === 'splash' ? 'Splash page' : 'Document';
-      const who = p.mine ? (p.share ? 'Shared with everyone' : 'Only you') : `Shared by ${p.owner}`;
+      const summary = window.shareSummary ? window.shareSummary(p) : '';
+      const who = p.mine ? (p.share ? `Shared with ${summary}` : 'Only you') : `Made by ${window.ownerLabel ? window.ownerLabel(p) : p.owner}`;
       return el('a', { href: `#projects/mine/${encodeURIComponent(p.id)}`, class: 'block px-4 py-3 border-b border-gray-100 dark:border-dark-border last:border-0 hover:bg-gray-50 dark:hover:bg-white/5' },
         el('div', { class: 'font-medium text-gray-900 dark:text-gray-100 break-words' }, p.name),
         el('div', { class: 'text-xs text-gray-400 mt-0.5' }, `${kind} · ${who}`));
@@ -130,7 +131,7 @@
     const parts = [];
     if (mine.length) parts.push(group('Your projects', mine));
     else parts.push(el('p', { class: note }, 'Nothing here yet. Choose New project to make your first one.'));
-    if (shared.length) parts.push(group('Shared with you', shared));
+    if (shared.length) parts.push(group(window.ME && window.ME.role === 'admin' ? 'Made by others' : 'Shared with you', shared));
     body.replaceChildren(...parts);
   }
 
@@ -219,10 +220,18 @@
 
   function shareBar(page, state) {
     const p = state.p;
-    if (!p.mine) return el('p', { class: note }, `Shared by ${p.owner}. You can read this.`);
-    const sel = el('select', { id: 'up-share', class: `${input} w-auto` }, el('option', { value: 'no' }, 'Only you'), el('option', { value: 'yes' }, 'Everyone with an account'));
-    sel.value = p.share ? 'yes' : 'no';
-    sel.onchange = () => saveSoon(state, { share: sel.value === 'yes' });
+    const label = () => p.share ? `Shared with ${window.shareSummary(p)}` : 'Only you';
+    const sel = el('button', { type: 'button', id: 'up-share', class: quiet }, label());
+    sel.onclick = async () => {
+      const list = await window.openShareDialog(p.name, p);
+      if (!list) return;
+      try { Object.assign(p, await api(`/api/user-projects/${p.id}`, 'PATCH', { sharedWith: list })); sel.textContent = label(); }
+      catch (e) { setSaved(state, e.message, true); }
+    };
+    if (!p.mine) {
+      const by = el('p', { class: note }, `Made by ${window.ownerLabel ? window.ownerLabel(p) : p.owner}. You can read this.`);
+      return window.canShareItem(p) ? el('div', { class: 'flex flex-wrap items-center gap-3' }, by, sel, state.saved = el('span', { class: 'text-xs text-gray-400', role: 'status' })) : by;
+    }
     state.saved = el('span', { class: 'text-xs text-gray-400', role: 'status' });
     const del = el('button', { type: 'button', id: 'up-delete', class: 'text-sm text-rose-500 hover:underline min-h-10' }, 'Delete project');
     del.onclick = () => {
@@ -236,7 +245,7 @@
       del.parentElement.append(row);
     };
     return el('div', { class: 'flex flex-wrap items-center gap-x-4 gap-y-2 pt-4 border-t border-gray-200 dark:border-dark-border' },
-      el('label', { class: `flex items-center gap-2 ${note}` }, 'Who can see this', sel), state.saved, el('span', { class: 'flex-1' }), del);
+      el('span', { class: `flex items-center gap-2 ${note}` }, 'Who can see this', sel), state.saved, el('span', { class: 'flex-1' }), del);
   }
 
   function draw(page, state) {

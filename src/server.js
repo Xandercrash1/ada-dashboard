@@ -7,6 +7,7 @@ const os = require('os');
 const { exec, spawn, execFile } = require('child_process');
 const crypto = require('crypto');
 const { mountAuth, getClientIp } = require('./auth');
+const sharing = require('./sharing');
 const todoEngine = require('./todo-engine');
 const todoStore = require('./todo-store');
 const todoValidate = require('./todo-validate');
@@ -65,14 +66,14 @@ app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1
 app.use(express.static(path.join(__dirname, '../public')));
 const MEDIA_DIR = path.join(__dirname, '../data/media');
 // Media split (Plan — Roles § Media library): admins see everything. Others see the
-// shared Home library ('default'), profile pictures, and images of pages they can see.
+// shared Home library ('default'), profile pictures, and images of pages shared with them.
 // Alex's other libraries are admin-only.
 function mediaLibraryVisible(req, lib) {
   if (isAdminReq(req)) return true;
   if (lib === 'avatars' || lib === 'page-home') return true;
   if (lib === 'default') return true;
   const m = /^page-([a-z0-9][a-z0-9-]{0,63})$/.exec(lib);
-  return !!m && req.user.role !== 'guest' && pageVisibleTo(req.user, m[1]);
+  return !!m && pageVisibleTo(req.user, m[1]);
 }
 app.use('/media', (req, res, next) => {
   if (isAdminReq(req)) return next();
@@ -1037,8 +1038,7 @@ const PROJECT_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;   // matches projects.js sl
 function pageEntry(id) { return readPagesRegistry().find(pg => pg.id === id) || null; }
 function pageVisibleTo(user, id) {
   if (id === 'home') return true;
-  const pg = pageEntry(id);
-  return !!pg && ((pg.owner || 'alex') === user.username || pg.shared === true);
+  return sharing.canSee(user, pageEntry(id));
 }
 function pageOwnedBy(user, id) {
   const pg = id !== 'home' && pageEntry(id);
@@ -1050,23 +1050,15 @@ function isAdminUserName(name) {
 }
 function sessionOwnedBy(user, s) { return !!s && s.owner === user.username; }
 
-// User tags on TODO tasks (fb-1790204578669). Alex (admin) sees every task; a
-// pages user sees only tasks tagged with their username. A pages user's own
-// tag is always stamped on what they create or edit, and they may tag other
-// household members (shared tasks) but never remove someone else's tag.
-function taskVisibleTo(req, t) { return isAdminReq(req) || (!!t && Array.isArray(t.tags) && t.tags.includes(req.user.username)); }
+// Tasks follow the same sharing rules as pages (src/sharing.js): Alex (admin) sees
+// every task; anyone else sees the tasks they made and the ones shared with them.
+// Tasks made before 2026-11-10 have no owner and count as Alex's.
+function taskVisibleTo(req, t) { return sharing.canSee(req.user, t); }
 function taskPeople() {
   const names = (userStore ? userStore.list() : []).filter(u => !u.disabled).map(u => u.username);
   return [...new Set(['alex', ...names])].sort();
 }
-function resolveTaskTags(req, tags, existing) {
-  const prev = existing && Array.isArray(existing.tags) ? existing.tags : [];
-  const known = new Set(taskPeople());
-  const unknown = (tags || []).filter(x => !known.has(x) && !prev.includes(x));
-  if (unknown.length) return { error: `Unknown user tag(s): ${unknown.join(', ')}` };
-  if (isAdminReq(req)) return { tags: tags || [] };
-  return { tags: [...new Set([...(tags || []), ...prev, req.user.username])] };
-}
+const taskView = (t) => t && ({ ...t, ...sharing.view(t), tags: [] });
 
 // What a pages user may SAVE. Their pages are opened by Alex too, in his admin
 // session, and w.html is injected raw — so a pages user never stores HTML:
@@ -1132,9 +1124,14 @@ function authorizeRole(req, res, next) {
   if (p === '/api/me' && m === 'GET') return next();
   if (p === '/api/me/password' && m === 'POST') return next();
   if ((p === '/api/me/profile' && m === 'PATCH') || (p === '/api/me/avatar' && m === 'POST')) return next();
-  // Guest: the homepage only for now (Alex, 2026-11-09). Permissions get added case by case.
+  // Guest: the homepage (Alex, 2026-11-09), plus a read-only look at pages, tasks and
+  // builder projects shared with them (2026-11-10). Every list is filtered by the handler.
   if (u.role === 'guest') {
-    if (m === 'GET' && ['/api/homepage', '/api/weather', '/api/glance', '/api/people', '/api/media/files'].includes(p)) return next();   // media files: the list is filtered to what a guest may open
+    if (m !== 'GET') return deny();
+    if (['/api/homepage', '/api/weather', '/api/glance', '/api/people', '/api/media/files', '/api/pages',
+      '/api/todo', '/api/todo/tasks', '/api/todo/projects', '/api/todo/completed', '/api/user-projects'].includes(p)) return next();   // media files: the list is filtered to what a guest may open
+    if ((mm = /^\/api\/pages\/([^/]+)\/(?:content|images(?:\/[^/]+)?)$/.exec(p))) return pageVisibleTo(u, mm[1]) ? next() : deny();
+    if (/^\/api\/user-projects\/[^/]+(?:\/(?:image|site|data\/[^/]+|photos\/[^/]+))?$/.test(p)) return next();   // src/user-projects.js checks sharing
     return deny();
   }
   if (p === '/api/people' && m === 'GET') return next();
@@ -1221,7 +1218,7 @@ app.post('/api/me/avatar', async (req, res) => {
 deviceEnrollment.mountAdmin(app, { isAdminReq });
 const vaultProjects = require('./projects').create();
 vaultProjects.mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
-require('./user-projects').create({ dataDir: DATA_DIR, projectContext: vaultProjects.context }).mount(app, { ownerName, isAdminReq });   // New project button: splash pages and documents
+require('./user-projects').create({ dataDir: DATA_DIR, projectContext: vaultProjects.context }).mount(app, { ownerName, isAdminReq, people: () => taskPeople() });   // New project button: splash pages and documents
 require('./food-lookup').create().mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
@@ -1772,16 +1769,23 @@ app.delete('/api/pages/:id/images/:file', (req, res) => {
 
 // --- PAGES API ---
 app.get('/api/pages', (req, res) => {
-  const all = readPagesRegistry().map(pg => ({ ...pg, owner: pg.owner || 'alex', shared: pg.shared === true }));
-  res.json({ pages: isAdminReq(req) ? all : all.filter(pg => pg.owner === req.user.username || pg.shared) });
+  const all = readPagesRegistry().filter(pg => sharing.canSee(req.user, pg)).map(pageView);
+  res.json({ pages: all });
 });
+
+// What every page answer carries: who made it and who it's shared with. `shared` stays
+// for older screens: true when the list isn't empty.
+function pageView(pg) { const v = sharing.view(pg); return { ...pg, ...v, shared: v.sharedWith.length > 0 }; }
 
 // Share / rename (owner or admin).
 app.patch('/api/pages/:id', (req, res) => {
   const pages = readPagesRegistry();
   const pg = pages.find(x => x.id === req.params.id);
   if (!pg) return res.status(404).json({ error: 'Page not found' });
-  if (typeof req.body.shared === 'boolean') pg.shared = req.body.shared;
+  // Older screens send shared: true/false, meaning every 303 account or nobody.
+  const wanted = 'sharedWith' in req.body ? req.body.sharedWith : typeof req.body.shared === 'boolean' ? (req.body.shared ? ['@303'] : []) : undefined;
+  const refused = sharing.change(req.user, pg, wanted, taskPeople());
+  if (refused) return res.status(refused.status).json({ error: refused.error });
   if (typeof req.body.title === 'string' && req.body.title.trim()) pg.title = req.body.title.replace(/[<>]/g, '').trim().slice(0, 60);
   // Project pages (One Ada, 2026-10-05): a page tied to a project is listed on that project's hub
   // instead of getting a top-bar tab. Admin-only; null clears it.
@@ -1791,7 +1795,7 @@ app.patch('/api/pages/:id', (req, res) => {
     else return res.status(400).json({ error: 'project: lowercase slug' });
   }
   writePagesRegistry(pages);
-  res.json({ ...pg, owner: pg.owner || 'alex', shared: pg.shared === true });
+  res.json(pageView(pg));
 });
 
 app.post('/api/pages', (req, res) => {
@@ -1808,7 +1812,8 @@ app.post('/api/pages', (req, res) => {
   if (pages.some(p => p.id === id)) return res.status(400).json({ error: 'Page ID already exists' });
 
   const project = isAdminReq(req) && PROJECT_SLUG_RE.test(req.body.project || '') ? req.body.project : undefined;   // project pages: no top-bar tab
-  pages.push({ id, title, icon, owner: ownerName(req), shared: false, ...(project ? { project } : {}) });
+  const entry = { id, title, icon, owner: ownerName(req), sharedWith: [], ...(project ? { project } : {}) };
+  pages.push(entry);
   writePagesRegistry(pages);
   
   const docPath = getPageDocPath(id);
@@ -1816,7 +1821,7 @@ app.post('/api/pages', (req, res) => {
     writeFileAtomic(docPath, JSON.stringify({ widgets: [] }, null, 2));
   }
   
-  res.json({ success: true, page: { id, title, icon, owner: ownerName(req), shared: false, ...(project ? { project } : {}) } });
+  res.json({ success: true, page: pageView(entry) });
 });
 
 app.get('/api/pages/:id/content', (req, res) => {
@@ -4431,7 +4436,7 @@ app.get('/api/todo', (req, res) => {
       if (changed) todoStore.writeTasks(newTasks);
       return newTasks;
     });
-    const view = todoEngine.buildView(rolledTasks.filter(t => taskVisibleTo(req, t)), today);
+    const view = todoEngine.buildView(rolledTasks.filter(t => taskVisibleTo(req, t)).map(taskView), today);
     const response = {
       pastDue: view.pastDue,
       today: view.today,
@@ -4454,7 +4459,7 @@ app.get('/api/todo/tasks', (req, res) => {
     const { project, type } = req.query;
     if (project) tasks = tasks.filter(t => t.project === project);
     if (type) tasks = tasks.filter(t => t.type === type);
-    res.json(tasks);
+    res.json(tasks.map(taskView));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4464,13 +4469,15 @@ app.post('/api/todo/tasks', (req, res) => {
   try {
     const { task, errors } = todoValidate.normalizeTask(req.body, null);
     if (errors) return res.status(400).json({ error: errors.join('; '), errors });
-    const tagged = resolveTaskTags(req, task.tags, null);
-    if (tagged.error) return res.status(400).json({ error: tagged.error });
+    const shared = sharing.clean(req.body.sharedWith || [], { people: taskPeople(), item: { owner: ownerName(req) } });
+    if (shared.error) return res.status(400).json({ error: shared.error });
     const nowIso = new Date().toISOString();
     const newTask = {
       id: todoEngine.generateId(),
       ...task,
-      tags: tagged.tags,
+      tags: [],
+      owner: ownerName(req),
+      sharedWith: shared.list,
       sourceFile: null, // API/CLI-created tasks have no vault provenance
       createdAt: nowIso,
       updatedAt: nowIso
@@ -4480,7 +4487,7 @@ app.post('/api/todo/tasks', (req, res) => {
       tasks.push(newTask);
       todoStore.writeTasks(tasks);
     });
-    res.status(201).json(newTask);
+    res.status(201).json(taskView(newTask));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4495,11 +4502,12 @@ app.patch('/api/todo/tasks/:id', (req, res) => {
       if (idx === -1) { result = { status: 404, body: { error: 'Task not found' } }; return; }
       const { task, errors } = todoValidate.normalizeTask(req.body, tasks[idx]);
       if (errors) { result = { status: 400, body: { error: errors.join('; '), errors } }; return; }
-      const tagged = resolveTaskTags(req, task.tags, tasks[idx]);
-      if (tagged.error) { result = { status: 400, body: { error: tagged.error } }; return; }
-      tasks[idx] = { ...tasks[idx], ...task, tags: tagged.tags, updatedAt: new Date().toISOString() };
+      const next = { ...tasks[idx], ...task, tags: tasks[idx].tags || [] };
+      const refused = sharing.change(req.user, next, req.body.sharedWith, taskPeople());
+      if (refused) { result = { status: refused.status, body: { error: refused.error } }; return; }
+      tasks[idx] = { ...next, updatedAt: new Date().toISOString() };
       todoStore.writeTasks(tasks);
-      result = { status: 200, body: tasks[idx] };
+      result = { status: 200, body: taskView(tasks[idx]) };
     });
     res.status(result.status).json(result.body);
   } catch (err) {
@@ -4514,6 +4522,7 @@ app.delete('/api/todo/tasks/:id', (req, res) => {
       const tasks = todoStore.readTasks();
       const filtered = tasks.filter(t => t.id !== req.params.id);
       if (filtered.length === tasks.length) { result = { status: 404, body: { error: 'Task not found' } }; return; }
+      if (!sharing.canShare(req.user, tasks.find(t => t.id === req.params.id))) { result = { status: 403, body: { error: 'Only the person who made this task can delete it.' } }; return; }
       todoStore.writeTasks(filtered);
       result = { status: 200, body: { success: true } };
     });
@@ -4561,7 +4570,8 @@ app.post('/api/todo/tasks/:id/complete', (req, res) => {
         type: task.type,
         completedAt: new Date().toISOString(),
         notes: task.notes || '',
-        tags: task.tags || []
+        tags: [],
+        ...sharing.view(task)
       };
       completed.unshift(entry);
       todoStore.writeCompleted(completed);

@@ -28,7 +28,7 @@
     // Who is signed in (fb-1790201502191). A 303 account sees its own and
     // shared pages; admin-only API calls are answered locally with empty data
     // so the shared UI code stays quiet. The SERVER is the wall — this only
-    // keeps the UI honest. A guest sees Home only (Alex, 2026-11-09).
+    // keeps the UI honest. A guest sees Home plus what's shared with them (2026-11-10).
     window.ME = null;
     window.__meReady = fetch('/api/me').then(r => r.ok ? r.json() : null).then(m => { window.ME = m; return m; }).catch(() => null);
     (function () {
@@ -38,7 +38,8 @@
       window.fetch = async function (input, init) {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
-        const GUEST_OK = [/^\/api\/me(\/(password|profile|avatar))?$/, /^\/api\/people$/, /^\/api\/homepage$/, /^\/api\/(weather|glance)$/, /^\/api\/media\/files$/, /^\/api\/login$/, /^\/api\/logout$/];
+        const GUEST_OK = [/^\/api\/me(\/(password|profile|avatar))?$/, /^\/api\/people$/, /^\/api\/homepage$/, /^\/api\/(weather|glance)$/, /^\/api\/media\/files$/, /^\/api\/login$/, /^\/api\/logout$/,
+          /^\/api\/pages(\/|$)/, /^\/api\/todo(\/(tasks|projects|completed))?$/, /^\/api\/user-projects(\/|$)/];
         if (path.startsWith('/api/') && !GUEST_OK.some(re => re.test(path))) {
           const me = window.ME || await window.__meReady;
           if (me && me.role && me.role !== 'admin' && (me.role === 'guest' || !PAGES_OK.some(re => re.test(path)))) {
@@ -54,7 +55,7 @@
     .role-pages #tab-btn-tools, .role-pages #tab-btn-server,
     .role-pages #mob-btn-tools, .role-pages #mob-btn-server,
     .role-pages .ntf-bell, .role-pages #edit-widget-advanced, .role-pages .admin-only { display: none !important; }
-    .role-guest #tab-btn-todo, .role-guest #tab-btn-projects, .role-guest #mob-btn-todo, .role-guest #mob-btn-projects, .role-guest .not-guest { display: none !important; }
+    .guest-no-tasks #tab-btn-todo, .guest-no-tasks #mob-btn-todo, .guest-no-projects #tab-btn-projects, .guest-no-projects #mob-btn-projects, .role-guest .not-guest { display: none !important; }
   </style>
   <script type="module" src="/components/index.js"></script>
   <script src="/components/BubbleManager.js"></script>
@@ -344,7 +345,7 @@
             <i class="fa-solid fa-list-ul text-gray-400"></i> Manage
           </button>
         </div>
-        <button onclick="openAddTodoModal()" class="inline-flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition-all shadow-md shadow-indigo-600/20 flex-shrink-0">
+        <button onclick="openAddTodoModal()" class="not-guest inline-flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition-all shadow-md shadow-indigo-600/20 flex-shrink-0">
           <i class="fa-solid fa-plus"></i> <span class="hidden sm:inline">New Task</span>
         </button>
       </div>
@@ -1065,7 +1066,7 @@
         </div>
 
         <div id="todo-people-wrap">
-          <label class="block text-xs font-semibold text-gray-300 mb-1">People <span class="font-normal text-gray-500">— who this task belongs to</span></label>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Shared with <span id="todo-people-note" class="font-normal text-gray-500">— only you and admins see it unless you pick someone</span></label>
           <div id="todo-people" class="flex flex-wrap gap-1.5"></div>
         </div>
 
@@ -1385,7 +1386,7 @@
     let currentTab = 'home';
     let currentServerSubTab = 'health';
     function switchTab(tab) {
-      if (window.ME && window.ME.role === 'guest' && tab !== 'home') tab = 'home';   // guests: Home only
+      if (window.ME && window.ME.role === 'guest' && !guestMayOpen(tab)) tab = 'home';   // guests: Home and what's shared with them
       currentTab = tab;
       try { localStorage.setItem('ada_activeTab', tab); } catch (e) {}
       
@@ -1770,7 +1771,7 @@
       const dateLabel = todoDateLabel(t, sameDay);
       return `
         <div id="todo-row-${escapeHtml(t.id)}" class="hover:bg-white/5 transition-all rounded-r-2xl p-3 flex items-start gap-3.5 group relative ${todoPriorityBorderClass(t.priority)}">
-          <button onclick="completeTodoTask('${escapeHtml(t.id)}')" class="mt-0.5 w-5 h-5 rounded border border-gray-600/50 hover:border-indigo-400/80 hover:bg-indigo-500/10 text-transparent flex items-center justify-center transition-all flex-shrink-0" title="Complete">
+          <button onclick="completeTodoTask('${escapeHtml(t.id)}')" class="not-guest mt-0.5 w-5 h-5 rounded border border-gray-600/50 hover:border-indigo-400/80 hover:bg-indigo-500/10 text-transparent flex items-center justify-center transition-all flex-shrink-0" title="Complete">
             <i class="fa-solid fa-check text-[10px]"></i>
           </button>
           <div class="flex-1 min-w-0 space-y-1">
@@ -1780,10 +1781,10 @@
               </h4>
               <div class="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity absolute right-4 top-3 bg-dark-bg/80 backdrop-blur-sm pl-2 rounded-l-lg z-10">
                 <span class="px-2 py-0.5 rounded text-[9px] font-semibold border ${todoPriorityBadgeClass(t.priority)}">${escapeHtml(t.priority || 'Low')}</span>
-                <button onclick="openEditTodoModal('${escapeHtml(t.id)}')" class="text-gray-500 hover:text-indigo-400 text-xs p-1 transition-colors" title="Edit">
+                <button onclick="openEditTodoModal('${escapeHtml(t.id)}')" class="not-guest text-gray-500 hover:text-indigo-400 text-xs p-1 transition-colors" title="Edit">
                   <i class="fa-solid fa-pen"></i>
                 </button>
-                <button onclick="deleteTodoTask('${escapeHtml(t.id)}')" class="text-gray-500 hover:text-rose-400 text-xs p-1 transition-colors" title="Delete">
+                <button onclick="deleteTodoTask('${escapeHtml(t.id)}')" class="${canShareItem(t) ? '' : 'hidden '}text-gray-500 hover:text-rose-400 text-xs p-1 transition-colors" title="Delete">
                   <i class="fa-solid fa-trash-can"></i>
                 </button>
               </div>
@@ -1953,40 +1954,21 @@
       await loadTodoDaily();
     }
 
-    // --- USER TAGS (fb-1790204578669) ---
-    // A task belongs to the people tagged on it. Alex sees every task; a pages
-    // user sees only their own. The server enforces all of this — the picker
-    // just mirrors it: a pages user's own tag is always on, and tags other
-    // people already hold can't be removed from their account.
-    let todoPeople = null;
-    async function loadTodoPeople() {
-      if (todoPeople) return todoPeople;
-      const r = await todoApiFetch('/api/todo/people');
-      todoPeople = (r.ok && Array.isArray(r.data)) ? r.data : [];
-      return todoPeople;
-    }
-    function todoPersonLabel(n) { return n ? n[0].toUpperCase() + n.slice(1) : ''; }
-    function todoPeopleChips(t) {
-      const tags = Array.isArray(t.tags) ? t.tags : [];
-      return tags.map(n => `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[10px]"><i class="fa-solid fa-user text-[8px]"></i> ${escapeHtml(todoPersonLabel(n))}</span>`).join('');
-    }
+    // --- SHARING (Plan — Roles § Sharing) ---
+    // A task, page or builder project has a "shared with" list of people and roles.
+    // Only the person who made it, or an admin, can change the list (Alex, 2026-11-10).
+    // The server enforces all of this; the picker only mirrors it.
+    function todoPeopleChips(t) { return sharedChips(t); }
     async function renderTodoPeoplePicker(t) {
       const box = document.getElementById('todo-people');
       if (!box) return;
-      const me = (window.ME || await window.__meReady) || {};
-      const admin = !me.role || me.role === 'admin';
-      const had = t && Array.isArray(t.tags) ? t.tags : [];
-      const people = await loadTodoPeople();
-      const all = [...new Set([...people, ...had])];
-      box.innerHTML = all.map(n => {
-        const mine = !admin && n === me.username;
-        const checked = had.includes(n) || (!t && mine);
-        const locked = !admin && (mine || had.includes(n));
-        return `<label class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-white/10 bg-black/20 text-xs text-gray-200 ${locked ? 'opacity-70' : 'cursor-pointer hover:border-emerald-500/50'}">
-          <input type="checkbox" value="${escapeHtml(n)}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''} class="rounded text-emerald-600 focus:ring-0">
-          ${escapeHtml(todoPersonLabel(n))}${mine ? ' <span class="text-gray-500">(you)</span>' : ''}</label>`;
-      }).join('') || '<span class="text-[11px] text-gray-500">No household accounts yet.</span>';
+      const item = t || { owner: (window.ME && window.ME.username) || 'alex', sharedWith: [] };
+      const can = canShareItem(item);
+      const note = document.getElementById('todo-people-note');
+      if (note) note.textContent = can ? '— only you and admins see it unless you pick someone' : `— only ${ownerLabel(item)} can change this`;
+      box.innerHTML = await sharePickerHtml(item, !can);
     }
+    function todoPickedShares() { return [...document.querySelectorAll('#todo-people input:checked')].map(x => x.value); }
 
     // --- ADD/EDIT MODAL ---
     function todayISO() {
@@ -2219,8 +2201,10 @@
         priority: document.getElementById('todo-priority').value,
         type,
         notes: document.getElementById('todo-notes').value.trim(),
-        tags: [...document.querySelectorAll('#todo-people input:checked')].map(x => x.value)
       };
+      const editing = todoEditingId ? (todoAllTasks.find(x => x.id === todoEditingId) ||
+        (todoView && [...(todoView.pastDue || []), ...(todoView.today || []), ...(todoView.upcoming || [])].find(x => x.id === todoEditingId))) : null;
+      if (!editing || canShareItem(editing)) payload.sharedWith = todoPickedShares();
 
       // Per-type fields. The contract's JSON example (§2) shows only a
       // recurring row, so the scheduled/backlog date-field mapping below is
@@ -5445,11 +5429,15 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     function applyRoleUI() {
       const me = window.ME;
       document.querySelectorAll('.account-name').forEach(el => { el.textContent = me ? me.username : ''; });
+      sharePeople();   // names for "shared with" labels
       if (!me || !me.role || me.role === 'admin') return;
       document.body.classList.add('role-pages');
-      if (me.role === 'guest') document.body.classList.add('role-guest');
+      if (me.role === 'guest' && !document.body.classList.contains('role-guest')) {
+        document.body.classList.add('role-guest', 'guest-no-tasks', 'guest-no-projects');
+        checkGuestShares();
+      }
       filterWidgetLibraryForRole();
-      if (['todo', 'tools', 'server'].includes(currentTab) || (me.role === 'guest' && currentTab !== 'home')) switchTab('home');
+      if (['tools', 'server'].includes(currentTab) || (me.role === 'guest' && !guestMayOpen(currentTab))) switchTab('home');
     }
     // Share / settings / history / publish / delete live in the "Page options" menu.
     // A Document widget is edited through its own "Edit doc" button.
@@ -5473,7 +5461,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const item = (icon, label, fn, cls = '') =>
         `<button type="button" data-fn="${fn}" class="w-full text-left px-3 py-2 rounded-lg hover:bg-white/5 flex items-center gap-2 ${cls || 'text-gray-300'}"><i class="fa-solid ${icon} w-4"></i> ${label}</button>`;
       m.innerHTML = [
-        item(pg.shared ? 'fa-user-group' : 'fa-lock', pg.shared ? 'Shared — make private' : 'Private — share with household', 'togglePageShared'),
+        item(pg.shared ? 'fa-user-group' : 'fa-lock', pg.shared ? `Shared with ${escapeHtml(shareSummary(pg))}` : 'Private: share…', 'togglePageShared'),
         item('fa-gear', 'Page settings', 'openPageSettings'),
         item('fa-clock-rotate-left', 'History', 'openHistory'),
         '<div class="my-1 border-t border-dark-border"></div>',
@@ -5501,12 +5489,112 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     async function togglePageShared() {
       const pg = currentPageEntry();
       if (!pg) return;
-      const res = await fetch(`/api/pages/${encodeURIComponent(pg.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shared: !pg.shared }) });
-      if (!res.ok) { showAppToast('Could not change sharing', 'error'); return; }
-      pg.shared = !pg.shared;
+      const list = await openShareDialog(pg.title, pg);
+      if (!list) return;
+      const res = await fetch(`/api/pages/${encodeURIComponent(pg.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sharedWith: list }) });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) { showAppToast(out.error || 'Could not change sharing', 'error'); return; }
       await loadCustomPages();
       updatePageAccessUI();
-      showAppToast(pg.shared ? 'Shared — everyone signed in can see this page.' : 'Private — only you can see this page.', 'success');
+      showAppToast(list.length ? `Shared with ${shareSummary(out)}.` : 'Private: only you can see this page.', 'success');
+    }
+
+    // --- "Shared with" lists, used by pages, tasks and builder projects ---
+    const SHARE_ROLES = [['@303', 'Everyone in 303'], ['@guest', 'All guests']];
+    let sharePeopleCache = null;
+    let sharePeopleLoading = null;
+    async function sharePeople() {
+      if (sharePeopleCache) return sharePeopleCache;
+      if (!sharePeopleLoading) sharePeopleLoading = (async () => {
+        try { const r = await fetch('/api/people'); const l = r.ok ? await r.json() : []; sharePeopleCache = Array.isArray(l) ? l : []; } catch (e) { sharePeopleCache = []; }
+        // Lists drawn before the names arrived showed usernames: draw them again.
+        if (currentTab === 'todo') { try { renderTodoDaily(); renderTodoManage(); } catch (e) {} }
+        return sharePeopleCache;
+      })();
+      return sharePeopleLoading;
+    }
+    function canShareItem(item) {
+      const me = window.ME;
+      if (!me || !me.role || me.role === 'admin') return true;
+      return me.role !== 'guest' && !!item && (item.owner || 'alex') === me.username;
+    }
+    function sharePersonName(n) {
+      const p = (sharePeopleCache || []).find(x => x.username === n);
+      return (p && p.displayName) || n;
+    }
+    function ownerLabel(item) { return sharePersonName((item && item.owner) || 'alex'); }
+    function shareLabel(x) { const r = SHARE_ROLES.find(([k]) => k === x); return r ? r[1] : sharePersonName(x); }
+    function shareSummary(item) {
+      const l = (item && Array.isArray(item.sharedWith)) ? item.sharedWith : [];
+      if (!l.length) return 'nobody';
+      return l.length <= 2 ? l.map(shareLabel).join(' and ') : `${shareLabel(l[0])} and ${l.length - 1} more`;
+    }
+    function sharedChips(item) {
+      if (!sharePeopleCache) sharePeople();
+      const l = (item && Array.isArray(item.sharedWith)) ? item.sharedWith : [];
+      return l.map(x => {
+        const role = x.startsWith('@');
+        const p = (sharePeopleCache || []).find(y => y.username === x);
+        const dot = p && p.color ? `<span class="w-1.5 h-1.5 rounded-full" style="background:${escapeHtml(p.color)}"></span>` : `<i class="fa-solid ${role ? 'fa-user-group' : 'fa-user'} text-[8px]"></i>`;
+        return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[10px]">${dot} ${escapeHtml(shareLabel(x))}</span>`;
+      }).join('');
+    }
+    // Checkboxes for roles and people. The owner isn't listed: they always see their own things.
+    async function sharePickerHtml(item, locked) {
+      const people = await sharePeople();
+      const had = (item && Array.isArray(item.sharedWith)) ? item.sharedWith : [];
+      const owner = (item && item.owner) || 'alex';
+      const box = (value, label, extra) => `<label class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-white/10 bg-black/20 text-xs text-gray-200 ${locked ? 'opacity-70' : 'cursor-pointer hover:border-emerald-500/50'}">
+          <input type="checkbox" value="${escapeHtml(value)}" ${had.includes(value) ? 'checked' : ''} ${locked ? 'disabled' : ''} class="rounded text-emerald-600 focus:ring-0">${extra || ''}${escapeHtml(label)}</label>`;
+      const roles = SHARE_ROLES.map(([k, label]) => box(k, label, '<i class="fa-solid fa-user-group text-[10px] text-gray-400"></i>'));
+      const names = [...new Set([...people.map(p => p.username), ...had.filter(x => !x.startsWith('@'))])].filter(n => n !== owner);
+      const ppl = names.map(n => {
+        const p = people.find(x => x.username === n) || { username: n };
+        return box(n, sharePersonName(n), personBadge(p, 18));
+      });
+      return [...roles, ...ppl].join('') || '<span class="text-[11px] text-gray-500">No one else has an account yet.</span>';
+    }
+    // Resolves to the chosen list, or null if cancelled.
+    async function openShareDialog(title, item) {
+      const can = canShareItem(item);
+      const m = modalShell('share-modal');
+      m.innerHTML = `<div class="bg-dark-bg border border-dark-border rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4">
+          <div><h3 class="text-white font-bold text-sm">Share “${escapeHtml(title || 'this')}”</h3>
+            <p class="text-[11px] text-gray-500 mt-1">${can ? 'The people you pick can see it. Only you and admins can change this list.' : `Only ${escapeHtml(ownerLabel(item))} can change who this is shared with.`}</p></div>
+          <div id="share-picks" class="flex flex-wrap gap-1.5">${await sharePickerHtml(item, !can)}</div>
+          <div class="flex justify-end gap-2 pt-1">
+            <button id="share-cancel" class="px-3 py-2 text-xs text-gray-400 hover:text-white">${can ? 'Cancel' : 'Close'}</button>
+            ${can ? '<button id="share-save" class="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Save</button>' : ''}
+          </div>
+        </div>`;
+      return new Promise(resolve => {
+        const done = (v) => { m.remove(); resolve(v); };
+        m.querySelector('#share-cancel').onclick = () => done(null);
+        m.addEventListener('click', (e) => { if (e.target === m) resolve(null); });
+        const save = m.querySelector('#share-save');
+        if (save) save.onclick = () => done([...m.querySelectorAll('#share-picks input:checked')].map(x => x.value));
+      });
+    }
+    window.openShareDialog = openShareDialog;
+    window.sharedChips = sharedChips;
+    window.ownerLabel = ownerLabel;
+    window.shareSummary = shareSummary;
+    window.canShareItem = canShareItem;
+
+    // Guests see Home, plus Tasks, Projects and pages once something there is shared with them.
+    let guestHas = { todo: false, projects: false };
+    function guestMayOpen(tab) {
+      if (tab === 'home') return true;
+      if (tab === 'todo' || tab === 'projects') return guestHas[tab];
+      return customPages.some(p => p.id === tab);
+    }
+    async function checkGuestShares() {
+      const get = (u) => fetch(u).then(r => r.ok ? r.json() : []).catch(() => []);
+      const [tasks, projects] = await Promise.all([get('/api/todo/tasks'), get('/api/user-projects')]);
+      guestHas = { todo: Array.isArray(tasks) && tasks.length > 0, projects: Array.isArray(projects) && projects.length > 0 };
+      document.body.classList.toggle('guest-no-tasks', !guestHas.todo);
+      document.body.classList.toggle('guest-no-projects', !guestHas.projects);
+      window.guestHas = guestHas;
     }
     // Account: profile, change password, admin → People, sign out.
     const PROFILE_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#64748b'];
