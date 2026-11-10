@@ -49,7 +49,7 @@ ada-home .h-actions { display: flex; flex-wrap: wrap; justify-content: flex-end;
 ada-home .h-actions button { min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-surface); color: inherit; font-weight: 600; cursor: pointer; }
 ada-home .h-actions button.go { background: var(--h-link); border-color: var(--h-link); color: var(--bg); }
 ada-home .h-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 8px; }
-ada-home .h-tile { min-height: 56px; padding: 8px 14px; text-align: left; font-weight: 500; overflow-wrap: anywhere; border-radius: 10px; border: 1px solid var(--h-line); background: var(--h-surface); color: inherit; cursor: pointer; }
+ada-home .h-tile { display: block; box-sizing: border-box; text-decoration: none; min-height: 56px; padding: 8px 14px; text-align: left; font-weight: 500; overflow-wrap: anywhere; border-radius: 10px; border: 1px solid var(--h-line); background: var(--h-surface); color: inherit; cursor: pointer; }
 ada-home .h-tile:hover { border-color: var(--h-link); }
 ada-home .h-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 0; border-block: 1px solid var(--h-line); }
 ada-home .h-pill { font-size: .875rem; font-weight: 600; color: var(--h-ok); }
@@ -346,11 +346,18 @@ class HomeView extends HTMLElement {
     // Project pages live on their project's hub, as in the top bar.
     const own = pages.filter(p => !p.project).map(p => [p.id, p.title]);
     this.r.pages.hidden = guest && !own.length;
+    // Sites on this server, for Alex only (2026-11-10). Opened from here so the sign-in cookie
+    // (SameSite=Strict) goes along; a link tapped in another app arrives signed out.
+    const sites = this.me.username === 'alex' ? [['/grimoire/', 'Grimoire']] : [];
     this.r.tiles.replaceChildren(...[...built, ...own].map(([id, title]) => {
       const b = el('button', 'h-tile', title);
       b.type = 'button';
       b.onclick = () => window.switchTab(id);
       return b;
+    }), ...sites.map(([href, title]) => {
+      const a = el('a', 'h-tile', title);
+      a.href = href;
+      return a;
     }));
   }
 
