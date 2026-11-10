@@ -27,6 +27,10 @@ const PORT = process.env.PORT || 3000;
 // 2026-09-23). Trusting only loopback sockets keeps Caddy's real client IP
 // (Caddy connects from 127.0.0.1) while spoofed headers from outside are ignored.
 app.set('trust proxy', 'loopback');
+// Case-sensitive routes (2026-11-09 audit): Express matches case-insensitively by default, so
+// "/API/users" reached the admin handler while authorizeRole only walls paths starting "/api/".
+// MUST be set before the first app.use/app.get, or the router is already built without it.
+app.set('case sensitive routing', true);
 // CORS allowlist (2026-10-08; was cors() = ACAO * for every origin). The UI and Grimoire are
 // same-origin (no CORS needed); published pages post to their own pages.dev /api/contact and
 // messages are pulled, not pushed; Mac bridge/curl/cron are non-browser. So only our own origin.
@@ -1096,6 +1100,7 @@ function authorizeRole(req, res, next) {
   if (isAdminReq(req)) return next();
   const u = req.user, m = req.method, p = req.path;
   const deny = () => res.status(403).json({ error: 'Not available for your account.' });
+  if (!p.startsWith('/api/') && p.toLowerCase().startsWith('/api')) return deny();   // '/API/...' and the like never get past the wall
   if (!p.startsWith('/api/')) return (m === 'GET' || m === 'HEAD') ? next() : deny();   // the app shell, components, media files
   let mm;
   if (p === '/api/me' && m === 'GET') return next();
