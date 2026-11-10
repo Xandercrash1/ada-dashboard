@@ -6328,6 +6328,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         const data = await res.json();
         // 409 = a turn is already running server-side; attach to it.
         if (res.status === 409 && data.jobId) return pollDesignerJob(data.jobId);
+        // 429 = today's Designer messages are used up; the server didn't keep this one.
+        if (res.status === 429) {
+          designerSession.messages.pop();
+          renderDesignerMessages();
+          setDesignerBusy(false);
+          return renderDesignerNotice(data.error || 'No Designer messages left today.');
+        }
         if (!res.ok || !data.jobId) throw new Error(data.error || ('HTTP ' + res.status));
         pollDesignerJob(data.jobId);
       } catch (err) {

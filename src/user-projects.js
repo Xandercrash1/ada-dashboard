@@ -17,7 +17,6 @@ const sharing = require('./sharing');
 
 const SITE_MODEL = 'claude-sonnet-5-5';   // Haiku's sites were mostly placeholders in a side-by-side test, 2026-11-04
 const SITE_TIMEOUT_MS = 300000;
-const SITES_PER_DAY = 30;
 const MAX_RUNNING = 2;
 const MAX_SITE_BYTES = 1024 * 1024;
 const KEEP_VERSIONS = 20;
@@ -158,12 +157,11 @@ function runClaude(prompt) {
   });
 }
 
-function create({ dataDir, run = runClaude, projectContext = () => null }) {
+function create({ dataDir, run = runClaude, projectContext = () => null, limits = require('./ai-limits').create({ dataDir }) }) {
   const file = path.join(dataDir, 'user-projects.json');
   const imageDir = path.join(dataDir, 'user-project-images');
   const siteDir = path.join(dataDir, 'user-project-sites');
   const jobs = new Map();   // project id -> { state: 'writing' | 'failed', owner, error }
-  const used = new Map();
 
   const load = () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return []; throw e; } };
   const save = (all) => { const tmp = `${file}.${process.pid}.${Date.now()}.tmp`; fs.writeFileSync(tmp, JSON.stringify(all, null, 2)); fs.renameSync(tmp, file); };
@@ -194,22 +192,15 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
     return cur;
   };
 
-  function takeTurn(who) {
-    const day = new Date().toISOString().slice(0, 10);
-    const u = used.get(who);
-    const n = u && u.day === day ? u.n : 0;
-    if (n >= SITES_PER_DAY) return false;
-    used.set(who, { day, n: n + 1 });
-    return true;
-  }
   const refuse = (message) => { const e = new Error(message); e.status = 429; return e; };
 
   // Runs in the background. The page polls the project, so leaving and coming back is fine.
-  function startBuild(p, who, prompt) {
+  // `user` is the signed-in account; admins have no daily limit (src/ai-limits.js).
+  function startBuild(p, user, who, prompt) {
     const running = [...jobs.values()].filter((j) => j.state === 'writing');
     if (running.some((j) => j.owner === who)) throw refuse('Ada is already building something for you. Try again when that finishes.');
     if (running.length >= MAX_RUNNING) throw refuse('Ada is busy building other sites. Try again in a couple of minutes.');
-    if (!takeTurn(who)) throw refuse('That is all the sites for today. You can still type on a page yourself.');
+    if (!limits.take(user, 'site')) throw refuse(`That's all ${limits.limits.site} site builds for today. They come back at midnight. You can still type on a page yourself.`);
     jobs.set(p.id, { state: 'writing', owner: who });
     run(prompt).then((stdout) => {
       const html = parseSite(stdout);
@@ -219,6 +210,7 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
       jobs.delete(p.id);
     }).catch((e) => {
       console.error('[user-projects] build failed:', e.message);
+      limits.refund(user, 'site');
       jobs.set(p.id, { state: 'failed', owner: who, error: 'Ada could not build that just now. Try again, or change the wording a little.' });
     });
   }
@@ -432,7 +424,7 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
       const about = text((req.body || {}).about, 4000).trim();
       if (!about) return res.status(400).json({ error: 'Tell Ada what the project is about first.' });
       const typed = p.blocks.filter((b) => b.title.trim() || b.body.trim()).map((b) => `${b.title}: ${b.body}`).join('\n');
-      startBuild(p, who, `Project name: ${p.name}${contextLine(p)}\n\nWhat they told you about it:\n${about}${typed ? `\n\nThey also wrote:\n${typed}` : ''}\n\n${photoLine(p)}\n\nBuild the site.`);
+      startBuild(p, req.user, who, `Project name: ${p.name}${contextLine(p)}\n\nWhat they told you about it:\n${about}${typed ? `\n\nThey also wrote:\n${typed}` : ''}\n\n${photoLine(p)}\n\nBuild the site.`);
       res.status(202).json(view(p, who));
     }));
 
@@ -445,7 +437,7 @@ function create({ dataDir, run = runClaude, projectContext = () => null }) {
       const source = newestDraft(p.id) || newestVersion(p.id);
       if (!source) return res.status(400).json({ error: 'There is no site to change yet.' });
       const current = fs.readFileSync(source, 'utf8');
-      startBuild(p, who, `Project name: ${p.name}${contextLine(p)}\n\n${photoLine(p)}\n\nThe site as it is now:\n${current}\n\nWhat they want changed:\n${want}\n\nReturn the whole updated HTML document. Keep everything they didn't ask to change. New facts may come only from what they wrote.`);
+      startBuild(p, req.user, who, `Project name: ${p.name}${contextLine(p)}\n\n${photoLine(p)}\n\nThe site as it is now:\n${current}\n\nWhat they want changed:\n${want}\n\nReturn the whole updated HTML document. Keep everything they didn't ask to change. New facts may come only from what they wrote.`);
       res.status(202).json(view(p, who));
     }));
 

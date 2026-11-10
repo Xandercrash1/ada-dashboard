@@ -1026,6 +1026,7 @@ app.post('/api/terminal/exec', (req, res) => {
 
 // --- ROLES: limited 'pages' accounts (fb-1790201502191) ---------------------
 const PAGES_USER_DESIGNER_MODEL = 'gpt-4o-mini';
+const aiLimits = require('./ai-limits').create({ dataDir: DATA_DIR });   // 303 daily Designer and site-build turns
 // Alex is 'admin'. Household members get role 'pages': their own pages (plus
 // shared ones and Home, read-only) and a Designer for their
 // own pages — nothing else. DENY BY DEFAULT: authorizeRole lists the only
@@ -1168,7 +1169,7 @@ function authorizeRole(req, res, next) {
   }
   if (/^\/api\/user-projects(\/|$)/.test(p)) return next();   // src/user-projects.js checks owner and sharing on every route
   if (p === '/api/media/upload' && m === 'POST') return next();   // the handler limits pages users to images in the shared library
-  if (m === 'GET' && ['/api/weather', '/api/glance', '/api/media/libraries', '/api/media/files', '/api/agent/models'].includes(p)) return next();
+  if (m === 'GET' && ['/api/weather', '/api/glance', '/api/media/libraries', '/api/media/files', '/api/agent/models', '/api/ai-limits'].includes(p)) return next();
   if (p === '/api/agent/sessions' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/agent\/sessions\/([^/]+)(?:\/(chat|job))?$/.exec(p))) {
     if (!sessionOwnedBy(u, readSessions().find(x => x.id === mm[1]))) return deny();
@@ -1218,7 +1219,7 @@ app.post('/api/me/avatar', async (req, res) => {
 deviceEnrollment.mountAdmin(app, { isAdminReq });
 const vaultProjects = require('./projects').create();
 vaultProjects.mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
-require('./user-projects').create({ dataDir: DATA_DIR, projectContext: vaultProjects.context }).mount(app, { ownerName, isAdminReq, people: () => taskPeople() });   // New project button: splash pages and documents
+require('./user-projects').create({ dataDir: DATA_DIR, projectContext: vaultProjects.context, limits: aiLimits }).mount(app, { ownerName, isAdminReq, people: () => taskPeople() });   // New project button: splash pages and documents
 require('./food-lookup').create().mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
@@ -2450,6 +2451,8 @@ function executeLocalTool(toolName, args, role, sessionId) {
 
 // Model registry (Model Selection Contract §1)
 app.get('/api/agent/models', (req, res) => res.json({ models: MODEL_REGISTRY }));
+// What's left of today's AI turns for the signed-in person ({unlimited: true} for admins).
+app.get('/api/ai-limits', (req, res) => res.json(aiLimits.left(req.user)));
 
 // Get all agent sessions
 // Admin views default to admin-owned sessions: other people's chats are theirs,
@@ -3893,6 +3896,9 @@ app.post('/api/agent/sessions/:id/chat', (req, res) => {
       modelOverride = model;
       if (persistModel) session.model = model;
     }
+
+    // Non-admins get a few Designer messages a day (src/ai-limits.js).
+    if (!aiLimits.take(req.user, 'designer')) return res.status(429).json({ error: `That's all ${aiLimits.limits.designer} Designer messages for today. They come back at midnight.` });
 
     // The user message is appended and persisted BEFORE responding (contract
     // §3), so it renders instantly regardless of how long the turn takes.

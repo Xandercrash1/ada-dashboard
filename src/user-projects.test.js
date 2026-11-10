@@ -89,10 +89,11 @@ test('older versions can be listed and restored as a draft, and a bad name is re
   const routes = {};
   const app = {}; ['get', 'post', 'patch', 'delete'].forEach((m) => { app[m] = (u, f) => { routes[`${m} ${u}`] = f; }; });
   let who = 'alex';
-  mod.mount(app, { ownerName: () => who, isAdminReq: () => true });
+  const user = () => ({ username: who, role: who === 'alex' ? 'admin' : '303' });
+  mod.mount(app, { ownerName: () => who, isAdminReq: (req) => req.user.role === 'admin' });
   const call = async (key, params, body) => {
     let out; const res = { status(c) { this.code = c; return this; }, json(b) { out = { code: this.code || 200, body: b }; return out; } };
-    await routes[key]({ params, body, query: {} }, res);
+    await routes[key]({ params, body, query: {}, user: user() }, res);
     return out;
   };
   const page = (n) => `<!doctype html><html><body>${n}</body></html>`;
@@ -112,5 +113,54 @@ test('older versions can be listed and restored as a draft, and a bad name is re
   assert.strictEqual((await call('post /api/user-projects/:id/versions/:name/restore', { id: p.id, name: '../../user-projects.json' })).code, 404);
   who = 'someone-else';
   assert.strictEqual((await call('get /api/user-projects/:id/versions', { id: p.id })).code, 404);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('non-admins get 3 site builds a day, a failed build is handed back, admins have no limit', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'up-'));
+  let fail = false;
+  const mod = require('./user-projects').create({ dataDir: dir, run: async () => { if (fail) throw new Error('boom'); return JSON.stringify({ result: '<!doctype html><html><body>ok</body></html>' }); } });
+  const routes = {};
+  const app = {}; ['get', 'post', 'patch', 'delete'].forEach((m) => { app[m] = (u, f) => { routes[`${m} ${u}`] = f; }; });
+  let user = { username: 'ann', role: '303' };
+  mod.mount(app, { ownerName: () => user.username, isAdminReq: (req) => req.user.role === 'admin' });
+  const call = async (key, params, body) => {
+    let out; const res = { status(c) { this.code = c; return this; }, json(b) { out = { code: this.code || 200, body: b }; return out; } };
+    await routes[key]({ params, body, query: {}, user }, res);
+    return out;
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+  const p = (await call('post /api/user-projects', {}, { name: 'P', kind: 'splash' })).body;
+  const build = () => call('post /api/user-projects/:id/draft', { id: p.id }, { about: 'a bakery' });
+  fail = true;
+  assert.strictEqual((await build()).code, 202); await settle();   // fails, so it doesn't count
+  fail = false;
+  for (let i = 0; i < 3; i++) { assert.strictEqual((await build()).code, 202); await settle(); }
+  const no = await build();
+  assert.strictEqual(no.code, 429);
+  assert.ok(/3 site builds/.test(no.body.error));
+  user = { username: 'alex', role: 'admin' };
+  const q = (await call('post /api/user-projects', {}, { name: 'Q', kind: 'splash' })).body;
+  for (let i = 0; i < 5; i++) { assert.strictEqual((await call('post /api/user-projects/:id/draft', { id: q.id }, { about: 'x' })).code, 202); await settle(); }
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('ai-limits: Eastern days, saved to disk, admins unlimited', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-'));
+  let now = new Date('2026-11-11T04:30:00Z');   // 11:30pm Eastern on the 10th
+  const L = require('./ai-limits');
+  const mk = () => L.create({ dataDir: dir, limits: { designer: 2, site: 1 }, clock: () => now });
+  const ann = { username: 'ann', role: '303' };
+  let a = mk();
+  assert.ok(a.take(ann, 'designer')); assert.ok(a.take(ann, 'designer')); assert.ok(!a.take(ann, 'designer'));
+  a = mk();   // a restart keeps the count
+  assert.ok(!a.take(ann, 'designer'));
+  assert.deepStrictEqual(a.left(ann).designer, { used: 2, limit: 2, left: 0 });
+  assert.ok(a.take({ username: 'alex', role: 'admin' }, 'designer'));
+  assert.deepStrictEqual(a.left({ username: 'alex', role: 'admin' }), { unlimited: true });
+  now = new Date('2026-11-11T05:01:00Z');   // past midnight Eastern
+  assert.ok(a.take(ann, 'designer'));
+  a.refund(ann, 'designer');
+  assert.strictEqual(a.left(ann).designer.used, 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });
