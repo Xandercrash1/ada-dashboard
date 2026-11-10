@@ -42,6 +42,7 @@ const { requireAuth, users: userStore } = mountAuth(app, {
   usersFile: path.join(__dirname, '../data/users.json'),   // per instance: live and staging have separate accounts
   loginHtmlFile: path.join(__dirname, '../public/login.html'),
   behindProxy: true,                  // throws at startup if trust proxy is unset
+  secretContext: String(PORT) === '3000' ? '' : `port-${PORT}`,   // staging logins don't work on live
 });
 // One Ada device enrollment (Plan — One Ada.md § 4 P2-2). The two token-authenticated routes
 // (POST /api/devices/enroll, GET /api/devices/enroll/:id) MUST be mounted before requireAuth.
@@ -5201,7 +5202,8 @@ app.post('/api/bridge/reply', (req, res) => {
   res.json({ success: true });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+// Staging listens on loopback only (2026-11-09); live keeps 0.0.0.0 behind Caddy and UFW.
+app.listen(PORT, String(PORT) === '3000' ? '0.0.0.0' : '127.0.0.1', () => {
   console.log(`================================================`);
   console.log(` Ada Operations Hub live on port ${PORT}`);
   console.log(` Local: http://localhost:${PORT}`);

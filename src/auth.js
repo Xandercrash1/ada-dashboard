@@ -252,42 +252,58 @@ function createRateLimiter(maxAttempts = MAX_ATTEMPTS, lockoutMs = LOCKOUT_MS) {
 }
 
 // ---------------------------------------------------------------------
-// Global backstop limiter — a SEPARATE, coarser counter shared across
-// every client, independent of IP/key. Rationale (added after dispatcher
-// review, 2026-08-26):
+// Per-account limiter (2026-11-09; replaces the 2026-08-26 global backstop).
 //
-// Per-IP limiting alone is not immune to a DISTRIBUTED attempt — a
-// botnet, or simply an attacker rotating through a handful of IPs/proxies,
-// can stay under any single IP's threshold indefinitely while still
-// hammering the login endpoint at volume. A global backstop trades a
-// small amount of availability (a genuine, sustained, distributed attack
-// will eventually lock Alex out too, briefly) for closing that gap: the
-// threshold is set high enough (30 failures / 5 min) that it will not
-// fire during normal single-user use — even a bad case of fat-fingering
-// the password repeatedly won't reach it — but will fire well before a
-// scripted attempt gets through any meaningful fraction of a real
-// password's keyspace.
-//
-// This does NOT replace the per-IP limiter, which is still the first
-// line of defense and the only one that isolates a single bad actor
-// without affecting anyone else. It is deliberately a backstop, not the
-// primary control.
+// The global counter closed the distributed-attack gap, but 30 failures from
+// anyone locked EVERY account out, so a stranger could keep Alex and every
+// friend locked out for free. Now the backstop counts failures per username
+// instead: a distributed attempt on one account still trips it, and the
+// worst a stranger can do is lock that one account for a while, not everyone.
+// The per-IP limiter stays the first line of defense. Usernames that don't
+// exist are counted the same way, so the limiter never reveals which exist.
 // ---------------------------------------------------------------------
 
-const GLOBAL_MAX_ATTEMPTS = 30;
-const GLOBAL_LOCKOUT_MS = 2 * 60 * 1000; // 2 minutes
+const ACCOUNT_MAX_ATTEMPTS = 20;
+const ACCOUNT_LOCKOUT_MS = 10 * 60 * 1000; // 10 minutes
 
-function createGlobalLimiter(maxAttempts = GLOBAL_MAX_ATTEMPTS, lockoutMs = GLOBAL_LOCKOUT_MS) {
+function createAccountLimiter(maxAttempts = ACCOUNT_MAX_ATTEMPTS, lockoutMs = ACCOUNT_LOCKOUT_MS) {
   return createRateLimiter(maxAttempts, lockoutMs);
 }
 
-const GLOBAL_KEY = '__global__';
+const accountKey = (username) => 'u:' + String(username || '').trim().toLowerCase();
+
+// ---------------------------------------------------------------------
+// Ended sessions (2026-11-09). Logout records the token's `sid` until the time it
+// would have expired anyway, so the list never holds more than 12 hours of logouts.
+// Kept in a file so a restart doesn't bring logged-out sessions back. Tokens from
+// before this change carry no `sid` and simply run out their 12 hours.
+// ---------------------------------------------------------------------
+
+function createRevocationStore(file) {
+  let map = new Map();   // sid -> exp (ms)
+  if (file) {
+    try { map = new Map(Object.entries(JSON.parse(fs.readFileSync(file, 'utf8')))); } catch (e) { /* none yet */ }
+  }
+  const prune = () => { const now = Date.now(); for (const [k, exp] of map) if (exp <= now) map.delete(k); };
+  return {
+    has(sid) { if (!sid) return false; const exp = map.get(sid); return !!exp && exp > Date.now(); },
+    add(sid, exp) {
+      prune(); map.set(sid, exp);
+      if (!file) return;
+      try {
+        const tmp = file + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(map)), { mode: 0o600 });
+        fs.renameSync(tmp, file);
+      } catch (e) { console.error('[auth.js] could not save ended sessions:', e.message); }
+    },
+  };
+}
 
 // ---------------------------------------------------------------------
 // requireAuth middleware
 // ---------------------------------------------------------------------
 
-function makeRequireAuth(getSecret, exempt, users) {
+function makeRequireAuth(getSecret, exempt, users, revoked) {
   return function requireAuth(req, res, next) {
     // Caller-supplied exemption (e.g. the remote Mac bridge authenticating
     // with a shared token instead of a browser session cookie). The predicate
@@ -307,7 +323,8 @@ function makeRequireAuth(getSecret, exempt, users) {
 
     const cookies = parseCookies(req);
     const token = cookies[COOKIE_NAME];
-    const session = token ? verifyToken(token, getSecret()) : null;
+    let session = token ? verifyToken(token, getSecret()) : null;
+    if (session && revoked && revoked.has(session.sid)) session = null;   // logged out
     if (!session) {
       // Distinguish API calls (JSON 401) from page loads (redirect to /login)
       if (req.path.startsWith('/api/')) {
@@ -519,14 +536,21 @@ function mountAuth(app, options = {}) {
   const credPath = options.credentialsFile || resolveCredentialsPath();
   const creds = loadCredentials(credPath);
   const limiter = createRateLimiter(options.maxAttempts, options.lockoutMs);
-  const globalLimiter = createGlobalLimiter(options.globalMaxAttempts, options.globalLockoutMs);
+  const accountLimiter = createAccountLimiter(options.accountMaxAttempts, options.accountLockoutMs);
   const loginHtmlPath = options.loginHtmlFile || path.join(__dirname, 'login.html');
 
   checkTrustProxyConfig(app, options.behindProxy);
 
-  const getSecret = () => creds.sessionSecret;
+  // Per-instance secret (2026-11-09): live and staging read the same credentials file, so with
+  // one secret a staging login was a valid live login. `secretContext` (server.js passes '' on
+  // live, 'port-<PORT>' elsewhere) derives a different key per instance; live's is unchanged.
+  const secret = options.secretContext
+    ? crypto.createHmac('sha256', creds.sessionSecret).update('instance:' + options.secretContext).digest('hex')
+    : creds.sessionSecret;
+  const getSecret = () => secret;
   const users = options.usersFile ? createUserStore(options.usersFile, creds) : null;
-  const requireAuth = makeRequireAuth(getSecret, options.exempt, users);
+  const revoked = createRevocationStore(options.revokedFile || (options.usersFile ? path.join(path.dirname(options.usersFile), 'revoked-sessions.json') : null));
+  const requireAuth = makeRequireAuth(getSecret, options.exempt, users, revoked);
 
   // GET /login — serve the login page itself (must stay reachable logged out)
   app.get('/login', (req, res) => {
@@ -539,13 +563,6 @@ function mountAuth(app, options = {}) {
   app.post('/api/login', (req, res) => {
     warnIfLiveProxyMismatch(req, app);
     const ip = getClientIp(req);
-
-    if (globalLimiter.isLocked(GLOBAL_KEY)) {
-      const waitMs = globalLimiter.remainingLockMs(GLOBAL_KEY);
-      return res.status(429).json({
-        error: `Too many failed attempts across all clients. Try again in ${Math.ceil(waitMs / 1000)}s.`,
-      });
-    }
 
     if (limiter.isLocked(ip)) {
       const waitMs = limiter.remainingLockMs(ip);
@@ -560,23 +577,35 @@ function mountAuth(app, options = {}) {
       return res.status(400).json({ error: users ? 'Username and password required.' : 'Password required.' });
     }
 
+    const acct = accountKey(users ? username : 'alex');
+    if (accountLimiter.isLocked(acct)) {
+      const waitMs = accountLimiter.remainingLockMs(acct);
+      return res.status(429).json({
+        error: `Too many failed attempts for this account. Try again in ${Math.ceil(waitMs / 1000)}s.`,
+      });
+    }
+
     const user = users ? users.verify(username, password) : (verifyPassword(password, creds.salt, creds.passwordHash) ? { username: 'alex', pv: 0 } : null);
     if (!user) {
       limiter.recordFailure(ip);
-      globalLimiter.recordFailure(GLOBAL_KEY);
+      accountLimiter.recordFailure(acct);
       return res.status(401).json({ error: users ? 'Incorrect username or password.' : 'Incorrect password.' });
     }
 
     limiter.recordSuccess(ip);
-    globalLimiter.recordSuccess(GLOBAL_KEY);
+    accountLimiter.recordSuccess(acct);
     const now = Date.now();
-    const token = signToken({ iat: now, exp: now + SESSION_TTL_MS, u: user.username, pv: user.pv || 0 }, getSecret());
+    const token = signToken({ iat: now, exp: now + SESSION_TTL_MS, u: user.username, pv: user.pv || 0, sid: b64url(crypto.randomBytes(12)) }, getSecret());
     res.setHeader('Set-Cookie', buildCookieHeader(token, req));
     res.json({ ok: true });
   });
 
-  // POST /api/logout — clear cookie
+  // POST /api/logout — end the session on the server (2026-11-09), then clear the cookie.
+  // Tokens are stateless, so a copied cookie used to keep working until it expired.
   app.post('/api/logout', (req, res) => {
+    const token = parseCookies(req)[COOKIE_NAME];
+    const session = token ? verifyToken(token, getSecret()) : null;
+    if (session && session.sid) revoked.add(session.sid, session.exp);
     res.setHeader('Set-Cookie', buildClearCookieHeader(req));
     res.json({ ok: true });
   });
