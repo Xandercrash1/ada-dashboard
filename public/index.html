@@ -2479,6 +2479,8 @@
     async function refreshTelemetry() {
       try {
         const res = await fetch('/api/system');
+        // Server stats are admin-only; other accounts get 401/403, so stop asking instead of logging every 5 s.
+        if (res.status === 401 || res.status === 403) { clearInterval(window.__telemetryTimer); return; }
         const sys = await res.json();
 
         // Cards
@@ -6428,7 +6430,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     window.__customPagesReady = loadCustomPages();
     loadScheduled();
     loadFeedbackTypes().then(loadFeedback);
-    setInterval(refreshTelemetry, 5000);
+    window.__telemetryTimer = setInterval(refreshTelemetry, 5000);
     // Auto-refresh the queue while the Scheduler sub-tab is on screen.
     setInterval(() => {
       const panel = document.getElementById('server-sub-scheduled');
