@@ -63,6 +63,7 @@ const invites = require('./invites').create({
 invites.mountPublic(app, { getClientIp });
 app.use(requireAuth);                 // everything below requires a session
 app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1790201502191), defined below
+require('./grimoire-proxy').mountGrimoirePreview(app, { isAdminReq: (req) => isAdminReq(req) });   // /grimoire-next/ preview (2026-11-10)
 app.use(express.static(path.join(__dirname, '../public')));
 const MEDIA_DIR = path.join(__dirname, '../data/media');
 // Media split (Plan — Roles § Media library): admins see everything. Others see the

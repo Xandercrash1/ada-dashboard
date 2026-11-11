@@ -187,7 +187,9 @@
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.ok) {
           const params = new URLSearchParams(window.location.search);
-          const redirectTo = params.get('redirect') || '/';
+          // Only a path on this site: no other host, no javascript: (2026-11-10 audit)
+          const asked = params.get('redirect') || '';
+          const redirectTo = /^\/(?![\/\\])[^\\\s\x00-\x1f\x7f]*$/.test(asked) ? asked : '/';
           window.location.href = redirectTo;
           return;
         }
