@@ -50,7 +50,7 @@ function normalizeTask(raw, existing) {
   // User tags (fb-1790204578669): usernames a task belongs to. Admin sees
   // every task; a pages user sees only tasks carrying their own tag. Format
   // is checked here; WHO may be tagged is the server's call (known users).
-  const tagsRaw = pick('tags', []);
+  const tagsRaw = pick('tags', []) ?? [];   // tasks saved before tags existed have no field at all (fb-1794356458080)
   let tags = [];
   if (tagsRaw !== null && !Array.isArray(tagsRaw)) errors.push('tags must be an array of usernames');
   else tags = [...new Set((tagsRaw || []).map(x => String(x).trim().toLowerCase()).filter(Boolean))];
