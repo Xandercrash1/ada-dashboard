@@ -1010,9 +1010,21 @@ app.post('/api/terminal/exec', (req, res) => {
   const { command } = req.body;
   if (!command || !command.trim()) return res.status(400).json({ error: 'Command required' });
 
+  // sudo asks for a password on this server (Alex, 2026-11-11), and this console has no terminal to type it
+  // into. When the console sends one, `sudo` inside the command becomes `sudo -A` and reads it through
+  // src/sudo-askpass.sh. It exists only in that command's environment: never stored, never logged.
+  const { sudoPassword } = req.body;
+  if (sudoPassword !== undefined && (typeof sudoPassword !== 'string' || !sudoPassword || sudoPassword.length > 256 || /[\r\n\0]/.test(sudoPassword))) {
+    return res.status(400).json({ error: 'Invalid sudo password' });
+  }
+  const run = sudoPassword
+    ? (cb) => execFile('bash', ['-c', 'sudo() { command sudo -A "$@"; }\n' + command],
+        { cwd: '/home/ubuntu', timeout: 300000, env: { ...process.env, SUDO_ASKPASS: path.join(__dirname, 'sudo-askpass.sh'), ADA_SUDO_PW: sudoPassword } }, cb)
+    : (cb) => exec(command, { cwd: '/home/ubuntu', timeout: 300000 }, cb);
+
   const startTime = Date.now();
   // 300s (contract §1) — interactive console, a person is waiting.
-  exec(command, { cwd: '/home/ubuntu', timeout: 300000 }, (err, stdout, stderr) => {
+  run((err, stdout, stderr) => {
     const durationMs = Date.now() - startTime;
     res.json({
       success: !err,

@@ -583,6 +583,8 @@
               <span class="absolute left-3.5 top-2.5 text-xs text-gray-500 font-mono font-bold">$</span>
               <input type="text" id="term-input" placeholder="Type bash command (e.g. uptime, ps aux, pm2 logs)..." class="w-full bg-black/80 border border-dark-border rounded-xl pl-8 pr-4 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500 transition-colors" autocomplete="off">
             </div>
+            <!-- Shown only for commands that use sudo; sudo asks for a password on this server (2026-11-11). Never stored. -->
+            <input type="password" id="term-sudo-pw" placeholder="sudo password" aria-label="sudo password" autocomplete="off" class="hidden w-40 bg-black/80 border border-amber-500/60 rounded-xl px-3 py-2 text-xs font-mono text-amber-200 focus:outline-none focus:border-amber-400 transition-colors">
             <button type="submit" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow flex items-center gap-1.5">
               <i class="fa-solid fa-play text-[10px]"></i> Run
             </button>
@@ -2444,6 +2446,12 @@
 
       const out = document.getElementById('term-output');
       const label = document.getElementById('term-status-label');
+      // sudo needs a password on this server: ask for it in the box beside the command, send it with this one run, then forget it.
+      const pwBox = document.getElementById('term-sudo-pw');
+      const needsSudo = /(^|[\s;&|(])sudo\s/.test(cmd);
+      if (needsSudo && !pwBox.value) { pwBox.classList.remove('hidden'); pwBox.focus(); label.innerText = 'Enter your sudo password, then Run'; return; }
+      const sudoPassword = needsSudo ? pwBox.value : undefined;
+      pwBox.value = '';
       label.innerText = `Executing: ${cmd}...`;
       out.innerText += `\n$ ${cmd}\n`;
 
@@ -2451,19 +2459,28 @@
         const res = await fetch('/api/terminal/exec', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command: cmd })
+          body: JSON.stringify({ command: cmd, sudoPassword })
         });
         const result = await res.json();
         label.innerText = `Completed (Exit: ${result.exitCode}, ${result.durationMs}ms)`;
         if (result.stdout) out.innerText += result.stdout;
         if (result.stderr) out.innerText += `\n[STDERR] ${result.stderr}`;
+        if (result.error) out.innerText += `\n[Error] ${result.error}`;
         out.scrollTop = out.scrollHeight;
         input.value = '';
+        pwBox.classList.add('hidden');
       } catch (err) {
         label.innerText = `Execution Error`;
         out.innerText += `\n[Error] ${err.message}\n`;
       }
     }
+
+    // Show the sudo password box as soon as the command uses sudo.
+    document.getElementById('term-input').addEventListener('input', (e) => {
+      const box = document.getElementById('term-sudo-pw');
+      if (/(^|[\s;&|(])sudo\s/.test(e.target.value)) box.classList.remove('hidden');
+      else if (!box.value) box.classList.add('hidden');
+    });
 
     function runQuickCommand(cmd) {
       document.getElementById('term-input').value = cmd;
