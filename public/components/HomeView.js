@@ -32,6 +32,7 @@ ada-home .h-task input:checked + span { color: var(--h-muted); text-decoration: 
 ada-home .h-late { flex: none; margin-left: auto; font-size: .8125rem; color: var(--h-warn); }
 ada-home .h-event { display: flex; gap: 12px; align-items: baseline; min-height: 48px; padding-block: 12px; }
 ada-home .h-event time { flex: none; width: 4.5rem; color: var(--h-muted); font-size: .875rem; font-variant-numeric: tabular-nums; }
+ada-home .h-event .h-who { flex: none; margin-left: auto; color: var(--h-muted); font-size: .75rem; }
 ada-home .h-event span { min-width: 0; overflow-wrap: anywhere; }
 ada-home .h-link { justify-self: start; min-height: 40px; padding: 0 4px; border: 0; background: none; color: var(--h-link); font-weight: 600; text-decoration: underline; cursor: pointer; }
 ada-home .h-notice-title { margin: 0; font-weight: 600; }
@@ -146,7 +147,8 @@ class HomeView extends HTMLElement {
     this.loadTasks();
     this.loadHouse();
     this.loadPages();
-    if (this.isAdmin) { this.loadEvents(); this.loadAdmin(); }
+    this.loadEvents();   // the server returns only events shared with this account
+    if (this.isAdmin) this.loadAdmin();
   }
 
   // The announcement editor saved: draw what it wrote without refetching.
@@ -241,6 +243,8 @@ class HomeView extends HTMLElement {
       const li = el('li', 'h-event');
       const at = ev.allDay ? 'All day' : new Date(ev.startsAt).toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
       li.append(el('time', '', at), el('span', '', ev.title));
+      // Whose event it is: shown when it isn't the viewer's own (an admin sees everyone's).
+      if (ev.owner && this.me && ev.owner !== this.me.username && ev.person) li.append(el('small', 'h-who', ev.person));
       return li;
     }));
     if (this.tasks) this.drawSummary();

@@ -34,11 +34,11 @@
     (function () {
       const nativeFetch = window.fetch.bind(window);
       const PAGES_OK = [/^\/api\/me(\/(password|profile|avatar))?$/, /^\/api\/people$/, /^\/api\/(messages|sites)(\/|$)/, /^\/api\/pages(\/|$)/, /^\/api\/homepage$/, /^\/api\/templates(\/|$)/, /^\/api\/widgets\/sanitize$/,
-        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/todo(\/|$)/, /^\/api\/media\/(libraries|files|upload)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/user-projects(\/|$)/, /^\/api\/login$/, /^\/api\/logout$/];
+        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/agenda(\/events(\/[^/]+)?)?$/, /^\/api\/todo(\/|$)/, /^\/api\/media\/(libraries|files|upload)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/user-projects(\/|$)/, /^\/api\/login$/, /^\/api\/logout$/];
       window.fetch = async function (input, init) {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
-        const GUEST_OK = [/^\/api\/me(\/(password|profile|avatar))?$/, /^\/api\/people$/, /^\/api\/homepage$/, /^\/api\/(weather|glance)$/, /^\/api\/media\/files$/, /^\/api\/login$/, /^\/api\/logout$/,
+        const GUEST_OK = [/^\/api\/me(\/(password|profile|avatar))?$/, /^\/api\/people$/, /^\/api\/homepage$/, /^\/api\/(weather|glance|agenda)$/, /^\/api\/media\/files$/, /^\/api\/login$/, /^\/api\/logout$/,
           /^\/api\/pages(\/|$)/, /^\/api\/todo(\/(tasks|projects|completed))?$/, /^\/api\/user-projects(\/|$)/];
         if (path.startsWith('/api/') && !GUEST_OK.some(re => re.test(path))) {
           const me = window.ME || await window.__meReady;

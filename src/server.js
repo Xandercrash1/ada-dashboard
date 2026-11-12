@@ -1156,13 +1156,16 @@ function authorizeRole(req, res, next) {
   // builder projects shared with them (2026-11-10). Every list is filtered by the handler.
   if (u.role === 'guest') {
     if (m !== 'GET') return deny();
-    if (['/api/homepage', '/api/weather', '/api/glance', '/api/people', '/api/media/files', '/api/pages',
+    if (['/api/homepage', '/api/weather', '/api/glance', '/api/people', '/api/agenda', '/api/media/files', '/api/pages',
       '/api/todo', '/api/todo/tasks', '/api/todo/projects', '/api/todo/completed', '/api/user-projects'].includes(p)) return next();   // media files: the list is filtered to what a guest may open
     if ((mm = /^\/api\/pages\/([^/]+)\/(?:content|images(?:\/[^/]+)?)$/.exec(p))) return pageVisibleTo(u, mm[1]) ? next() : deny();
     if (/^\/api\/user-projects\/[^/]+(?:\/(?:image|site|data\/[^/]+|photos\/[^/]+))?$/.test(p)) return next();   // src/user-projects.js checks sharing
     return deny();
   }
   if (p === '/api/people' && m === 'GET') return next();
+  if (p === '/api/agenda' && m === 'GET') return next();   // the handler shows only events shared with this account
+  if (p === '/api/agenda/events' && m === 'POST') return next();
+  if (/^\/api\/agenda\/events\/[^/]+$/.test(p) && (m === 'PATCH' || m === 'DELETE')) return next();   // owner checked in the handler
   if (p === '/api/pages' && (m === 'GET' || m === 'POST')) return next();
   if ((mm = /^\/api\/pages\/([^/]+)\/content$/.exec(p))) {
     if (m === 'GET') return pageVisibleTo(u, mm[1]) ? next() : deny();
@@ -5086,12 +5089,12 @@ app.get('/api/agenda', async (req, res) => {
         if (ev.status !== 'CANCELLED' && ev.start.ms < winEndMs && ev.start.ms + durMs > winStartMs) {
           events.push({ startMs: ev.start.ms, endMs: ev.start.ms + durMs, allDay: ev.start.allDay,
                         title: ev.summary || '(untitled)', location: ev.location || '',
-                        source: 'feed', calendar: feed.label || feed.id });
+                        source: 'feed', calendar: feed.label || feed.id, _item: feed });
         }
         continue;
       }
       for (const occ of expandIcsEvent(ev, winStartMs, winEndMs, overridesByUid)) {
-        events.push({ ...occ, source: 'feed', calendar: feed.label || feed.id });
+        events.push({ ...occ, source: 'feed', calendar: feed.label || feed.id, _item: feed });
       }
     }
     feedStatus.push({ id: feed.id, label: feed.label || feed.id, ok: !error, error, fetchedAt });
@@ -5104,19 +5107,75 @@ app.get('/api/agenda', async (req, res) => {
     if (startMs < winEndMs && endMs > winStartMs) {
       events.push({ startMs, endMs, allDay: !!ev.allDay, title: String(ev.title),
                     location: ev.location ? String(ev.location) : '',
-                    source: 'local', calendar: ev.addedBy || 'dashboard' });
+                    source: 'local', calendar: ev.addedBy || 'dashboard', id: ev.id, _item: ev });
     }
   }
+  // Who sees what (same lists as pages and tasks, src/sharing.js): an event or feed belongs to
+  // its owner (Alex when unset) and is shown to those it is shared with. Admins see all.
+  const admin = isAdminReq(req);
+  const visible = events.filter(e => admin || sharing.canSee(req.user, e._item));
 
-  events.sort((a, b) => a.startMs - b.startMs || a.title.localeCompare(b.title));
+  visible.sort((a, b) => a.startMs - b.startMs || a.title.localeCompare(b.title));
+  const nameOf = (u) => { const p = userStore && userStore.list().find(x => x.username === u); return (p && p.displayName) || u; };
   res.json({
     windowStart: new Date(winStartMs).toISOString(),
     windowEnd: new Date(winEndMs).toISOString(),
-    events: events.map(e => ({ title: e.title, startsAt: new Date(e.startMs).toISOString(),
+    events: visible.map(e => { const v = sharing.view(e._item); return { title: e.title, startsAt: new Date(e.startMs).toISOString(),
                                endsAt: new Date(e.endMs).toISOString(), allDay: e.allDay,
-                               location: e.location, source: e.source, calendar: e.calendar })),
-    feeds: feedStatus
+                               location: e.location, source: e.source, calendar: e.calendar,
+                               ...(e.id ? { id: e.id } : {}), owner: v.owner, person: nameOf(v.owner), sharedWith: v.sharedWith }; }),
+    feeds: admin ? feedStatus : []
   });
+});
+
+// Add / change / remove a dashboard-stored event. Owner = the caller (an admin may name another
+// account); sharedWith follows the same rules as pages (unknown names refused, only the owner or an
+// admin may change it). Only the owner or an admin may edit or delete.
+function cleanEventBody(b, res) {
+  const title = String(b.title || '').trim().slice(0, 200);
+  const startsAt = String(b.startsAt || '');
+  if (!title || Number.isNaN(Date.parse(startsAt))) { res.status(400).json({ error: 'An event needs a title and a start time.' }); return null; }
+  if (b.endsAt && Number.isNaN(Date.parse(b.endsAt))) { res.status(400).json({ error: 'Bad end time.' }); return null; }
+  return { title, startsAt: new Date(startsAt).toISOString(), ...(b.endsAt ? { endsAt: new Date(b.endsAt).toISOString() } : {}),
+    allDay: !!b.allDay, location: b.location ? String(b.location).slice(0, 200) : undefined };
+}
+app.post('/api/agenda/events', (req, res) => {
+  const body = req.body || {};
+  const f = cleanEventBody(body, res); if (!f) return;
+  let owner = ownerName(req);
+  if (body.owner !== undefined && body.owner !== owner) {
+    if (!isAdminReq(req)) return res.status(403).json({ error: 'Only an admin can add an event for someone else.' });
+    const o = String(body.owner).toLowerCase();
+    if (o !== 'alex' && !taskPeople().includes(o)) return res.status(400).json({ error: `Unknown account "${String(body.owner).slice(0, 40)}".` });
+    owner = o;
+  }
+  const c = sharing.clean(body.sharedWith || [], { people: taskPeople(), item: { owner } });
+  if (c.error) return res.status(400).json({ error: c.error });
+  const ev = { id: 'ev-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...f, owner, sharedWith: c.list, addedBy: ownerName(req) };
+  const all = readLocalCalendarEvents();
+  all.push(ev);
+  writeFileAtomic(path.join(DATA_DIR, 'calendar.json'), JSON.stringify(all, null, 2));
+  res.json(ev);
+});
+app.patch('/api/agenda/events/:id', (req, res) => {
+  const all = readLocalCalendarEvents();
+  const ev = all.find(x => x.id === req.params.id);
+  if (!ev || !sharing.canSee(req.user, ev)) return res.status(404).json({ error: 'No such event.' });
+  if (!sharing.canShare(req.user, ev)) return res.status(403).json({ error: 'Only the person who made this can change it.' });
+  const body = req.body || {};
+  if (body.title !== undefined || body.startsAt !== undefined) { const f = cleanEventBody({ ...ev, ...body }, res); if (!f) return; Object.assign(ev, f); if (f.location === undefined) delete ev.location; }
+  const refused = sharing.change(req.user, ev, body.sharedWith, taskPeople());
+  if (refused) return res.status(refused.status).json({ error: refused.error });
+  writeFileAtomic(path.join(DATA_DIR, 'calendar.json'), JSON.stringify(all, null, 2));
+  res.json(ev);
+});
+app.delete('/api/agenda/events/:id', (req, res) => {
+  const all = readLocalCalendarEvents();
+  const ev = all.find(x => x.id === req.params.id);
+  if (!ev || !sharing.canSee(req.user, ev)) return res.status(404).json({ error: 'No such event.' });
+  if (!sharing.canShare(req.user, ev)) return res.status(403).json({ error: 'Only the person who made this can delete it.' });
+  writeFileAtomic(path.join(DATA_DIR, 'calendar.json'), JSON.stringify(all.filter(x => x !== ev), null, 2));
+  res.json({ ok: true });
 });
 
 // Legacy alias — the old mock read data/events.json; the agenda is real now.
