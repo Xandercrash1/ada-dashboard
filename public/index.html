@@ -598,6 +598,16 @@
             <pre id="term-output" class="text-gray-300 whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar leading-relaxed">Ready. Enter a command above to execute on the server.</pre>
           </div>
         </div>
+        <!-- Backups card: read-only, filled by loadBackups() from /api/backups/status -->
+        <div id="backups-card" class="bg-dark-card border border-dark-border rounded-2xl p-4 min-w-0">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-vault text-emerald-400 mr-2"></i>Backups</h3>
+            <span id="backups-error" class="text-xs text-rose-400"></span>
+          </div>
+          <div id="backups-list" class="space-y-2"></div>
+          <div id="backups-notes" class="mt-3 pt-3 border-t border-dark-border/50 text-xs text-gray-400 space-y-1 break-words"></div>
+        </div>
+
       </div>
 
       <!-- ====================================================== -->
@@ -1454,6 +1464,7 @@
       if (sub === 'users') loadUsers();
       if (sub === 'publishing') loadPublishing();
       if (sub === 'trash') loadTrash();
+      if (sub === 'health') loadBackups();
       ['health', 'agents', 'feedback', 'scheduled', 'users', 'publishing', 'trash'].forEach(s => {
         document.getElementById(`server-sub-${s}`).classList.add('hidden');
         const btn = document.getElementById(`subtab-btn-${s}`);
@@ -1479,6 +1490,60 @@
         loadFeedback();
       }
     }
+
+    // ===================== BACKUPS CARD (src/backups-status.js) =====================
+    function backupsAgo(iso) {
+      if (!iso) return null;
+      const h = (Date.now() - new Date(iso).getTime()) / 3600000;
+      if (h < 1) return `${Math.max(0, Math.round(h * 60))} min ago`;
+      if (h < 48) return `${Math.round(h)} hours ago`;
+      return `${Math.round(h / 24)} days ago`;
+    }
+    function backupsSize(b) {
+      if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
+      if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+      return Math.max(1, Math.round(b / 1024)) + ' KB';
+    }
+    function backupsEl(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    async function loadBackups() {
+      const list = document.getElementById('backups-list'), notes = document.getElementById('backups-notes'), err = document.getElementById('backups-error');
+      if (!list) return;
+      try {
+        const r = await fetch('/api/backups/status');
+        if (r.status === 401 || r.status === 403) { window.__backupsTimer && clearInterval(window.__backupsTimer); return; }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        err.textContent = '';
+        list.replaceChildren();
+        for (const dev of d.devices) {
+          const h = dev.newest ? (Date.now() - new Date(dev.newest).getTime()) / 3600000 : Infinity;
+          const colour = h < 26 ? 'bg-emerald-400' : h < 72 ? 'bg-amber-400' : 'bg-rose-500';
+          const row = backupsEl('div', 'bg-dark-bg border border-dark-border rounded-xl p-3 min-w-0');
+          const top = backupsEl('div', 'flex items-center gap-2 min-w-0');
+          top.append(backupsEl('span', 'w-2.5 h-2.5 rounded-full flex-shrink-0 ' + colour), backupsEl('span', 'text-sm font-semibold text-white truncate', dev.name));
+          const when = dev.newest ? 'newest backup ' + backupsAgo(dev.newest) : 'no backup yet';
+          row.append(top, backupsEl('p', 'text-xs text-gray-300 mt-1', when),
+            backupsEl('p', 'text-xs text-gray-500 mt-0.5', `${dev.snapshots} snapshot${dev.snapshots === 1 ? '' : 's'} · ${backupsSize(dev.sizeBytes)}`));
+          list.append(row);
+        }
+        if (!d.devices.length) list.append(backupsEl('p', 'text-xs text-gray-500', 'No backup repositories found.'));
+        notes.replaceChildren();
+        const dr = d.drive;
+        notes.append(backupsEl('p', dr && !dr.ok ? 'text-rose-400' : '',
+          dr ? `Google Drive copy: ${dr.ok ? 'worked' : 'FAILED'}, ${backupsAgo(dr.at)}` : 'Google Drive copy: no record in the log'));
+        if (d.lastRun && !d.lastRun.ok) notes.append(backupsEl('p', 'text-rose-400', `Last VPS run failed ${backupsAgo(d.lastRun.at)}: ${d.lastRun.text}`));
+        notes.append(backupsEl('p', '', d.homeCopyNote));
+      } catch (e) {
+        err.textContent = 'Could not load backups.';
+      }
+    }
+    window.__backupsTimer = setInterval(() => { if (!document.hidden && currentServerSubTab === 'health') loadBackups(); }, 60000);
+    loadBackups();
 
     // ===================== TRASH PENDING (src/trash-pending.js) =====================
     let trashNames = [];
