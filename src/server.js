@@ -1017,21 +1017,35 @@ app.post('/api/terminal/exec', (req, res) => {
   if (sudoPassword !== undefined && (typeof sudoPassword !== 'string' || !sudoPassword || sudoPassword.length > 256 || /[\r\n\0]/.test(sudoPassword))) {
     return res.status(400).json({ error: 'Invalid sudo password' });
   }
-  const run = sudoPassword
-    ? (cb) => execFile('bash', ['-c', 'sudo() { command sudo -A "$@"; }\n' + command],
-        { cwd: '/home/ubuntu', timeout: 300000, env: { ...process.env, SUDO_ASKPASS: path.join(__dirname, 'sudo-askpass.sh'), ADA_SUDO_PW: sudoPassword } }, cb)
-    : (cb) => exec(command, { cwd: '/home/ubuntu', timeout: 300000 }, cb);
-
+  // Its own process group, so the 5-minute limit stops everything the command started (a pipe, sudo,
+  // its children) instead of only the shell, and the person is told it timed out (2026-11-11).
+  const env = sudoPassword
+    ? { ...process.env, SUDO_ASKPASS: path.join(__dirname, 'sudo-askpass.sh'), ADA_SUDO_PW: sudoPassword }
+    : process.env;
+  const script = sudoPassword ? 'sudo() { command sudo -A "$@"; }\n' + command : command;
+  const LIMIT_MS = 300000, MAX_OUT = 1024 * 1024;   // 300s (contract §1) — interactive console, a person is waiting.
   const startTime = Date.now();
-  // 300s (contract §1) — interactive console, a person is waiting.
-  run((err, stdout, stderr) => {
-    const durationMs = Date.now() - startTime;
+  const child = spawn('bash', ['-c', script], { cwd: '/home/ubuntu', env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '', stderr = '', timedOut = false;
+  child.stdout.on('data', (d) => { if (stdout.length < MAX_OUT) stdout += d; });
+  child.stderr.on('data', (d) => { if (stderr.length < MAX_OUT) stderr += d; });
+  const killGroup = (sig) => { try { process.kill(-child.pid, sig); } catch (e) { /* already gone */ } };
+  const timer = setTimeout(() => {
+    timedOut = true;
+    killGroup('SIGTERM');
+    setTimeout(() => killGroup('SIGKILL'), 5000).unref();
+  }, LIMIT_MS);
+  child.on('error', (err) => { stderr += err.message; });
+  child.on('close', (code, signal) => {
+    clearTimeout(timer);
+    if (timedOut) stderr += `\nStopped: the console's limit is 5 minutes. Run long jobs from a terminal.`;
     res.json({
-      success: !err,
-      exitCode: err ? err.code : 0,
-      stdout: stdout || '',
-      stderr: stderr || (err ? err.message : ''),
-      durationMs
+      success: code === 0 && !timedOut,
+      exitCode: code === null ? (signal || 'killed') : code,
+      timedOut,
+      stdout,
+      stderr,
+      durationMs: Date.now() - startTime
     });
   });
 });
