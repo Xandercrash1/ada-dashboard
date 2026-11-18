@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const LIMITS = { designer: 10, site: 3 };
+const LIMITS = { designer: 10, site: 3, coach: 20 };   // coach: Nutrition Coach messages (2026-11-18)
 const ZONE = 'America/New_York';
 
 const today = (now = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);

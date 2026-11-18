@@ -34,7 +34,7 @@
     (function () {
       const nativeFetch = window.fetch.bind(window);
       const PAGES_OK = [/^\/api\/me(\/(password|profile|avatar))?$/, /^\/api\/people$/, /^\/api\/(messages|sites)(\/|$)/, /^\/api\/pages(\/|$)/, /^\/api\/homepage$/, /^\/api\/templates(\/|$)/, /^\/api\/widgets\/sanitize$/,
-        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/agenda(\/events(\/[^/]+)?)?$/, /^\/api\/todo(\/|$)/, /^\/api\/media\/(libraries|files|upload)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/user-projects(\/|$)/, /^\/api\/login$/, /^\/api\/logout$/];
+        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/agenda(\/events(\/[^/]+)?)?$/, /^\/api\/todo(\/|$)/, /^\/api\/media\/(libraries|files|upload)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/user-projects(\/|$)/, /^\/api\/nutrition(\/|$)/, /^\/api\/food-lookup$/, /^\/api\/login$/, /^\/api\/logout$/];
       window.fetch = async function (input, init) {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
@@ -63,6 +63,7 @@
   <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="projects-tab.js" defer></script><!-- One Ada: Projects tab -->
+  <script src="nutrition-tab.js" defer></script><!-- Nutrition tab (admin + 303) -->
   <script src="user-projects.js" defer></script><!-- New project button: splash pages and documents -->
   <script>
     const renderer = new marked.Renderer();
@@ -215,6 +216,9 @@
         </button>
         <button onclick="switchTab('projects')" id="tab-btn-projects" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
           <i class="fa-solid fa-diagram-project"></i> Projects
+        </button>
+        <button onclick="switchTab('nutrition')" id="tab-btn-nutrition" class="not-guest tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
+          <i class="fa-solid fa-apple-whole"></i> Nutrition
         </button>
         <button onclick="switchTab('tools')" id="tab-btn-tools" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
           <i class="fa-solid fa-toolbox"></i> Tools
@@ -462,6 +466,7 @@
     <!-- TAB 3: SERVER (HEALTH & INTERACTIVE AGENTS)           -->
     <!-- ======================================================== -->
     <section id="view-projects" class="hidden space-y-5"><div id="projects-root" class="space-y-5"></div></section><!-- One Ada: Projects tab -->
+    <section id="view-nutrition" class="hidden"><div id="nutrition-root"></div></section><!-- Nutrition tab (admin + 303) -->
 
     <section id="view-server" class="hidden space-y-5">
       
@@ -943,6 +948,10 @@
       <i class="fa-solid fa-diagram-project text-lg"></i>
       <span>Projects</span>
     </button>
+    <button onclick="switchTab('nutrition')" id="mob-btn-nutrition" class="not-guest flex flex-col items-center justify-center w-full py-1 text-gray-400 text-[11px] gap-1 transition-colors">
+      <i class="fa-solid fa-apple-whole text-lg"></i>
+      <span>Nutrition</span>
+    </button>
     <button onclick="switchTab('tools')" id="mob-btn-tools" class="flex flex-col items-center justify-center w-full py-1 text-gray-400 text-[11px] gap-1 transition-colors">
       <i class="fa-solid fa-bolt text-lg"></i>
       <span>Scripts</span>
@@ -1402,9 +1411,9 @@
       currentTab = tab;
       try { localStorage.setItem('ada_activeTab', tab); } catch (e) {}
       
-      const allTabs = ['home', 'todo', 'projects', 'tools', 'server', ...customPages.map(p => p.id)];
+      const allTabs = ['home', 'todo', 'projects', 'nutrition', 'tools', 'server', ...customPages.map(p => p.id)];
       onDesignerTabSwitch(tab);
-      const viewTabs = ['home', 'todo', 'projects', 'tools', 'server'];
+      const viewTabs = ['home', 'todo', 'projects', 'nutrition', 'tools', 'server'];
       
       allTabs.forEach(t => {
         // Only hide views that actually exist as standalone sections
@@ -1434,6 +1443,7 @@
       } else {
          const targetView = document.getElementById(`view-${tab}`);
          if (targetView) targetView.classList.remove('hidden');
+         if (tab === 'nutrition' && window.AdaNutrition) window.AdaNutrition.show();
          if (tab === 'projects' && window.AdaProjects) window.AdaProjects.show();   // One Ada: Projects tab (projects-tab.js)
       }
       if (tab !== 'projects' && location.hash.startsWith('#projects')) {
@@ -6791,7 +6801,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       try { saved = localStorage.getItem('ada_activeTab') || 'home'; } catch (e) {}
       if (location.hash.startsWith('#projects')) saved = 'projects';   // One Ada deep links (#projects/start, …)
       try {
-        if (!['home', 'todo', 'projects', 'tools', 'server'].includes(saved)) {
+        if (!['home', 'todo', 'projects', 'nutrition', 'tools', 'server'].includes(saved)) {
           await (window.__customPagesReady || Promise.resolve());
           if (!customPages.some(p => p.id === saved)) saved = 'home';
         }
