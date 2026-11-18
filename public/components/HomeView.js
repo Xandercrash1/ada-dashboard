@@ -348,7 +348,7 @@ class HomeView extends HTMLElement {
       ? [['todo', 'Tasks'], ['projects', 'Projects'], ['tools', 'Scripts']]
       : guest ? [] : [['todo', 'Tasks']];
     // Project pages live on their project's hub, as in the top bar.
-    const own = pages.filter(p => !p.project).map(p => [p.id, p.title]);
+    const own = pages.filter(p => !p.project || p.kind === 'builtin').map(p => [p.id, p.title]);   // builtin: a built-in view listed like a page (its id is the view's id)
     this.r.pages.hidden = guest && !own.length;
     // Sites on this server, for Alex only (2026-11-10). Opened from here so the sign-in cookie
     // (SameSite=Strict) goes along; a link tapped in another app arrives signed out.

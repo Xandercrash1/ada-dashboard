@@ -217,9 +217,6 @@
         <button onclick="switchTab('projects')" id="tab-btn-projects" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
           <i class="fa-solid fa-diagram-project"></i> Projects
         </button>
-        <button onclick="switchTab('nutrition')" id="tab-btn-nutrition" class="not-guest tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
-          <i class="fa-solid fa-apple-whole"></i> Nutrition
-        </button>
         <button onclick="switchTab('tools')" id="tab-btn-tools" class="tab-button border-transparent text-gray-400 hover:text-gray-200 border-b-2 py-3.5 px-1 text-sm font-medium flex items-center gap-2 transition-all">
           <i class="fa-solid fa-toolbox"></i> Tools
         </button>
@@ -948,10 +945,6 @@
       <i class="fa-solid fa-diagram-project text-lg"></i>
       <span>Projects</span>
     </button>
-    <button onclick="switchTab('nutrition')" id="mob-btn-nutrition" class="not-guest flex flex-col items-center justify-center w-full py-1 text-gray-400 text-[11px] gap-1 transition-colors">
-      <i class="fa-solid fa-apple-whole text-lg"></i>
-      <span>Nutrition</span>
-    </button>
     <button onclick="switchTab('tools')" id="mob-btn-tools" class="flex flex-col items-center justify-center w-full py-1 text-gray-400 text-[11px] gap-1 transition-colors">
       <i class="fa-solid fa-bolt text-lg"></i>
       <span>Scripts</span>
@@ -1446,6 +1439,9 @@
          if (tab === 'nutrition' && window.AdaNutrition) window.AdaNutrition.show();
          if (tab === 'projects' && window.AdaProjects) window.AdaProjects.show();   // One Ada: Projects tab (projects-tab.js)
       }
+      // Nutrition has a direct link, /nutrition (works after login); keep the address bar honest.
+      if (tab === 'nutrition' && location.pathname !== '/nutrition') history.replaceState(null, '', '/nutrition');
+      else if (tab !== 'nutrition' && location.pathname === '/nutrition') history.replaceState(null, '', '/');
       if (tab !== 'projects' && location.hash.startsWith('#projects')) {
          history.replaceState(null, '', location.pathname + location.search);   // leaving Projects drops its deep link
       }
@@ -2632,7 +2628,8 @@
       try {
         const res = await fetch('/api/pages');
         const data = await res.json();
-        customPages = data.pages || [];
+        // Built-in views registered as pages (kind: 'builtin', e.g. Nutrition) get a Home tile and a project listing, but are not canvas pages.
+        customPages = (data.pages || []).filter(p => p.kind !== 'builtin');
         renderCustomTabs();
       } catch (err) {
         console.error('Failed to load custom pages', err);
@@ -6799,7 +6796,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
     window.addEventListener('DOMContentLoaded', async () => {
       let saved = 'home';
       try { saved = localStorage.getItem('ada_activeTab') || 'home'; } catch (e) {}
-      if (location.hash.startsWith('#projects')) saved = 'projects';   // One Ada deep links (#projects/start, …)
+      if (location.hash.startsWith('#projects')) saved = 'projects';
+      if (location.pathname === '/nutrition' || location.hash === '#nutrition') saved = 'nutrition';   // direct link   // One Ada deep links (#projects/start, …)
       try {
         if (!['home', 'todo', 'projects', 'nutrition', 'tools', 'server'].includes(saved)) {
           await (window.__customPagesReady || Promise.resolve());

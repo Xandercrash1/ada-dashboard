@@ -478,3 +478,37 @@ test('isolation of goals, plans, workouts and changes; guests refused on the new
   assert.deepStrictEqual(fs.readdirSync(path.join(t.dataDir, 'nutrition')).sort(), ['amy.json']);
   t.close();
 });
+
+// ================= round 3: Nutrition as a registered (built-in) page, direct link
+test('register-nutrition-page: dry run, add, idempotent, other pages untouched', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reg-'));
+  const pages = [{ id: 'proj-x', title: 'X', icon: 'fa-diagram-project', owner: 'alex', shared: false, project: 'x' }];
+  fs.writeFileSync(path.join(dir, 'pages.json'), JSON.stringify(pages, null, 2), { mode: 0o600 });
+  const sc = path.join(__dirname, '../scripts/register-nutrition-page.js');
+  assert.match(execFileSync('node', [sc, dir, '--dry']).toString(), /dry run.*add/);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, 'pages.json'), 'utf8')), pages);
+  assert.match(execFileSync('node', [sc, dir]).toString(), /Done/);
+  const after = JSON.parse(fs.readFileSync(path.join(dir, 'pages.json'), 'utf8'));
+  assert.strictEqual(after.length, 2); assert.deepStrictEqual(after[0], pages[0]);
+  assert.deepStrictEqual(after[1], { id: 'nutrition', title: 'Nutrition', icon: 'fa-apple-whole', owner: 'alex', sharedWith: ['@303'], project: 'lifestyle', kind: 'builtin' });
+  assert.strictEqual(fs.statSync(path.join(dir, 'pages.json')).mode & 0o777, 0o600);
+  const snap = fs.readFileSync(path.join(dir, 'pages.json'), 'utf8');
+  assert.match(execFileSync('node', [sc, dir]).toString(), /already registered/);
+  assert.strictEqual(fs.readFileSync(path.join(dir, 'pages.json'), 'utf8'), snap);
+  // a drifted entry is corrected, extra sharing kept
+  after[1].title = 'Old'; after[1].sharedWith = ['alice']; fs.writeFileSync(path.join(dir, 'pages.json'), JSON.stringify(after, null, 2));
+  execFileSync('node', [sc, dir]);
+  const fixed = JSON.parse(fs.readFileSync(path.join(dir, 'pages.json'), 'utf8'))[1];
+  assert.strictEqual(fixed.title, 'Nutrition'); assert.deepStrictEqual(fixed.sharedWith.sort(), ['@303', 'alice']);
+  // a foreign page with that id is never overwritten
+  fs.writeFileSync(path.join(dir, 'pages.json'), JSON.stringify([{ id: 'nutrition', title: 'Mine' }]));
+  assert.throws(() => execFileSync('node', [sc, dir], { stdio: 'pipe' }));
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(dir, 'pages.json'), 'utf8'))[0].title, 'Mine');
+});
+test('login redirect keeps a pasted /nutrition link, and nothing unsafe', () => {
+  const { loginUrl } = require('./auth');
+  const r = (path, method = 'GET') => loginUrl({ path, method });
+  assert.strictEqual(r('/nutrition'), '/login?redirect=%2Fnutrition');
+  assert.strictEqual(r('/'), '/login'); assert.strictEqual(r('/nutrition', 'POST'), '/login');
+  assert.strictEqual(r('//evil.com'), '/login'); assert.strictEqual(r('/a b'), '/login'); assert.strictEqual(r('/login'), '/login');
+});

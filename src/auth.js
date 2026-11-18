@@ -210,6 +210,13 @@ function buildClearCookieHeader(req) {
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+// Page loads that need a sign-in go to /login and, for a plain same-site path (a pasted link such as /nutrition),
+// come back to it afterwards: login.html honours ?redirect=.
+function loginUrl(req) {
+  const p = req.path;
+  return req.method === 'GET' && p !== '/' && /^\/[A-Za-z0-9][A-Za-z0-9_\/-]{0,80}$/.test(p) && !p.startsWith('/login') ? '/login?redirect=' + encodeURIComponent(p) : '/login';
+}
+
 function createRateLimiter(maxAttempts = MAX_ATTEMPTS, lockoutMs = LOCKOUT_MS) {
   // Map<key, { count, firstAttemptAt, lockedUntil }>
   const attempts = new Map();
@@ -330,7 +337,7 @@ function makeRequireAuth(getSecret, exempt, users, revoked) {
       if (req.path.startsWith('/api/')) {
         return res.status(401).json({ error: 'Unauthorized' });
       }
-      return res.redirect('/login');
+      return res.redirect(loginUrl(req));
     }
     // Multi-user (fb-1790201502191): the token names a user and a password
     // version. Resolved against the user store on EVERY request, so disabling
@@ -339,7 +346,7 @@ function makeRequireAuth(getSecret, exempt, users, revoked) {
     const user = users ? users.find(session.u || 'alex') : { username: 'alex', role: 'admin', pv: 0 };
     if (!user || user.disabled || (user.pv || 0) !== (session.pv || 0)) {
       if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
-      return res.redirect('/login');
+      return res.redirect(loginUrl(req));
     }
     req.session = session;
     req.user = { username: user.username, role: user.role };
@@ -679,7 +686,7 @@ if (require.main === module && process.argv.includes('--setup')) {
   setupCli();
 }
 
-module.exports = {
+module.exports = { loginUrl,
   mountAuth,
   resolveCredentialsPath,
   hashPassword,

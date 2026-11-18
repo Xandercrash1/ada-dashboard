@@ -64,6 +64,8 @@ invites.mountPublic(app, { getClientIp });
 app.use(requireAuth);                 // everything below requires a session
 app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1790201502191), defined below
 require('./grimoire-proxy').mountGrimoirePreview(app, { isAdminReq: (req) => isAdminReq(req) });   // /grimoire-next/ preview (2026-11-10)
+// Direct link to Nutrition (admin and 303): serves the app, which opens the view. Guests go Home.
+app.get('/nutrition', (req, res) => (req.user && req.user.role === 'guest') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
 app.use(express.static(path.join(__dirname, '../public')));
 const MEDIA_DIR = path.join(__dirname, '../data/media');
 // Media split (Plan — Roles § Media library): admins see everything. Others see the

@@ -66,7 +66,7 @@ const noHScroll = (page) => page.evaluate(() => document.documentElement.scrollW
     if (await page.locator('[data-act="wz-skip"]').count()) await page.click('[data-act="wz-skip"]');   // first-time setup is covered by nutrition-r2-e2e.js
     await page.waitForTimeout(500);
     const visBtn = await page.locator(w < 768 ? '#mob-btn-nutrition' : '#tab-btn-nutrition').isVisible();
-    ok(visBtn, `${who}@${w}: Nutrition tab button visible`);
+    ok(!visBtn, `${who}@${w}: no Nutrition button in the nav (it opens from a Home tile or /nutrition)`);
     ok(await page.locator('#nutrition-root').isVisible(), `${who}@${w}: view shown`);
     if (who === 'user') {
       const body = await page.textContent('#nutrition-root');

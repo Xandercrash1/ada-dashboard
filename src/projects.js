@@ -112,7 +112,7 @@ function create(opts = {}) {
     const docs = listDocs(dir);
     const statusFile = docs.find((d) => d.rel === 'projectStatus.md');
     const statusMd = statusFile ? fs.readFileSync(path.join(dir, 'projectStatus.md'), 'utf8') : '';
-    const pages = (readPages() || []).filter((pg) => pg.project === slug).map((pg) => ({ id: pg.id, title: pg.title, icon: pg.icon }));
+    const pages = (readPages() || []).filter((pg) => pg.project === slug).map((pg) => ({ id: pg.id, title: pg.title, icon: pg.icon, kind: pg.kind }));
     let forumInfo = { open: 0, pending: 0, total: 0 };
     try { forumInfo = forumSummary(slug); } catch { /* forum store unreadable: hub still loads */ }
     return { status: 200, body: { ...p, statusMd, docs: docs.filter((d) => d.rel !== 'projectStatus.md'), pages, forum: forumInfo, dash: (() => { try { return projectDash.exists(slug); } catch { return false; } })() } };
