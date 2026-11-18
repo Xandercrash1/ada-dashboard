@@ -62,7 +62,9 @@ const noHScroll = (page) => page.evaluate(() => document.documentElement.scrollW
     const ctx = await browser.newContext({ viewport: { width: w, height: 844 } });
     const page = await ctx.newPage(); page.on('pageerror', (e) => errors.push(who + w + ': ' + e.message)); page.on('console', (m) => { if (m.type() === 'error' && !/cdn|net::|favicon|Failed to load resource|telemetry/.test(m.text())) errors.push(who + w + ' console: ' + m.text()); });
     if (who === 'user') await login(page, users[0], '203.0.113.131'); else { await page.goto(B + '/'); await page.waitForTimeout(3000); }
-    await page.evaluate(() => switchTab('nutrition')); await page.waitForTimeout(1500);
+    await page.evaluate(() => switchTab('nutrition')); await page.waitForTimeout(1800);
+    if (await page.locator('[data-act="wz-skip"]').count()) await page.click('[data-act="wz-skip"]');   // first-time setup is covered by nutrition-r2-e2e.js
+    await page.waitForTimeout(500);
     const visBtn = await page.locator(w < 768 ? '#mob-btn-nutrition' : '#tab-btn-nutrition').isVisible();
     ok(visBtn, `${who}@${w}: Nutrition tab button visible`);
     ok(await page.locator('#nutrition-root').isVisible(), `${who}@${w}: view shown`);
