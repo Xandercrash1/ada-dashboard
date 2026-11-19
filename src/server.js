@@ -1254,8 +1254,9 @@ deviceEnrollment.mountAdmin(app, { isAdminReq });
 const vaultProjects = require('./projects').create();
 vaultProjects.mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Projects tab data from the read-only vault clone ~/ada-vault (+ each project's pages)
 require('./user-projects').create({ dataDir: DATA_DIR, projectContext: vaultProjects.context, limits: aiLimits }).mount(app, { ownerName, isAdminReq, people: () => taskPeople() });   // New project button: splash pages and documents
-require('./food-lookup').create().mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
-require('./nutrition').create({ dataDir: DATA_DIR, limits: aiLimits }).mount(app, { ownerName });   // Nutrition tab: per-person food log, targets, Coach (admin + 303)
+const foodLookup = require('./food-lookup').create();
+foodLookup.mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
+require('./nutrition').create({ dataDir: DATA_DIR, limits: aiLimits, lookup: (q, brands) => foodLookup.lookup(q, brands) }).mount(app, { ownerName });   // Nutrition tab: per-person food log, targets, Coach (admin + 303)
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./backups-status').create().mount(app, { isAdminReq });   // Server tab > Health & Stats: read-only Backups card (filesystem only, no restic)
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)

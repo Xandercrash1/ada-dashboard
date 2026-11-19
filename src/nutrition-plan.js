@@ -7,7 +7,7 @@
  */
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const SESSION_TYPES = ['strength', 'cardio', 'hiit', 'mobility', 'sport', 'other'];
-const GOAL_TYPES = ['lose_weight', 'gain_weight', 'strength', 'endurance', 'general_health', 'other'];
+const GOAL_TYPES = ['lose_weight', 'gain_weight', 'reduce_waist', 'strength', 'endurance', 'general_health', 'other'];
 const REVIEW_STEP = 0.10;          // calories move at most 10% per review
 const PROTEIN_STEP = 0.20;
 const INITIAL_BAND = 0.15;         // the first AI plan may sit within 15% of the formula
@@ -15,6 +15,8 @@ const MAX_SESSION_MIN = 150;
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+// Longer free text is cut at a sentence end when it has to be cut, never mid-word.
+const trimText = (v, max) => { const t = clean(v, 100000); if (t.length <= max) return t; const cut = t.slice(0, max); const i = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? ')); return i > max * 0.5 ? cut.slice(0, i + 1) : cut.replace(/\s+\S*$/, '') + '…'; };
 const clean = (v, max) => String(v == null ? '' : v).replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 const fin = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : NaN));
 
@@ -49,7 +51,11 @@ function checkTargets(raw, ctx) {
   const step = ctx.mode === 'initial' ? INITIAL_BAND : REVIEW_STEP;
   let lo = base * (1 - step), hi = base * (1 + step);
   if (ctx.age < 18) { lo = Math.max(lo, f.tdee * 0.95); hi = Math.min(hi, f.tdee * 1.05); }
-  else { lo = Math.max(lo, ctx.floor, f.tdee * 0.75); hi = Math.min(hi, f.tdee * 1.2); }
+  else {
+    lo = Math.max(lo, ctx.floor, f.tdee * 0.75);
+    if (ctx.maxLossKgWeek) lo = Math.max(lo, f.tdee - (ctx.maxLossKgWeek * 7700) / 7);   // never a deficit beyond the safe loss pace
+    hi = Math.min(hi, f.tdee * 1.2);
+  }
   if (lo > hi) lo = hi;
   kcal = clamp(kcal, lo, hi);
   kcal = Math.round(kcal / 10) * 10;
@@ -145,9 +151,9 @@ function checkWorkoutPlan(raw, ctx) {
   return { plan: { title: clean(raw.title, 80) || 'Weekly workout plan', notes: clean(raw.notes, 300), days }, notes };
 }
 
-function checkGoalUpdates(raw, goals) {
+function checkGoalUpdates(raw, goals, ctx) {
   if (!Array.isArray(raw) || raw.length > 10) return { error: 'goal updates malformed' };
-  const out = [];
+  const out = [], notes = [];
   for (const u of raw) {
     if (!isObj(u) || typeof u.id !== 'string') return { error: 'a goal update is malformed' };
     const g = goals.find((x) => x.id === u.id); if (!g) continue;
@@ -157,15 +163,22 @@ function checkGoalUpdates(raw, goals) {
       if (u.deadline !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(u.deadline))) return { error: 'goal deadline malformed' };
       upd.deadline = u.deadline;
     }
-    if (upd.status !== undefined || upd.deadline !== undefined) out.push(upd);
+    if (u.target !== undefined) { const t = fin(u.target); if (Number.isNaN(t)) return { error: 'goal target malformed' }; upd.target = t; }
+    // Weight and waist targets and deadlines go through the same safety rules as the goal editor; unsafe values are pulled back or dropped.
+    if ((upd.target !== undefined || upd.deadline) && ctx && ctx.clampGoal) {
+      const c = ctx.clampGoal(g, upd);
+      if (!c) { notes.push('A goal change was not allowed and was skipped.'); delete upd.target; delete upd.deadline; }
+      else { Object.assign(upd, c.upd); notes.push(...c.notes); }
+    }
+    if (upd.status !== undefined || upd.deadline !== undefined || upd.target !== undefined) out.push(upd);
   }
-  return { updates: out };
+  return { updates: out, notes };
 }
 
 // The whole reply: { explanation, targets?, workout_plan?, goal_updates? }. Returns what is safe to apply.
 function checkAdjustment(raw, ctx) {
   if (!isObj(raw)) return { error: 'not an object' };
-  const out = { explanation: clean(raw.explanation || raw.summary, 1500), notes: [] };
+  const out = { explanation: trimText(raw.explanation || raw.summary, 6000), notes: [] };
   let any = false;
   if (raw.targets !== undefined && raw.targets !== null) {
     const t = checkTargets(raw.targets, ctx);
@@ -178,12 +191,70 @@ function checkAdjustment(raw, ctx) {
     out.workoutPlan = w.plan; out.notes.push(...w.notes); any = true;
   }
   if (raw.goal_updates !== undefined && raw.goal_updates !== null) {
-    const g = checkGoalUpdates(raw.goal_updates, ctx.goals || []);
+    const g = checkGoalUpdates(raw.goal_updates, ctx.goals || [], ctx);
     if (g.error) return { error: g.error };
+    out.notes.push(...(g.notes || []));
     if (g.updates.length) { out.goalUpdates = g.updates; any = true; }
   }
   out.any = any;
   return out;
 }
 
-module.exports = { DAYS, SESSION_TYPES, GOAL_TYPES, extractJson, splitAdjust, checkTargets, checkWorkoutPlan, checkGoalUpdates, checkAdjustment, clean, avoidFor };
+// ---- chat logging: <log>{"items":[…]}</log>
+const LOG_KINDS = ['food', 'workout', 'weight', 'waist'];
+const MEAL_OK = ['breakfast', 'lunch', 'dinner', 'snack'];
+const isDateStr = (d) => { try { return typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && new Date(d + 'T12:00:00Z').toISOString().slice(0, 10) === d; } catch (e) { return false; } };
+const dayDiff = (a, b) => Math.round((Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 864e5);
+function splitLog(text) {
+  const s = String(text || '');
+  const m = /<log>([\s\S]*?)<\/log>/i.exec(s);
+  return { present: !!m, block: m ? extractJson(m[1]) : null, visible: s.replace(/<log>[\s\S]*?<\/log>/gi, '').trim() };
+}
+const mealForHour = (h) => (h < 10.5 ? 'breakfast' : h < 15 ? 'lunch' : h < 21 ? 'dinner' : 'snack');
+// ctx: { today (YYYY-MM-DD), hour (Eastern, 0-24 decimal), weightKg, lastWaistCm }
+// Returns { items } or { error }. A malformed item rejects the whole block; numbers out of range are pulled back and noted.
+function checkLog(raw, ctx) {
+  if (!isObj(raw) || !Array.isArray(raw.items) || !raw.items.length || raw.items.length > 12) return { error: 'items malformed' };
+  const items = [], notes = [];
+  for (const it of raw.items) {
+    if (!isObj(it) || !LOG_KINDS.includes(it.kind)) return { error: 'unknown kind' };
+    let date = ctx.today;
+    if (it.date !== undefined && it.date !== null) { if (!isDateStr(it.date)) return { error: 'bad date' }; date = it.date; }
+    const back = dayDiff(ctx.today, date);
+    if (back < 0 || back > 7) return { error: 'date outside the last 7 days' };
+    if (it.kind === 'food') {
+      const name = clean(it.name, 120); if (!name) return { error: 'food has no name' };
+      let servings = it.servings === undefined ? 1 : fin(it.servings); if (Number.isNaN(servings) || servings <= 0) return { error: 'bad servings' };
+      servings = Math.round(clamp(servings, 0.1, 20) * 100) / 100;
+      const per = {};
+      for (const [k, key, hi] of [['calories', 'kcal', 3000], ['protein', 'protein', 300], ['carbs', 'carbs', 600], ['fat', 'fat', 300], ['fiber', 'fiber', 200], ['sugar', 'sugar', 400], ['sodium', 'sodium', 10000]]) {
+        const v = it[key] === undefined || it[key] === null ? (k === 'calories' ? NaN : 0) : fin(it[key]);
+        if (Number.isNaN(v) || v < 0) return { error: `bad ${key}` };
+        per[k] = Math.round(Math.min(v, hi) * 10) / 10;
+        if (v > hi) notes.push(`${name}: ${key} limited to ${hi}.`);
+      }
+      if (per.calories * servings > 3000) { per.calories = Math.floor(3000 / servings); notes.push(`${name}: calories limited to 3000 for one item.`); }
+      const meal = it.meal === undefined || it.meal === null ? mealForHour(ctx.hour) : String(it.meal).toLowerCase();
+      if (!MEAL_OK.includes(meal)) return { error: 'bad meal' };
+      const grams = it.grams === undefined || it.grams === null ? null : fin(it.grams);
+      if (grams !== null && (Number.isNaN(grams) || grams <= 0 || grams > 3000)) return { error: 'bad grams' };
+      items.push({ kind: 'food', date, meal, name, serving: clean(it.serving, 60), servings, per, grams, source: it.source === 'usda' ? 'usda' : 'estimate' });
+    } else if (it.kind === 'workout') {
+      const name = clean(it.name, 80); if (!name) return { error: 'workout has no name' };
+      const minutes = fin(it.minutes); if (Number.isNaN(minutes) || minutes < 1 || minutes > 600) return { error: 'bad minutes' };
+      let effort = null; if (it.effort !== undefined && it.effort !== null) { effort = fin(it.effort); if (Number.isNaN(effort) || effort < 1 || effort > 10) return { error: 'bad effort' }; effort = Math.round(effort); }
+      items.push({ kind: 'workout', date, name, type: SESSION_TYPES.includes(it.type) ? it.type : 'other', minutes: Math.round(minutes), effort, notes: clean(it.notes, 300) });
+    } else if (it.kind === 'weight') {
+      const kg = fin(it.kg); if (Number.isNaN(kg) || kg < 25 || kg > 350) return { error: 'bad weight' };
+      if (ctx.weightKg && (kg < ctx.weightKg * 0.8 || kg > ctx.weightKg * 1.2)) return { error: 'weight is not plausible next to the last one' };
+      items.push({ kind: 'weight', date, kg: Math.round(kg * 10) / 10 });
+    } else {
+      const cm = fin(it.cm); if (Number.isNaN(cm) || cm < 40 || cm > 250) return { error: 'bad waist' };
+      if (ctx.lastWaistCm && (cm < ctx.lastWaistCm * 0.75 || cm > ctx.lastWaistCm * 1.25)) return { error: 'waist is not plausible next to the last one' };
+      items.push({ kind: 'waist', date, cm: Math.round(cm * 10) / 10 });
+    }
+  }
+  return { items, notes };
+}
+
+module.exports = { splitLog, checkLog, trimText, DAYS, SESSION_TYPES, GOAL_TYPES, extractJson, splitAdjust, checkTargets, checkWorkoutPlan, checkGoalUpdates, checkAdjustment, clean, avoidFor };

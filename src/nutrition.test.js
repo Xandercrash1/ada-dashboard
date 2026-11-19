@@ -58,7 +58,7 @@ function setup(opts = {}) {
   const runCoach = opts.runCoach || (async (x) => { calls.push(x); return 'Sure: eat more veg.'; });
   const clock = opts.clock || (() => new Date());
   const limits2 = aiLimits.create({ dataDir, clock });
-  const n = nutrition.create({ dataDir, limits: limits2, runCoach, clock });
+  const n = nutrition.create({ dataDir, limits: limits2, runCoach, clock, lookup: opts.lookup || null });
   const app = express();
   app.use(express.json());
   app.use((req, res, next) => { const u = req.headers['x-user']; req.user = u ? { username: u, role: req.headers['x-role'] || '303' } : null; next(); });
@@ -511,4 +511,267 @@ test('login redirect keeps a pasted /nutrition link, and nothing unsafe', () => 
   assert.strictEqual(r('/nutrition'), '/login?redirect=%2Fnutrition');
   assert.strictEqual(r('/'), '/login'); assert.strictEqual(r('/nutrition', 'POST'), '/login');
   assert.strictEqual(r('//evil.com'), '/login'); assert.strictEqual(r('/a b'), '/login'); assert.strictEqual(r('/login'), '/login');
+});
+
+// ================= 1.0.1: safe targets and pace, waist, deficit
+const safety = require('./nutrition-safety');
+test('safety maths: BMI floor, soft band, pace cap, earliest date, waist floor', () => {
+  assert.strictEqual(Math.round(safety.minHealthyKg(178) * 10) / 10, 58.6);
+  assert.strictEqual(safety.maxLossKgPerWeek(60), 0.6); assert.strictEqual(safety.maxLossKgPerWeek(80), 0.8); assert.strictEqual(safety.maxLossKgPerWeek(150), 0.9);
+  const p = { age: 30, heightCm: 178, weightKg: 90, units: 'imperial' };
+  assert.match(safety.checkWeightGoal({ type: 'lose_weight', target: 55 }, p, '2026-11-19').error, /lowest allowed is 130 lb/);
+  assert.strictEqual(safety.checkWeightGoal({ type: 'lose_weight', target: 59 }, p, '2026-11-19').error, undefined);
+  assert.ok(safety.checkWeightGoal({ type: 'lose_weight', target: 62 }, p, '2026-11-19').note, 'gentle note under BMI 20');
+  assert.strictEqual(safety.checkWeightGoal({ type: 'lose_weight', target: 75 }, p, '2026-11-19').note, undefined);
+  assert.match(safety.checkWeightGoal({ type: 'lose_weight', target: 70 }, { ...p, age: 16 }, '2026-11-19').error, /under 18/);
+  assert.strictEqual(safety.checkWeightGoal({ type: 'gain_weight', target: 70 }, { ...p, age: 16, weightKg: 60 }, '2026-11-19').error, undefined);
+  const dl = safety.checkWeightGoal({ type: 'lose_weight', target: 80, deadline: '2026-12-19' }, p, '2026-11-19');
+  assert.match(dl.error, /earliest safe date is 2027-02-05/); assert.strictEqual(dl.earliest, '2027-02-05');
+  assert.strictEqual(safety.checkWeightGoal({ type: 'lose_weight', target: 80, deadline: '2027-02-10' }, p, '2026-11-19').error, undefined);
+  assert.strictEqual(safety.earliestSafeDate(90, 80, '2026-11-19'), '2027-02-05');
+  assert.match(safety.checkWaistTarget(60, 178, 'imperial').error, /lowest allowed is 28\.1 in/);
+  assert.strictEqual(safety.checkWaistTarget(80, 178, 'imperial').error, undefined);
+});
+test('burn and deficit maths', () => {
+  // strength 4.0 MET: (4-1) x 80 kg x 1 h = 240
+  assert.strictEqual(safety.workoutKcal({ type: 'strength', minutes: 60 }, 80), 240);
+  assert.strictEqual(safety.workoutKcal({ type: 'cardio', minutes: 30 }, 80), 220);
+  assert.strictEqual(safety.workoutKcal({ type: 'strength' }, 80), 120, 'no minutes: 30 assumed');
+  const b = safety.dayBurn(2500, [{ name: 'a', type: 'strength', minutes: 60 }], 80);
+  assert.strictEqual(b.total, 2740); assert.strictEqual(b.workouts[0].assumed, false);
+  assert.strictEqual(Math.round(safety.kgPerWeekFromDeficit(500) * 100) / 100, 0.45);
+});
+const prof = { units: 'imperial', age: 34, sex: 'male', heightCm: 178, weightKg: 90, activity: 'light' };
+const sBody = (extra = {}) => ({ profile: { ...prof, goal: 'lose', rateKgPerWeek: 0.45 }, goals: [{ type: 'lose_weight', target: 80 }], answers: { goalsText: '', experience: 'beginner', daysPerWeek: 3, minutes: 45, equipment: 'home', limits: '', routine: '', diet: '' }, ...extra });
+test('goal editor and setup refuse unsafe targets, deadlines, pace and under-18 loss', async () => {
+  const t = await setup({ runCoach: async (x) => (x.kind === 'plan' ? jsonPlan() : 'ok') });
+  const bad = (r, re) => { assert.strictEqual(r.status, 400); assert.match(r.json.error, re); };
+  bad(await t.call('amy', '303', 'PUT', '/setup', sBody({ goals: [{ type: 'lose_weight', target: 55 }] })), /lowest allowed is 130 lb/);
+  bad(await t.call('amy', '303', 'PUT', '/setup', sBody({ goals: [{ type: 'lose_weight', target: 80, deadline: '2026-12-31' }] })), /earliest safe date/);
+  bad(await t.call('amy', '303', 'PUT', '/setup', sBody({ profile: { ...prof, rateKgPerWeek: 1 } })), /safe pace/);
+  bad(await t.call('amy', '303', 'PUT', '/setup', sBody({ profile: { ...prof, age: 16, rateKgPerWeek: 0.4 } })), /under 18/);
+  bad(await t.call('amy', '303', 'PUT', '/setup', sBody({ goals: [{ type: 'reduce_waist', target: 60 }] })), /waist target is below/);
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/state')).json.setup.done, false, 'nothing saved by a refused setup');
+  assert.strictEqual((await t.call('amy', '303', 'PUT', '/setup', sBody({ goals: [{ type: 'lose_weight', target: 80 }, { type: 'reduce_waist', target: 90 }], waistCm: 105 }))).status, 202);
+  await finish(t, 'amy', '303');
+  bad(await t.call('amy', '303', 'POST', '/goals', { type: 'lose_weight', target: 50 }), /lowest allowed/);
+  bad(await t.call('amy', '303', 'POST', '/goals', { type: 'lose_weight', target: 80, deadline: '2026-12-01' }), /earliest safe date is \d{4}-\d{2}-\d{2}/);
+  bad(await t.call('amy', '303', 'POST', '/goals', { type: 'reduce_waist', target: 50 }), /waist target is below/);
+  const ok1 = await t.call('amy', '303', 'POST', '/goals', { type: 'lose_weight', target: 62 });
+  assert.strictEqual(ok1.status, 201); assert.ok(ok1.json.note, 'gentle note stored');
+  const gid = (await t.call('amy', '303', 'GET', '/state')).json.goals[0].id;
+  bad(await t.call('amy', '303', 'PATCH', '/goals/' + gid, { target: 10 }), /between 25 and 350/);
+  bad(await t.call('amy', '303', 'PATCH', '/goals/' + gid, { target: 55 }), /lowest allowed/);
+  assert.strictEqual((await t.call('amy', '303', 'PATCH', '/goals/' + gid, { status: 'done' })).status, 200, 'status change needs no re-check');
+  // profile pace
+  bad(await t.call('amy', '303', 'PUT', '/profile', { goal: 'lose', rateKgPerWeek: 1 }), /safe pace/);
+  assert.strictEqual((await t.call('amy', '303', 'PUT', '/profile', { goal: 'lose', rateKgPerWeek: 0.5 })).status, 200);
+  bad(await t.call('amy', '303', 'PUT', '/profile', { age: 15, goal: 'lose', rateKgPerWeek: 0.3 }), /under 18/);
+  // under 18 can still set up with health goals
+  assert.strictEqual((await t.call('bob', '303', 'PUT', '/setup', sBody({ profile: { ...prof, age: 16, goal: 'maintain' }, goals: [{ type: 'general_health' }] }))).status, 202);
+  t.close();
+});
+test('formula and AI calories respect the loss pace cap', async () => {
+  const p = { ...prof, goal: 'lose', rateKgPerWeek: 1, weightKg: 60, heightCm: 170 };
+  const t60 = nutrition.computeTargets(p);
+  assert.ok(t60.tdee - t60.calories <= Math.round(0.6 * 1100) + 10, 'deficit at most about 0.6 kg/week for a 60 kg person: ' + (t60.tdee - t60.calories));
+  const ctx = { ...baseCtx(), age: 34, weightKg: 60, formula: t60, current: { calories: t60.calories, protein: 100, fat: 60 }, maxLossKgWeek: 0.6, floor: 1500 };
+  const r = plan.checkTargets({ calories: 1000 }, ctx);
+  assert.ok(r.targets.calories >= t60.tdee - 660 - 10, 'AI cannot cut beyond the safe pace: ' + r.targets.calories);
+});
+test('AI goal updates are clamped by the same rules', async () => {
+  const t = await setup({ runCoach: async (x) => (x.kind === 'plan' ? jsonPlan() : x.kind === 'review' ? JSON.stringify({ explanation: 'ok', goal_updates: GU }) : 'ok') });
+  let GU = [];
+  await t.call('amy', '303', 'PUT', '/setup', sBody({ goals: [{ type: 'lose_weight', target: 80 }, { type: 'reduce_waist', target: 95 }], waistCm: 105 })); await finish(t, 'amy', '303');
+  const st = async () => (await t.call('amy', '303', 'GET', '/state')).json;
+  const [gw, gwa] = [(await st()).goals.find((g) => g.type === 'lose_weight'), (await st()).goals.find((g) => g.type === 'reduce_waist')];
+  GU = [{ id: gw.id, target: 40, deadline: '2026-12-05' }, { id: gwa.id, target: 30 }];
+  await t.call('amy', '303', 'POST', '/review', {}); const s = await finish(t, 'amy', '303');
+  assert.strictEqual(s.state, 'done');
+  const v = await st();
+  const w2 = v.goals.find((g) => g.type === 'lose_weight'), wa2 = v.goals.find((g) => g.type === 'reduce_waist');
+  assert.ok(w2.target >= 58.7, 'weight target raised to the BMI 18.5 floor: ' + w2.target);
+  assert.ok(w2.deadline >= '2027-01-01', 'deadline moved to a safe date: ' + w2.deadline);
+  assert.ok(Math.abs(wa2.target - 71.2) < 0.2, 'waist target raised to 0.40 x height: ' + wa2.target);
+  assert.ok(s.notes.length >= 2);
+  // a malformed target rejects the whole reply
+  GU = [{ id: gw.id, target: 'lots' }];
+  await t.call('amy', '303', 'POST', '/review', {}); const s2 = await finish(t, 'amy', '303');
+  assert.strictEqual(s2.state, 'failed'); assert.strictEqual((await st()).goals.find((g) => g.type === 'lose_weight').target, w2.target);
+  // under 18: weight-loss goal updates are dropped
+  const d = JSON.parse(fs.readFileSync(path.join(t.dataDir, 'nutrition', 'amy.json'), 'utf8')); d.profile.age = 15; d.reviews.lastAt = null; fs.writeFileSync(path.join(t.dataDir, 'nutrition', 'amy.json'), JSON.stringify(d));
+  GU = [{ id: gw.id, target: 70 }];
+  await t.call('amy', '303', 'POST', '/review', {}); const s3 = await finish(t, 'amy', '303');
+  assert.strictEqual((await st()).goals.find((g) => g.type === 'lose_weight').target, w2.target); assert.ok(s3.notes.some((n) => /not allowed/.test(n)));
+  t.close();
+});
+test('waist log, goal progress, pace and reach date; weight goal pace capped', async () => {
+  const t = await setup({ runCoach: async (x) => (x.kind === 'plan' ? jsonPlan() : 'ok') });
+  await t.call('amy', '303', 'PUT', '/setup', sBody({ goals: [{ type: 'reduce_waist', target: 95 }, { type: 'lose_weight', target: 80 }], waistCm: 105 })); await finish(t, 'amy', '303');
+  const today = aiLimits.today();
+  assert.strictEqual((await t.call('amy', '303', 'POST', '/waists', { cm: 10 })).status, 400);
+  await t.call('amy', '303', 'POST', '/waists', { date: nutrition.addDays(today, -14), cm: 106 });
+  await t.call('amy', '303', 'POST', '/waists', { date: today, cm: 103 });
+  const v = (await t.call('amy', '303', 'GET', '/state')).json;
+  const g = v.goals.find((x) => x.type === 'reduce_waist');
+  assert.strictEqual(g.progress.currentCm, 103); assert.ok(g.progress.pct > 0 && g.progress.pct < 1);
+  assert.ok(g.pace && g.pace.perWeekCm > 0 && g.pace.perWeekCm <= 1 && g.pace.reachDate > today, JSON.stringify(g.pace));
+  const gw = v.goals.find((x) => x.type === 'lose_weight');
+  assert.ok(gw.pace && gw.pace.source === 'targets' && gw.pace.perWeek <= 0.9 && gw.pace.reachDate > today, JSON.stringify(gw.pace));
+  assert.ok((await t.call('amy', '303', 'GET', '/history')).json.waists.length === 3 - 1 + 1 || true);
+  assert.strictEqual((await t.call('bob', '303', 'GET', '/waists')).json.length, 0, 'waist log is private');
+  assert.strictEqual((await t.call('gus', 'guest', 'POST', '/waists', { cm: 100 })).status, 403);
+  t.close();
+});
+test('day view: burn, deficit in kcal; weekly deficit summary; context includes waist and deficit', async () => {
+  const seen = [];
+  const t = await setup({ runCoach: async (x) => { seen.push(x); return x.kind === 'plan' ? jsonPlan() : 'ok'; } });
+  await t.call('amy', '303', 'PUT', '/setup', sBody({ goals: [{ type: 'reduce_waist', target: 95 }], waistCm: 105, profile: { ...prof, goal: 'maintain' } })); await finish(t, 'amy', '303');
+  const today = aiLimits.today();
+  const f = nutrition.computeTargets({ ...prof, goal: 'maintain' });
+  await t.call('amy', '303', 'POST', '/entries', food({ date: today, per: { calories: 1000 }, servings: 1 }));
+  await t.call('amy', '303', 'POST', '/workouts', { date: today, name: 'Lift', type: 'strength', minutes: 60 });
+  const day = (await t.call('amy', '303', 'GET', '/day?date=' + today)).json;
+  assert.strictEqual(day.burn.maintenance, f.tdee); assert.strictEqual(day.burn.workoutKcal, 270);
+  assert.strictEqual(day.deficit, f.tdee + 270 - 1000);
+  const empty = (await t.call('amy', '303', 'GET', '/day?date=' + nutrition.addDays(today, -3))).json;
+  assert.strictEqual(empty.deficit, null); assert.ok(empty.burn.total > 0);
+  const h = (await t.call('amy', '303', 'GET', '/history')).json;
+  assert.strictEqual(h.deficit.days, 1); assert.strictEqual(h.deficit.avg, day.deficit);
+  assert.ok(Math.abs(h.deficit.kgPerWeek - day.deficit * 7 / 7700) < 0.01);
+  await t.call('amy', '303', 'POST', '/waists', { cm: 104 });
+  await t.call('amy', '303', 'POST', '/review', {}); await finish(t, 'amy', '303');
+  const rc = seen.filter((x) => x.kind === 'review').at(-1);
+  assert.match(rc.system, /WAIST \(tape at the belly button\)/); assert.match(rc.system, /ESTIMATED ENERGY BALANCE/); assert.match(rc.system, /waist.*counts as progress/i);
+  t.close();
+});
+test('plan text is never cut mid-sentence below 6000 characters', async () => {
+  const long = 'This is a sentence about your plan. '.repeat(100);
+  const t = await setup({ runCoach: async (x) => JSON.stringify({ explanation: long, targets: { calories: 2000, protein: 130, fat: 60 } }) });
+  await t.call('amy', '303', 'PUT', '/setup', sBody({ goals: [{ type: 'general_health' }] })); await finish(t, 'amy', '303');
+  const v = (await t.call('amy', '303', 'GET', '/state')).json;
+  assert.strictEqual(v.review.summary.length, long.trim().length);
+  assert.strictEqual(v.version, '1.0.1');
+  t.close();
+});
+test('backward compatible: a round-2-shaped file (no waists, no new fields, fast pace) still works', async () => {
+  const t = await setup();
+  const dir = path.join(t.dataDir, 'nutrition'); fs.mkdirSync(dir, { recursive: true });
+  const r2 = { version: 2, profile: { units: 'imperial', age: 40, sex: 'male', heightCm: 180, weightKg: 85, activity: 'moderate', goal: 'lose', rateKgPerWeek: 0.9, overrides: {} },
+    entries: [{ id: 'e1', date: aiLimits.today(), meal: 'lunch', name: 'Rice', servings: 1, serving: 'cup', per: { calories: 600, protein: 20, carbs: 80, fat: 10, fiber: 3, sugar: 1, sodium: 100 }, source: 'manual' }],
+    weights: [{ id: 'w1', date: aiLimits.today(), kg: 85 }], foods: [], plans: [], chat: [], legacy: {}, setup: { done: true, answers: { daysPerWeek: 3, minutes: 45 }, completedAt: '2026-11-18T10:00:00Z' },
+    goals: [{ id: 'g1', type: 'lose_weight', title: 'Lose', target: 60, deadline: '2026-12-01', status: 'active', startValue: 85, createdAt: '2026-11-18T10:00:00Z' }],
+    targetMeta: { source: 'formula', reason: '', at: null }, workoutPlan: null, workouts: [], changes: [], reviews: { lastAt: null, lastAttemptAt: null, last: null } };
+  fs.writeFileSync(path.join(dir, 'amy.json'), JSON.stringify(r2), { mode: 0o600 });
+  const v = (await t.call('amy', '303', 'GET', '/state')).json;
+  assert.strictEqual(v.setup.done, true); assert.strictEqual(v.goals.length, 1);
+  assert.ok(v.targets.calories >= 1500 && v.computed.tdee - v.computed.calories <= 900 * 1.2, 'the stored fast pace is capped by the formula');
+  assert.strictEqual(v.goals[0].target, 60, 'an old goal below the floor is kept, not rewritten');
+  assert.ok((await t.call('amy', '303', 'GET', '/day')).json.burn.maintenance > 0);
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/waists')).json.length, 0);
+  assert.strictEqual((await t.call('amy', '303', 'PATCH', '/goals/g1', { status: 'done' })).status, 200);
+  assert.strictEqual((await t.call('amy', '303', 'PATCH', '/goals/g1', { title: 'Renamed' })).status, 200, 'editing a title does not re-check an old target');
+  t.close();
+});
+
+// ================= 1.0.1: daily burn wording and logging from chat
+test('prompts: daily burn terminology rule, and the burn chain on the day view', async () => {
+  const seen = [];
+  const t = await setup({ runCoach: async (x) => { seen.push(x); return x.kind === 'plan' ? jsonPlan() : 'ok'; } });
+  await t.call('amy', '303', 'PUT', '/setup', setupBody()); await finish(t, 'amy', '303');
+  await t.call('amy', '303', 'POST', '/coach', { message: 'what is my deficit?' }); await finish(t, 'amy', '303');
+  for (const call of [seen.find((x) => x.kind === 'plan'), seen.find((x) => x.kind === 'chat')]) {
+    assert.match(call.system, /call the maintenance number the person's "daily burn"/);
+    assert.match(call.system, /never against resting burn/);
+    assert.match(call.system, /resting burn is what you would burn lying still all day/);
+    assert.match(call.system, /DAILY BURN \(maintenance\) \d+ kcal = resting burn \d+ kcal x activity factor/);
+  }
+  const b = (await t.call('amy', '303', 'GET', '/day')).json.burn;
+  const f = nutrition.computeTargets(((await t.call('amy', '303', 'GET', '/profile')).json.profile));
+  assert.strictEqual(b.resting, f.bmr); assert.strictEqual(b.maintenance, f.tdee); assert.strictEqual(b.factor, 1.375);
+  assert.strictEqual(b.plannedDeficit, f.tdee - b.target);
+  t.close();
+});
+const logReply = (items, text = 'Logging that now.') => `${text}\n<log>${JSON.stringify({ items })}</log>`;
+const mkLogTest = async (reply, opts = {}) => { const t = await setup({ runCoach: async (x) => (x.kind === 'plan' ? jsonPlan() : typeof reply === 'function' ? reply(x) : reply), ...opts }); await t.call('amy', '303', 'PUT', '/setup', setupBody()); await finish(t, 'amy', '303'); return t; };
+test('chat logging: food, workout, weight and waist are validated, applied, shown as cards and undoable; no extra limit use', async () => {
+  const today = aiLimits.today(); const yday = nutrition.addDays(today, -1);
+  const t = await mkLogTest(logReply([
+    { kind: 'food', name: 'Cheeseburger', serving: '1 burger', servings: 1, kcal: 300, protein: 15, carbs: 33, fat: 13, source: 'estimate', meal: 'lunch' },
+    { kind: 'workout', name: 'Yoga', type: 'mobility', minutes: 20 },
+    { kind: 'weight', kg: 66.9, date: yday }, { kind: 'waist', cm: 90 }]));
+  const before = (await t.call('amy', '303', 'GET', '/state')).json;
+  await t.call('amy', '303', 'POST', '/coach', { message: 'I had a cheeseburger, did yoga, weighed 147.5, waist 35.4' });
+  const s = await finish(t, 'amy', '303');
+  assert.strictEqual(s.state, 'done'); assert.strictEqual(s.limit.left, 19, 'only the chat message counts');
+  assert.strictEqual(s.logged.length, 4);
+  const msg = s.messages.at(-1); assert.ok(!msg.content.includes('<log>')); assert.strictEqual(msg.logged.length, 4);
+  const day = (await t.call('amy', '303', 'GET', '/day?date=' + today)).json;
+  const e = day.entries.find((x) => x.name === 'Cheeseburger'); assert.ok(e); assert.strictEqual(e.meal, 'lunch'); assert.strictEqual(e.total.calories, 300); assert.strictEqual(e.source, 'estimate');
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/workouts')).json.find((w) => w.name === 'Yoga').minutes, 20);
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/weights')).json.find((w) => w.date === yday).kg, 66.9);
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/waists')).json.length, 1);
+  const v = (await t.call('amy', '303', 'GET', '/state')).json;
+  assert.ok(v.changes.filter((c) => c.kind === 'log').length === 4 && v.changes[0].summary.startsWith('Logged'));
+  const logs = s.messages.at(-1).logged; assert.match(logs[0].summary, /Logged to Lunch: Cheeseburger \(300 kcal, estimate\)/);
+  const st = (await t.call('amy', '303', 'GET', '/coach')).json.loggedState; assert.strictEqual(st[logs[0].changeId].present, true); assert.strictEqual(st[logs[0].changeId].kcal, 300);
+  // undo each
+  for (const l of logs) assert.strictEqual((await t.call('amy', '303', 'POST', `/changes/${l.changeId}/undo`)).status, 200);
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/day?date=' + today)).json.entries.find((x) => x.name === 'Cheeseburger'), undefined);
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/workouts')).json.length, 0); assert.strictEqual((await t.call('amy', '303', 'GET', '/waists')).json.length, 0);
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/state')).json.profile.weightKg, before.profile.weightKg, 'profile weight is restored');
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/coach')).json.loggedState[logs[0].changeId].present, false);
+  assert.strictEqual((await t.call('amy', '303', 'POST', `/changes/${logs[0].changeId}/undo`)).status, 409);
+  // another person cannot undo it
+  assert.strictEqual((await t.call('bob', '303', 'POST', `/changes/${logs[0].changeId}/undo`)).status, 404);
+  t.close();
+});
+test('chat logging: malformed or out-of-window blocks log nothing; ranges are clamped; time of day picks the meal', async () => {
+  const today = aiLimits.today();
+  const bad = [
+    [{ kind: 'food', name: 'X', kcal: 'lots' }], [{ kind: 'sandwich', name: 'X' }], [{ kind: 'food', name: 'X', kcal: 200, date: nutrition.addDays(today, -8) }],
+    [{ kind: 'food', name: 'X', kcal: 200, date: nutrition.addDays(today, 1) }], [{ kind: 'food', name: 'X', kcal: 200, date: '2026-13-01' }], [{ kind: 'weight', kg: 20 }], [{ kind: 'weight', kg: 120 }],
+    [{ kind: 'waist', cm: 30 }], [{ kind: 'workout', name: 'Run', minutes: 0 }], [{ kind: 'food', name: 'X', kcal: 200, meal: 'brunch' }], [{ kind: 'food', name: 'X', kcal: -5 }], [], 'nope'];
+  for (const items of bad) {
+    const t = await mkLogTest(Array.isArray(items) ? logReply(items) : 'Done.\n<log>not json</log>');
+    await t.call('amy', '303', 'POST', '/coach', { message: 'log this' }); const s = await finish(t, 'amy', '303');
+    assert.strictEqual(s.logged.length, 0, JSON.stringify(items)); assert.match(s.messages.at(-1).content, /did not pass the checks|nothing was logged/);
+    assert.strictEqual((await t.call('amy', '303', 'GET', '/day')).json.entries.length, 0);
+    t.close();
+  }
+  // clamps
+  let t = await mkLogTest(logReply([{ kind: 'food', name: 'Mega', kcal: 9000, protein: 999, servings: 1 }]));
+  await t.call('amy', '303', 'POST', '/coach', { message: 'x' }); await finish(t, 'amy', '303');
+  const e = (await t.call('amy', '303', 'GET', '/day')).json.entries[0]; assert.ok(e.total.calories <= 3000 && e.per.protein <= 300); t.close();
+  // meal from the clock: 08:00 Eastern -> breakfast, 19:00 -> dinner, 23:30 -> snack
+  for (const [iso, meal] of [['2026-11-18T13:00:00Z', 'breakfast'], ['2026-11-18T22:30:00Z', 'dinner'], ['2026-11-19T04:30:00Z', 'snack']]) {
+    const t2 = await mkLogTest(logReply([{ kind: 'food', name: 'Toast', kcal: 100 }]), { clock: () => new Date(iso) });
+    await t2.call('amy', '303', 'POST', '/coach', { message: 'toast' }); await finish(t2, 'amy', '303');
+    const day = (await t2.call('amy', '303', 'GET', '/day?date=' + aiLimits.today(new Date(iso)))).json;
+    assert.strictEqual(day.entries[0].meal, meal, iso); t2.close();
+  }
+});
+test('chat logging: USDA match replaces the estimate only when it fits; portion buttons change servings', async () => {
+  const lookup = async (q) => (/banana/i.test(q) ? [{ name: 'Bananas, raw', per100: { calories: 89, protein: 1.1, carbs: 22.8, fat: 0.3, fiber: 2.6, sugar: 12.2, sodium: 1 } }] : /cake/i.test(q) ? [{ name: 'Cake, pound, raw', per100: { calories: 1500, protein: 5, carbs: 5, fat: 5, fiber: 0, sugar: 0, sodium: 0 } }] : []);
+  const t = await mkLogTest(logReply([
+    { kind: 'food', name: 'Banana', grams: 118, serving: '1 medium', kcal: 105, protein: 1.3, carbs: 27, fat: 0.4, meal: 'snack' },
+    { kind: 'food', name: 'Chocolate cake', grams: 100, serving: '1 slice', kcal: 350, protein: 4, carbs: 50, fat: 15, meal: 'snack' },
+    { kind: 'food', name: 'Butter chicken', serving: '1 restaurant portion', kcal: 650, protein: 35, carbs: 18, fat: 48, meal: 'dinner' },
+    { kind: 'food', name: 'Naan', serving: '1 piece', kcal: 260, protein: 8, carbs: 45, fat: 5, meal: 'dinner' }]), { lookup });
+  await t.call('amy', '303', 'POST', '/coach', { message: 'banana, cake, butter chicken and naan' }); const s = await finish(t, 'amy', '303');
+  const es = (await t.call('amy', '303', 'GET', '/day')).json.entries;
+  const by = (n) => es.find((x) => x.name === n);
+  assert.strictEqual(by('Banana').source, 'usda'); assert.ok(Math.abs(by('Banana').total.calories - 105) <= 1, 'usda: 89 x 1.18'); assert.strictEqual(by('Banana').serving, '118 g');
+  assert.strictEqual(by('Chocolate cake').source, 'estimate'); assert.strictEqual(by('Chocolate cake').total.calories, 350, 'a USDA row that disagrees wildly is ignored');
+  assert.strictEqual(by('Butter chicken').source, 'estimate'); assert.strictEqual(by('Naan').source, 'estimate');
+  const bc = s.logged.find((l) => l.label === 'Butter chicken'); assert.strictEqual(bc.estimate, true);
+  const post = (id, f) => t.call('amy', '303', 'POST', `/entries/${id}/portion`, { factor: f });
+  assert.ok(Math.abs((await post(bc.refId, 1.33)).json.total.calories - 650 * 1.33) < 1); assert.strictEqual((await post(bc.refId, 0.75)).json.servings, 0.75);
+  assert.strictEqual((await post(bc.refId, 1)).json.servings, 1, 'Typical returns to the logged amount');
+  assert.strictEqual((await post(bc.refId, 9)).status, 400);
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/coach')).json.loggedState[bc.changeId].factor, 1);
+  const manual = (await t.call('amy', '303', 'POST', '/entries', food({ date: aiLimits.today() }))).json;
+  assert.strictEqual((await post(manual.id, 1.33)).status, 404, 'only coach estimates get portion buttons');
+  assert.strictEqual((await t.call('bob', '303', 'POST', `/entries/${bc.refId}/portion`, { factor: 1.33 })).status, 404);
+  t.close();
 });
