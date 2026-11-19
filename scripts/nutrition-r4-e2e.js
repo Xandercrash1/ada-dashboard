@@ -111,7 +111,7 @@ const text = (page) => page.textContent('#nutrition-root');
   await page.click('[data-act="tab"][data-tab="profile"]'); await page.waitForTimeout(800);
   const rateOpts = await page.locator('#pf-rate option').allTextContents();
   ok(!rateOpts.some((o) => /^2 lb/.test(o)) && /max for you/.test(await text(page)), 'Profile pace list stops at the safe cap', rateOpts.join('|'));
-  ok(/Nutrition 1\.0\.1/.test(await text(page)), 'version label 1.0.1 at the foot of Profile');
+  ok(/Nutrition 1\.0\.2/.test(await text(page)), 'version label 1.0.2 at the foot of Profile');
   await shot(page, 'profile-390'); ok(await noH(page), 'profile: no horizontal scroll');
   const pr = await api('PUT', '/api/nutrition/profile', { goal: 'lose', rateKgPerWeek: 1 });
   ok(pr.status === 400 && /safe pace/.test(pr.json.error), 'API refuses a faster-than-safe pace', JSON.stringify(pr.json));

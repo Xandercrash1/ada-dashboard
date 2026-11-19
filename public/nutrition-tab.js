@@ -36,7 +36,7 @@
   const input = 'w-full rounded-xl border border-gray-300 dark:border-white/10 bg-transparent px-3 py-2.5 text-base min-h-[44px] focus:outline-none focus:ring-2 focus:ring-indigo-500';
   const label = 'block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1';
 
-  const S = { tab: 'today', date: null, day: null, profile: null, targets: null, computed: null, hist: null, coach: null, plans: [], foods: [], limit: null, busy: false, sheet: null, err: '', msg: '', openPlan: null, loaded: false, view: null, wiz: null, ws: null, gs: null, dayWorkouts: [], lastChanges: [], jobKind: null, autoTried: false, skipSetup: false, autoRev: false, help: {}, more: {} };
+  const S = { tab: 'today', date: null, day: null, profile: null, targets: null, computed: null, hist: null, coach: null, plans: [], foods: [], limit: null, busy: false, sheet: null, err: '', msg: '', openPlan: null, loaded: false, view: null, wiz: null, ws: null, gs: null, dayWorkouts: [], lastChanges: [], jobKind: null, autoTried: false, skipSetup: false, autoRev: false, help: {}, more: {}, nutOpen: null };
 
   const r0 = (n) => Math.round(n);
   const r1 = (n) => Math.round(n * 10) / 10;
@@ -101,6 +101,19 @@
   }
 
   // ------------------------------------------------------------ Today
+  // Tap a bar to see which foods made up the day's total, largest first.
+  function breakdownHtml(k) {
+    if (S.nutOpen !== k || !S.day || !S.day.breakdown) return '';
+    const n = NUTS.find((x) => x.k === k), rows = S.day.breakdown[k] || [];
+    const unit = n.unit;
+    const list = rows.length ? `<ul class="divide-y divide-gray-200 dark:divide-white/10">${rows.slice(0, 15).map((r) => `<li class="py-1.5 flex items-start justify-between gap-3"><span class="min-w-0"><span class="block text-sm truncate">${esc(r.name)}</span><span class="block text-xs text-gray-500 dark:text-gray-400">${esc(r.servings)} × ${esc(r.serving || 'serving')} · ${esc({ breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' }[r.meal] || '')}</span></span><span class="shrink-0 text-right"><span class="block text-sm font-medium">${fmt(r.amount, k)} ${unit}</span><span class="block text-xs text-gray-500 dark:text-gray-400">${r.share}% of today</span></span></li>`).join('')}</ul>${rows.length > 15 ? `<p class="text-xs text-gray-500">and ${rows.length - 15} more</p>` : ''}` : `<p class="text-sm text-gray-500 dark:text-gray-400">Nothing logged with ${esc(n.label.toLowerCase())} yet.</p>`;
+    const ks = S.day.breakdown.kcalShare && S.day.breakdown.kcalShare[k];
+    const per = { protein: 4, carbs: 4, fat: 9 }[k];
+    const calLine = ks ? `<p class="text-sm mt-2">${esc(n.label)}: ${fmt(ks.grams, k)} g × ${per} kcal = ${fmt(ks.kcal)} kcal, which is <b>${ks.pct}%</b> of today's calories.</p><p class="text-xs text-gray-500 dark:text-gray-400">Fat has 9 kcal per gram, while protein and carbs have 4. That is why fat can be a small share of the grams and a bigger share of the calories.</p>` : '';
+    return `<div class="mt-2 rounded-xl bg-black/5 dark:bg-white/5 p-3" data-breakdown="${k}"><div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Where today's ${esc(n.label.toLowerCase())} came from</div>${list}${calLine}</div>`;
+  }
+  const nutBtn = (k, inner, cls) => `<div role="button" tabindex="0" data-act="nut" data-k="${k}" aria-expanded="${S.nutOpen === k}" aria-label="Show where today's ${k} came from" class="cursor-pointer ${cls || ''}">${inner}</div>`;
+
   function renderToday() {
     const d = S.day, t = S.targets;
     const tot = d ? d.totals : {};
@@ -115,17 +128,17 @@
     const macroRow = (k) => {
       const n = NUTS.find((x) => x.k === k);
       const tv = t ? t[k] : 0;
-      return `<div><div class="flex justify-between text-sm mb-1"><span class="font-medium">${n.label}</span><span class="text-gray-500 dark:text-gray-400">${fmt(tot[k] || 0, k)}${tv ? ' / ' + fmt(tv, k) : ''} ${n.unit}</span></div>${bar(k, tot[k] || 0, tv)}</div>`;
+      return `<div>${nutBtn(k, `<div class="flex justify-between text-sm mb-1"><span class="font-medium">${n.label} <i class="fa-solid fa-chevron-${S.nutOpen === k ? 'up' : 'down'} text-[10px] text-gray-400"></i></span><span class="text-gray-500 dark:text-gray-400">${fmt(tot[k] || 0, k)}${tv ? ' / ' + fmt(tv, k) : ''} ${n.unit}</span></div>${bar(k, tot[k] || 0, tv)}`, 'py-1')}${breakdownHtml(k)}</div>`;
     };
     const extras = ['fiber', 'sugar', 'sodium'].map((k) => {
       const n = NUTS.find((x) => x.k === k); const tv = t ? t[k] : 0;
-      return `<div><div class="flex justify-between text-xs mb-1 text-gray-500 dark:text-gray-400"><span>${n.label}${n.limit ? ' (limit)' : ''}</span><span>${fmt(tot[k] || 0, k)}${tv ? ' / ' + fmt(tv, k) : ''} ${n.unit}</span></div>${bar(k, tot[k] || 0, tv, 'h-1.5')}</div>`;
+      return `<div>${nutBtn(k, `<div class="flex justify-between text-xs mb-1 text-gray-500 dark:text-gray-400"><span>${n.label}${n.limit ? ' (limit)' : ''} <i class="fa-solid fa-chevron-${S.nutOpen === k ? 'up' : 'down'} text-[9px]"></i></span><span>${fmt(tot[k] || 0, k)}${tv ? ' / ' + fmt(tv, k) : ''} ${n.unit}</span></div>${bar(k, tot[k] || 0, tv, 'h-1.5')}`, 'py-1.5')}${breakdownHtml(k)}</div>`;
     }).join('');
     const summary = `<div class="${card} p-4 space-y-4">
-      <div class="flex items-center gap-4">${ring}
+      <div role="button" tabindex="0" data-act="nut" data-k="calories" aria-expanded="${S.nutOpen === 'calories'}" aria-label="Show where today's calories came from" class="flex items-center gap-4 cursor-pointer">${ring}
         <div class="min-w-0"><div class="text-sm text-gray-500 dark:text-gray-400">${t && t.calories ? 'Target ' + fmt(t.calories) + ' kcal' : 'No target yet'}</div>
         <div class="text-2xl font-bold ${left !== null && left < 0 ? 'text-rose-500' : ''}">${left === null ? '&nbsp;' : (left >= 0 ? fmt(left) + ' left' : fmt(-left) + ' over')}</div>
-        ${t ? '' : '<button data-act="goto" data-tab="profile" class="mt-1 text-sm text-indigo-500 underline">Set up your profile to get targets</button>'}</div></div>
+        ${t ? '' : '<button data-act="goto" data-tab="profile" class="mt-1 text-sm text-indigo-500 underline">Set up your profile to get targets</button>'}${t ? `<div class="mt-1 text-xs text-indigo-500">${S.nutOpen === 'calories' ? 'Hide' : 'Tap for where it came from'}</div>` : ''}</div></div>${breakdownHtml('calories')}
       <div class="grid gap-3">${['protein', 'carbs', 'fat'].map(macroRow).join('')}</div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-gray-200 dark:border-white/10">${extras}</div></div>`;
     const meals = MEALS.map(([m, name, icon]) => {
@@ -754,7 +767,7 @@
     else if (S.tab === 'plan') body = renderPlan();
     else if (S.tab === 'history') body = renderHistory();
     else if (S.tab === 'coach') body = renderCoach();
-    else body = renderProfile() + `<p class="text-center text-xs text-gray-400 dark:text-gray-500 pt-2">Nutrition ${esc((S.view && S.view.version) || '1.0.1')}</p>`;
+    else body = renderProfile() + `<p class="text-center text-xs text-gray-400 dark:text-gray-500 pt-2">Nutrition ${esc((S.view && S.view.version) || '1.0.2')}</p>`;
     const ta = document.getElementById('nut-input'); const draft = ta ? ta.value : '';
     el.innerHTML = `<div class="max-w-2xl mx-auto space-y-4 pb-24 md:pb-8">${nav}${note('err')}${note('msg')}${body}</div>${sheetHtml()}${goalSheetHtml()}${workoutSheetHtml()}`;
     const ta2 = document.getElementById('nut-input'); if (ta2 && draft) ta2.value = draft;
@@ -780,6 +793,7 @@
       else api('/api/nutrition/workouts?from=' + date + '&to=' + date).then((ws) => { const w = ws.find((x) => x.id === id); if (w) openWorkout({ workout: w }); }).catch((er) => { S.err = er.message; render(); });
       return;
     }
+    if (a === 'nut') { S.nutOpen = S.nutOpen === t.dataset.k ? null : t.dataset.k; return render(); }
     if (a === 'help') { S.help[t.dataset.k] = !S.help[t.dataset.k]; return render(); }
     if (a === 'more') { S.more[t.dataset.k] = !S.more[t.dataset.k]; return render(); }
     if (a === 'del-waist') { api('/api/nutrition/waists/' + t.dataset.id, { method: 'DELETE' }).then(async () => { await refreshView(); return loadHistory(); }).catch((e) => { S.err = e.message; render(); }); return; }
@@ -844,6 +858,7 @@
     setPath(S.sheet, f, v);
   }
   function onKey(ev) {
+    if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.getAttribute && ev.target.getAttribute('role') === 'button' && ev.target.dataset.act === 'nut') { ev.preventDefault(); S.nutOpen = S.nutOpen === ev.target.dataset.k ? null : ev.target.dataset.k; render(); return; }
     if (ev.key === 'Enter' && ev.target.id === 'wz-chatin') { ev.preventDefault(); wizSend(); }
     if (ev.key === 'Enter' && ev.target.id === 'nf-q') { ev.preventDefault(); doSearch(); }
     if (ev.key === 'Enter' && !ev.shiftKey && ev.target.id === 'nut-input' && window.matchMedia('(min-width: 768px)').matches) { ev.preventDefault(); const v = ev.target.value; ev.target.value = ''; sendCoach(v); }

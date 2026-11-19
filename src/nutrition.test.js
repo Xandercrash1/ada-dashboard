@@ -651,7 +651,7 @@ test('plan text is never cut mid-sentence below 6000 characters', async () => {
   await t.call('amy', '303', 'PUT', '/setup', sBody({ goals: [{ type: 'general_health' }] })); await finish(t, 'amy', '303');
   const v = (await t.call('amy', '303', 'GET', '/state')).json;
   assert.strictEqual(v.review.summary.length, long.trim().length);
-  assert.strictEqual(v.version, '1.0.1');
+  assert.strictEqual(v.version, '1.0.2');
   t.close();
 });
 test('backward compatible: a round-2-shaped file (no waists, no new fields, fast pace) still works', async () => {
@@ -774,4 +774,50 @@ test('chat logging: USDA match replaces the estimate only when it fits; portion 
   assert.strictEqual((await post(manual.id, 1.33)).status, 404, 'only coach estimates get portion buttons');
   assert.strictEqual((await t.call('bob', '303', 'POST', `/entries/${bc.refId}/portion`, { factor: 1.33 })).status, 404);
   t.close();
+});
+
+// ================= 1.0.2: the page states the totals; where a nutrient came from
+test('breakdown: foods largest first with shares, calories from protein/carbs/fat at 4/4/9 kcal per gram', async () => {
+  const t = await setup();
+  const today = aiLimits.today();
+  await t.call('amy', '303', 'POST', '/entries', food({ date: today, name: 'Chicken', servings: 2, per: { calories: 200, protein: 30, carbs: 0, fat: 5 } }));
+  await t.call('amy', '303', 'POST', '/entries', food({ date: today, name: 'Rice', servings: 1, per: { calories: 200, protein: 4, carbs: 44, fat: 1 } }));
+  await t.call('amy', '303', 'POST', '/entries', food({ date: today, name: 'Oil', servings: 1, per: { calories: 120, protein: 0, carbs: 0, fat: 14 } }));
+  const d = (await t.call('amy', '303', 'GET', '/day?date=' + today)).json, b = d.breakdown;
+  assert.deepStrictEqual(b.protein.map((r) => r.name), ['Chicken', 'Rice']);
+  assert.strictEqual(b.protein[0].amount, 60); assert.ok(Math.abs(b.protein[0].share + b.protein[1].share - 100) < 0.2);
+  assert.strictEqual(b.protein[0].share, Math.round(60 / 64 * 1000) / 10);
+  assert.deepStrictEqual(b.fat.map((r) => r.name), ['Oil', 'Chicken', 'Rice']);
+  assert.deepStrictEqual(b.carbs.map((r) => r.name), ['Rice']);
+  assert.deepStrictEqual(b.sodium, [], 'foods with none of it are left out');
+  const ks = b.kcalShare, cal = d.totals.calories;
+  assert.strictEqual(ks.protein.kcal, 64 * 4); assert.strictEqual(ks.carbs.kcal, 44 * 4); assert.strictEqual(ks.fat.kcal, (10 + 1 + 14) * 9);
+  assert.strictEqual(ks.fat.pct, Math.round(((10 + 1 + 14) * 9 / cal) * 100));
+  assert.strictEqual(b.calories.reduce((a, r) => a + r.amount, 0), cal);
+  const empty = (await t.call('amy', '303', 'GET', '/day?date=' + nutrition.addDays(today, -2))).json.breakdown;
+  assert.strictEqual(empty.kcalShare, null); assert.deepStrictEqual(empty.protein, []);
+  assert.strictEqual((await t.call('bob', '303', 'GET', '/day?date=' + today)).json.breakdown.protein.length, 0, 'private');
+  t.close();
+});
+test('after a log the page states the day totals, not the model; context carries exact totals; prompt forbids adding up', async () => {
+  const seen = [];
+  const today = aiLimits.today(), yday = nutrition.addDays(today, -1);
+  const t = await mkLogTest(async (x) => { seen.push(x); return logReply([{ kind: 'food', name: 'Egg', serving: '1 egg', servings: 2, kcal: 70, protein: 6.3, carbs: 0.4, fat: 5, meal: 'breakfast' }, { kind: 'food', name: 'Toast', kcal: 80, protein: 3, carbs: 14, fat: 1, date: yday }], 'Logged 2 eggs. Your protein is now 11 g.'); });
+  await t.call('amy', '303', 'POST', '/entries', food({ date: today, name: 'Yogurt', servings: 1, per: { calories: 150, protein: 0.4, carbs: 10, fat: 2 } }));
+  await t.call('amy', '303', 'POST', '/coach', { message: 'I had two eggs' }); const s = await finish(t, 'amy', '303');
+  const msg = s.messages.at(-1).content;
+  const d = (await t.call('amy', '303', 'GET', '/day?date=' + today)).json, y = (await t.call('amy', '303', 'GET', '/day?date=' + yday)).json;
+  assert.ok(msg.includes(`**Today now:** ${Math.round(d.totals.calories)} kcal eaten of`), msg);
+  assert.ok(msg.includes(`protein ${Math.round(d.totals.protein)} of`), 'server protein ' + d.totals.protein + ': ' + msg);
+  assert.ok(msg.includes(`**${yday} now:** ${Math.round(y.totals.calories)} kcal eaten`), 'a second line for the other day');
+  assert.match(msg, /left\)|over\)/); assert.match(msg, /kcal (under|over) your daily burn/);
+  const chat = seen.find((x) => x.kind === 'chat');
+  assert.match(chat.system, /TODAY'S TOTALS \(exact figures from the page/); assert.match(chat.system, /never add up foods or totals yourself/);
+  assert.match(chat.system, /do not state the day's running totals at all/);
+  assert.match(chat.system, new RegExp(`Today now: ${Math.round(d.totals.calories - 140)} kcal eaten`), 'context has the totals before this turn');
+  // weight only: no totals line
+  const t2 = await mkLogTest(logReply([{ kind: 'weight', kg: 89.5 }]));
+  await t2.call('amy', '303', 'POST', '/coach', { message: 'weighed 197' }); const s2 = await finish(t2, 'amy', '303');
+  assert.ok(!s2.messages.at(-1).content.includes('now:'), 'no totals line when only weight was logged');
+  t.close(); t2.close();
 });
