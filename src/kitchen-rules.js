@@ -31,7 +31,8 @@ const SHELF = {
   fruit:       { fridge: 10,  pantry: 4,    freezer: 240, label: 'Fruit' },
   roots:       { pantry: 30,  fridge: 30,   label: 'Potatoes, onions, garlic, squash' },
   bread:       { pantry: 5,   freezer: 90,  fridge: 10, label: 'Bread and baked goods' },
-  condiment:   { fridge: 180, pantry: 365,  label: 'Condiments and sauces' },
+  dips:        { fridge: 7,   freezer: 60,  label: 'Dips, spreads, fresh salsa, prepared salads' },
+  condiment:   { fridge: 180, pantry: 365,  label: 'Condiments and sauces (shelf-stable)' },
   dry:         { pantry: 365, label: 'Dry goods: pasta, rice, flour, beans, cereal' },
   canned:      { pantry: 730, label: 'Canned and jarred (unopened)' },
   frozen:      { freezer: 240, label: 'Frozen foods' },
@@ -42,10 +43,10 @@ const CATEGORIES = Object.keys(SHELF);
 
 // Keyword guesses for items typed in by hand (the assistant sends its own category).
 const GUESS = [
-  ['poultry', /\b(chicken|turkey|duck)\b/], ['ground_meat', /\b(ground|mince|burger patt)/],
+  ['ground_meat', /\b(ground|mince[d]?|hamburgers?|burgers?|burger patt\w*|meatballs?)\b/], ['poultry', /\b(chicken|turkey|duck|wings?|drumsticks?|cornish hen)\b/],
   ['deli', /\b(bacon|ham|salami|pepperoni|hot ?dogs?|deli|sausage|prosciutto)\b/],
   ['fish', /\b(salmon|tuna steak|cod|tilapia|shrimp|fish|scallops?|crab|lobster)\b/],
-  ['meat', /\b(steak|beef|pork|lamb|chops?|roast|ribs|veal)\b/],
+  ['meat', /\b(steaks?|beef|pork|lamb|chops?|roasts?|ribs|veal|sirloin|ribeye|rib eye|tenderloin|brisket|filet mignon|flank|strip|t-bone|chuck|tri-tip|loin)\b/],
   ['leftovers', /\b(leftovers?|cooked)\b/], ['eggs', /\beggs?\b/], ['butter', /\bbutter\b/],
   ['milk', /\b(milk|cream|half and half)\b/], ['yogurt', /\b(yogh?urt|sour cream|cottage)\b/],
   ['cheese_hard', /\b(cheddar|parmesan|parmigiano|swiss|gouda|provolone|pecorino)\b/],
@@ -56,15 +57,20 @@ const GUESS = [
   ['produce', /\b(carrots?|broccoli|peppers?|tomato(es)?|cucumbers?|zucchini|celery|mushrooms?|cabbage|cauliflower|corn|beans? sprouts|asparagus|green beans)\b/],
   ['bread', /\b(bread|bagels?|tortillas?|buns?|rolls?|muffins?|pita)\b/],
   ['canned', /\b(canned|can of|tin of|jar of)\b/],
+  ['dips', /\b(hummus|guacamole|guac|pesto|tzatziki|dip|pico de gallo|fresh salsa|coleslaw|potato salad|chicken salad|tuna salad|egg salad|pasta salad)\b/],
   ['condiment', /\b(ketchup|mustard|mayo|mayonnaise|sauce|salsa|dressing|vinegar|soy|jam|honey|syrup|oil)\b/],
   ['dry', /\b(rice|pasta|spaghetti|noodles|flour|sugar|oats|cereal|lentils|quinoa|beans|crackers|chips)\b/],
   ['drink', /\b(juice|soda|beer|wine|seltzer|water)\b/],
 ];
-function guessCategory(name, unit) {
+// Keyword guess. `extra` = approved keywords from the household's library ([{ word, category }]), checked first,
+// longest match wins. Returns null when nothing matches (the caller then asks the model, or falls back to 'other').
+function guessCategory(name, unit, extra = []) {
   const n = String(name || '').toLowerCase();
+  const hit = extra.filter((k) => k && CATEGORIES.includes(k.category) && new RegExp(`\\b${String(k.word).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(n)).sort((a, b) => b.word.length - a.word.length)[0];
+  if (hit) return hit.category;
   if (/^(cans?|jars?|tins?)$/.test(String(unit || '').trim().toLowerCase()) && !/\b(sauce|salsa|jam|mustard|mayo)\b/.test(n)) return 'canned';
   for (const [c, re] of GUESS) if (re.test(n)) return c;
-  return 'other';
+  return null;
 }
 const defaultLocation = (category) => Object.keys(SHELF[category] || SHELF.other).find((k) => LOCATIONS.includes(k));
 

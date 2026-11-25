@@ -21,7 +21,9 @@ test('category guesses', () => {
   assert.strictEqual(R.guessCategory('Pork chops'), 'meat');
   assert.strictEqual(R.guessCategory('Baby spinach'), 'leafy');
   assert.strictEqual(R.guessCategory('Spaghetti'), 'dry');
-  assert.strictEqual(R.guessCategory('Mystery box'), 'other');
+  assert.strictEqual(R.guessCategory('Mystery box'), null);   // no match: the caller asks the model
+  assert.strictEqual(R.guessCategory('Hamburger'), 'ground_meat');
+  assert.strictEqual(R.guessCategory('Kimchi', '', [{ word: 'kimchi', category: 'condiment' }]), 'condiment');
   assert.strictEqual(R.guessCategory('Crushed tomatoes', 'can'), 'canned');
 });
 test('units and names', () => {
@@ -151,5 +153,51 @@ test('assistant: block applied by the server, a cook with something missing turn
     st = await wait();
     assert.match(seen[2], /WAITING ON THEM/);
     assert.strictEqual(st.view.items.length, 0);   // beef, spaghetti and the can all used up
+  } finally { s.close(); }
+});
+
+test('0.1.1: model only when no date and no keyword; late answers land; fixes logged; review suggests, approve adds a keyword', async () => {
+  const asked = [];
+  let slow = false;
+  const { s, call, dataDir } = server({
+    classifyWaitMs: 50,
+    classify: async (name) => { asked.push(name); if (slow) await new Promise((ok) => setTimeout(ok, 150)); return { category: name === 'Kimchi' ? 'condiment' : 'produce', confidence: 'high', model: 'fake' }; },
+    propose: async (list) => list.map((x) => (x.name === 'Bulgogi strips' ? 'bulgogi' : null)),
+  });
+  const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  try {
+    let r = await call('POST', '/items', { name: 'Chicken', qty: 1, unit: 'lb' });
+    assert.strictEqual(r.body.item.category, 'poultry'); assert.strictEqual(r.body.item.typeSource, 'keyword');
+    r = await call('POST', '/items', { name: 'Mystery jar', qty: 1, unit: '', expiresOn: '2026-12-31' });
+    assert.deepStrictEqual(asked, []);   // a package date means no model call
+    r = await call('POST', '/items', { name: 'Kimchi', qty: 1, unit: '' });
+    assert.deepStrictEqual(asked, ['Kimchi']);
+    assert.strictEqual(r.body.item.category, 'condiment'); assert.strictEqual(r.body.item.typeSource, 'ai');
+    slow = true;
+    r = await call('POST', '/items', { name: 'Jicama', qty: 1, unit: '' });
+    assert.strictEqual(r.body.item.typeSource, 'pending'); assert.strictEqual(r.body.item.category, 'other');
+    await wait(250);
+    const jic = (await call('GET', '/state')).body.items.find((i) => i.name === 'Jicama');
+    assert.strictEqual(jic.category, 'produce'); assert.strictEqual(jic.typeSource, 'ai');
+    // a hand fix
+    r = await call('POST', '/items', { name: 'Bulgogi strips', qty: 1, unit: 'lb' });
+    const id = r.body.item.id;
+    await call('PATCH', `/items/${id}`, { category: 'meat' });
+    const dec = JSON.parse(fs.readFileSync(path.join(dataDir, 'kitchen', 'decisions.json'), 'utf8'));
+    assert.ok(dec.some((d) => d.source === 'fix' && d.name === 'Bulgogi strips' && d.category === 'meat'));
+    // review: Bulgogi via the model's word, Kimchi and Jicama as short names
+    r = await call('POST', '/keywords/review');
+    assert.ok(r.body.added >= 2);
+    let st = (await call('GET', '/state')).body;
+    const bul = st.suggestions.find((x) => x.word === 'bulgogi');
+    assert.strictEqual(bul.category, 'meat'); assert.match(bul.why, /changed "Bulgogi strips"/);
+    assert.strictEqual((await call('GET', '/state', null, { 'x-user': 'paige', 'x-role': '303' })).body.suggestions.length, 0);   // admin only
+    assert.strictEqual((await call('POST', `/keywords/suggestions/${bul.id}`, { action: 'add' }, { 'x-user': 'paige', 'x-role': '303' })).status, 403);
+    await call('POST', `/keywords/suggestions/${bul.id}`, { action: 'add' });
+    asked.length = 0;
+    r = await call('POST', '/items', { name: 'Bulgogi marinated', qty: 1, unit: 'lb' });
+    assert.strictEqual(r.body.item.category, 'meat'); assert.strictEqual(r.body.item.typeSource, 'keyword');
+    assert.deepStrictEqual(asked, []);
+    assert.strictEqual((await call('POST', '/keywords/review')).body.added, 0);   // nothing new since
   } finally { s.close(); }
 });

@@ -37,7 +37,7 @@
     if (it.status === 'none') return '<span class="text-xs text-gray-400">keeps</span>';
     const [cls, txt] = it.status === 'expired' ? ['bg-rose-500/15 text-rose-500', d === -1 ? 'expired' : `expired ${-d} days ago`]
       : it.status === 'today' ? ['bg-rose-500/15 text-rose-500', 'last day']
-        : it.status === 'soon' ? ['bg-amber-500/15 text-amber-600 dark:text-amber-400', d === 1 ? 'good through tomorrow' : `${d} more days`]
+        : it.status === 'soon' ? ['bg-amber-500/15 text-amber-600 dark:text-amber-400', d === 1 ? '1 more day' : `${d} more days`]
           : it.status === 'week' ? ['bg-yellow-500/10 text-yellow-700 dark:text-yellow-300', `${d} days left`]
             : ['bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', d > 60 ? `${Math.round(d / 30)} months` : `${d} days`];
     return `<span class="text-xs font-semibold rounded-full px-2 py-0.5 whitespace-nowrap ${cls}" title="Good through ${esc(it.expiresOn)}${it.expirySource === 'label' ? ' (package date)' : ' (estimated)'}">${txt}</span>`;
@@ -113,6 +113,9 @@
         <button class="${ghost} w-full" data-act="ask" data-q="What can I make tonight that uses up the things about to go bad?"><i class="fa-solid fa-wand-magic-sparkles"></i> Ideas to use these up</button>` : ''}
         ${v.alerts.low.length ? `<h3 class="font-semibold mt-3 mb-1"><i class="fa-solid fa-battery-quarter text-rose-500"></i> Running low</h3><ul class="space-y-1">${v.alerts.low.map((i) => `<li class="text-sm">${esc(i.name)} <span class="text-gray-500">${amount(i.qty, i.unit)} left</span></li>`).join('')}</ul>` : ''}</div>`);
     }
+    if (v.suggestions && v.suggestions.length) out.push(`<div class="${card} border-indigo-500/30"><h3 class="font-semibold mb-1"><i class="fa-solid fa-lightbulb text-indigo-500"></i> Suggested keywords</h3><p class="text-xs text-gray-500 mb-2">Adding one means items with that word get the right date without asking the AI.</p>
+      <ul class="space-y-2">${v.suggestions.map((x) => `<li class="rounded-xl bg-black/5 dark:bg-white/5 p-2"><div class="text-sm"><b>${esc(x.word)}</b> → ${esc(x.label)}</div><div class="text-xs text-gray-500">${esc(x.why)}</div>
+        <div class="grid grid-cols-2 gap-2 mt-2"><button class="${primary} !min-h-[40px]" data-act="kw" data-id="${x.id}" data-do="add">Add</button><button class="${ghost} !min-h-[40px]" data-act="kw" data-id="${x.id}" data-do="skip">Skip</button></div></li>`).join('')}</ul></div>`);
     out.push(`<button class="${primary} w-full" data-act="add-open">${S.addOpen ? 'Close' : '<i class="fa-solid fa-plus"></i> Add food'}</button>`);
     if (S.addOpen) out.push(`<form class="${card} space-y-2" data-form="item">
       <input name="name" class="${input}" placeholder="What is it? (e.g. Chicken thighs)" maxlength="80" required>
@@ -133,9 +136,10 @@
   }
   function itemRow(i) {
     const open = S.editId === i.id;
-    return `<li class="py-2"><button class="w-full flex items-center justify-between gap-2 text-left min-h-[40px]" data-act="item-open" data-id="${i.id}"><span class="min-w-0"><span class="font-medium">${esc(i.name)}</span> <span class="text-sm text-gray-500">${amount(i.qty, i.unit)}</span>${i.low ? ' <i class="fa-solid fa-battery-quarter text-rose-500" title="Running low"></i>' : ''}</span>${badge(i)}</button>
+    return `<li class="py-2"><button class="w-full flex items-center justify-between gap-2 text-left min-h-[40px]" data-act="item-open" data-id="${i.id}"><span class="min-w-0"><span class="font-medium">${esc(i.name)}</span> <span class="text-sm text-gray-500">${amount(i.qty, i.unit)}</span>${i.low ? ' <i class="fa-solid fa-battery-quarter text-rose-500" title="Running low"></i>' : ''}${i.typeSource === 'default' || (i.typeSource === 'ai' && i.typeConfidence === 'low') ? ' <span class="text-[11px] text-amber-600 dark:text-amber-400">check the type</span>' : i.typeSource === 'pending' ? ' <i class="fa-solid fa-spinner fa-spin text-gray-400 text-xs" title="Working out the type"></i>' : ''}</span>${badge(i)}</button>
       ${open ? `<div class="mt-2 space-y-2"><div class="flex gap-2"><input id="kit-use-${i.id}" type="number" step="any" min="0" value="${i.qty <= 1 ? qty(i.qty) : 1}" class="${input} !w-24" aria-label="Amount used"><button class="${ghost} flex-1" data-act="item-use" data-id="${i.id}">Used this much</button></div>
         <div class="grid grid-cols-3 gap-2">${PLACES.filter(([k]) => k !== i.location).map(([k, n]) => `<button class="${ghost}" data-act="item-move" data-id="${i.id}" data-to="${k}">To ${n.toLowerCase()}</button>`).join('')}<button class="${ghost} text-rose-500" data-act="item-del" data-id="${i.id}">${i.status === 'expired' ? 'Toss' : 'Remove'}</button></div>
+        <label class="block text-xs text-gray-500">Type of food${i.typeSource === 'pending' ? ' (still working it out…)' : i.typeSource === 'ai' ? ' (guessed by AI)' : i.typeSource === 'default' ? ' (no match, please pick)' : ''}<select data-type-for="${i.id}" class="${input} mt-1">${S.v.types.map((t) => `<option value="${t.id}" ${t.id === i.category ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select></label>
         <p class="text-xs text-gray-500">In the ${esc(i.location)} since ${esc(i.placedOn || i.addedOn)}${i.expiresOn ? `, good through ${esc(i.expiresOn)} (${i.expirySource === 'label' ? 'package date' : 'estimated'}); expired the day after` : ''}.</p></div>` : ''}</li>`;
   }
 
@@ -235,6 +239,7 @@
     else if (a === 'ask' || a === 'chip') { const q = t.dataset.q; if (q.endsWith(': ')) { S.tab = 'assistant'; render(); loadChat(); const ta = document.getElementById('kit-input'); if (ta) { ta.value = q; ta.focus(); } } else { loadChat().then(() => send(q)); } }
     else if (a === 'chat-clear') run(api('/assistant', { method: 'DELETE' })).then(() => { S.chat = []; render(); });
     else if (a === 'cook') openCook(id, t.dataset.plan || null);
+    else if (a === 'kw') run(api(`/keywords/suggestions/${id}`, { method: 'POST', body: { action: t.dataset.do } }), t.dataset.do === 'add' ? 'Keyword added.' : 'Skipped.');
     else if (a === 'cook-close' || a === 'cook-close-bg') { S.cook = null; render(); }
     else if (a === 'res-bought') { const m = askList()[Number(t.dataset.i)]; S.cook.resolve[m.ingredient] = { bought: m.short != null ? m.short : (m.qty || 1), unit: m.unit || '' }; render(); }
     else if (a === 'res-skip') { const m = askList()[Number(t.dataset.i)]; S.cook.resolve[m.ingredient] = 'skip'; render(); }
@@ -249,6 +254,7 @@
   }
   function onInput(ev) {
     const t = ev.target;
+    if (t.dataset.typeFor && ev.type === 'change') { const lab = (S.v.types.find((x) => x.id === t.value) || {}).label; run(api(`/items/${t.dataset.typeFor}`, { method: 'PATCH', body: { category: t.value } }), `Changed to ${lab}; its date was worked out again. Thanks, that helps the keyword list learn.`); return; }
     if (t.dataset.cookScale) { S.cook.scale = Math.max(0.25, Number(t.value) || 1); if (ev.type === 'change') rePreview(); }
     if (t.dataset.resQty != null) { const m = askList()[Number(t.dataset.resQty)]; S.cook.resolve[m.ingredient].bought = Number(t.value) || 0; }
     if (t.dataset.resUnit != null) { const m = askList()[Number(t.dataset.resUnit)]; S.cook.resolve[m.ingredient].unit = t.value; }
@@ -259,7 +265,15 @@
     const fd = Object.fromEntries(new FormData(f).entries());
     const kind = f.dataset.form;
     if (kind === 'chat') send((document.getElementById('kit-input') || {}).value || '');
-    else if (kind === 'item') run(api('/items', { method: 'POST', body: { name: fd.name, qty: fd.qty, unit: fd.unit, location: fd.location, expiresOn: fd.expiresOn || undefined, lowAt: fd.lowAt === '' ? undefined : fd.lowAt } }), `Added ${fd.name}.`).then((r) => { if (r) { S.addOpen = false; render(); } });
+    else if (kind === 'item') {
+      S.msg = 'Adding…'; render();
+      run(api('/items', { method: 'POST', body: { name: fd.name, qty: fd.qty, unit: fd.unit, location: fd.location, expiresOn: fd.expiresOn || undefined, lowAt: fd.lowAt === '' ? undefined : fd.lowAt } })).then((r) => {
+        if (!r) return;
+        const it = r.item; S.addOpen = false;
+        flash(it.typeSource === 'pending' ? `Added ${it.name}. Working out what kind of food it is; its date will update in a moment.` : `Added ${it.name}: ${it.typeLabel}${it.expiresOn ? `, good through ${dayName(it.expiresOn)}` : ''}${it.expirySource === 'label' ? ' (your date)' : ''}. Wrong type? Tap it to change.`);
+        if (it.typeSource === 'pending') setTimeout(load, 15000);
+      });
+    }
     else if (kind === 'recipe') {
       const ingredients = String(fd.ingredients || '').split('\n').map(parseIngredient).filter(Boolean);
       run(api('/recipes', { method: 'POST', body: { name: fd.name, servings: fd.servings, ingredients, steps: fd.steps } }), `Saved ${fd.name}.`).then((r) => { if (r) { S.recipeOpen = false; render(); } });
