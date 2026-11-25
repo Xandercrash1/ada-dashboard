@@ -164,6 +164,11 @@ function cmdToday(args) {
   const view = engine.buildView(args.device ? rolled.filter(deviceFilter(args)) : rolled, today);
   const response = { pastDue: view.pastDue, today: view.today, upcoming: view.upcoming, generatedFor: today };
   if (view.flagged && view.flagged.length) response.flagged = view.flagged;
+  // A device's session start (CLAUDE.md § Session start) needs its undated items too, not just what's due.
+  if (args.device) {
+    const shown = new Set([...view.pastDue, ...view.today, ...view.upcoming].map(t => t.id));
+    response.undated = rolled.filter(deviceFilter(args)).filter(t => t.type === 'backlog' && !shown.has(t.id));
+  }
 
   output(args.json, response, v => {
     const printSection = (label, items) => {
@@ -177,7 +182,8 @@ function cmdToday(args) {
     printSection('PAST DUE', v.pastDue);
     printSection('Today', v.today);
     printSection('Upcoming', v.upcoming);
-    if (!v.pastDue.length && !v.today.length && !v.upcoming.length) console.log('Nothing due.');
+    if (v.undated) printSection('No due date (this device)', v.undated);
+    if (!v.pastDue.length && !v.today.length && !v.upcoming.length && !(v.undated && v.undated.length)) console.log('Nothing due.');
   });
 }
 
