@@ -110,7 +110,7 @@ class DocBodyWidget extends HTMLElement {
       const doc = await res.json();
       this.updatedAt = doc.updatedAt || null;
       // Older documents are Markdown: shown as HTML, saved as rich text after the first edit.
-      this.html = doc.format === 'html' ? (doc.text || '') : (doc.text ? window.marked.parse(String(doc.text)) : '');
+      this.html = doc.format === 'html' ? (doc.text || '') : (doc.text ? window.safeMd(String(doc.text)) : '');
       this.showView();
     } catch (e) { this.showError('Could not load the document.'); }
   }

@@ -159,7 +159,7 @@ class BubbleManager {
       // Render expanded chat window
       const msgsHtml = (session.messages || []).map(m => m.role === 'user'
         ? `<div class="flex justify-end"><div class="max-w-[85%] bg-indigo-600/80 text-white rounded-xl rounded-br-sm px-3 py-2 whitespace-pre-wrap break-words text-xs">${this.escapeHtml(m.text)}</div></div>`
-        : `<div class="flex"><div class="max-w-[85%] bg-dark-bg border border-dark-border text-gray-800 dark:text-gray-200 rounded-xl rounded-bl-sm px-3 py-2 break-words prose prose-sm dark:prose-invert prose-p:leading-snug prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-a:text-indigo-500 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600 text-xs">${marked.parse(m.text)}</div></div>`
+        : `<div class="flex"><div class="max-w-[85%] bg-dark-bg border border-dark-border text-gray-800 dark:text-gray-200 rounded-xl rounded-bl-sm px-3 py-2 break-words prose prose-sm dark:prose-invert prose-p:leading-snug prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-a:text-indigo-500 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600 text-xs">${window.safeMd(m.text)}</div></div>`
       ).join('');
       
       let chipsHtml = '';

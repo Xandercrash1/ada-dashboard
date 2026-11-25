@@ -30,7 +30,7 @@
     const r = new marked.Renderer();
     r.html = (t) => esc(typeof t === 'string' ? t : (t && (t.text || t.raw)) || '');   // never render raw HTML
     const src = String(text || '').replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/\[\[([^\]]+)\]\]/g, '$1');   // Obsidian links → text
-    return marked.parse(src, { renderer: r });
+    return window.safeHtml(marked.parse(src, { renderer: r }));   // and no javascript: links (2026-11-25)
   }
   const prose = 'prose prose-sm dark:prose-invert max-w-none prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-a:text-indigo-500';
 

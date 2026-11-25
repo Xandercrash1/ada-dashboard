@@ -63,6 +63,7 @@
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="/safe-md.js"></script><!-- safeMd(): Markdown that cannot run script (2026-11-25) -->
   <script src="projects-tab.js" defer></script><!-- One Ada: Projects tab -->
   <script src="nutrition-tab.js" defer></script><!-- Nutrition tab (admin + 303) -->
   <script src="kitchen-tab.js" defer></script><!-- Kitchen tab (prototype, 2026-11-24) -->
@@ -81,7 +82,7 @@
       const html = originalCodeRenderer(arg1, arg2, arg3);
       const safeCode = btoa(unescape(encodeURIComponent(codeText)));
       return `<div class="relative group">
-        <button onclick="navigator.clipboard.writeText(decodeURIComponent(escape(atob('${safeCode}')))).then(() => { const btn = this; const orig = btn.innerHTML; btn.innerHTML = '<i class=\\'fa-solid fa-check text-emerald-400\\'></i> Copied!'; setTimeout(() => btn.innerHTML = orig, 2000); })" class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 hover:bg-dark-accent backdrop-blur-sm text-gray-300 border border-dark-border rounded-lg px-2 py-1.5 text-[10px] font-semibold flex items-center gap-1.5 z-10 shadow"><i class="fa-regular fa-copy"></i> Copy</button>
+        <button type="button" data-copy="${safeCode}" class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-dark-bg/80 hover:bg-dark-accent backdrop-blur-sm text-gray-300 border border-dark-border rounded-lg px-2 py-1.5 text-[10px] font-semibold flex items-center gap-1.5 z-10 shadow"><i class="fa-regular fa-copy"></i> Copy</button>
         ${html}
       </div>`;
     };
@@ -2966,7 +2967,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
               </div>
               <div class="bg-dark-card border ${m.async ? 'border-cyan-900' : 'border-dark-border'} text-gray-200 text-xs rounded-2xl rounded-tl-sm px-4 py-3 max-w-xl shadow-sm leading-relaxed space-y-2">
                 ${asyncBadge}
-                <div class="prose prose-sm dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-pre:border dark:prose-pre:border-dark-border prose-a:text-indigo-400 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600 dark:prose-headings:text-gray-100">${marked.parse(promoteDisplayText)}</div>
+                <div class="prose prose-sm dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-pre:border dark:prose-pre:border-dark-border prose-a:text-indigo-400 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600 dark:prose-headings:text-gray-100">${safeMd(promoteDisplayText)}</div>
                 ${promoteBtnHtml}
                 ${toolHtml}
               </div>
@@ -4122,7 +4123,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
                 📋
               </div>
               <div class="bg-dark-card border border-dark-border text-gray-200 text-xs rounded-xl rounded-tl-sm px-3 py-2 max-w-[85%] shadow-sm leading-relaxed prose prose-sm dark:prose-invert prose-p:leading-snug prose-pre:bg-black/50 prose-a:text-emerald-500 marker:text-emerald-400 dark:prose-code:text-emerald-200 prose-code:text-emerald-600">
-                ${marked.parse(m.text)}
+                ${safeMd(m.text)}
               </div>
             </div>`;
         }
@@ -4417,35 +4418,6 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       }
     }
 
-    // Markdown from text other people or the nightly loop wrote (ticket bodies, task notes; review 2026-11-25). An
-    // allowlist: the rendered HTML is parsed inertly and rebuilt from fresh elements of plain tags with a few safe
-    // attributes. Unknown elements (custom widgets, noscript and so on) are unwrapped to their text; script-like ones dropped.
-    const SAFE_MD_TAGS = new Set(['P', 'BR', 'HR', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'DEL', 'CODE', 'PRE', 'KBD', 'BLOCKQUOTE', 'UL', 'OL', 'LI', 'A',
-      'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'IMG', 'SPAN', 'DIV', 'SUP', 'SUB']);
-    const SAFE_MD_DROP = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'NOSCRIPT', 'TEXTAREA', 'TITLE', 'XMP', 'NOEMBED', 'NOFRAMES', 'PLAINTEXT']);
-    const safeUrl = (v, img) => (img ? /^(https?:\/\/|\/(?!\/))/i : /^(https?:\/\/|mailto:|\/(?!\/)|#)/i).test(String(v || '').trim());
-    function safeMd(text) {
-      const doc = new DOMParser().parseFromString('<!doctype html><body>' + marked.parse(String(text || '')), 'text/html');   // inert: no scripts run
-      const out = document.createElement('div');
-      const copy = (from, to) => {
-        for (const n of from.childNodes) {
-          if (n.nodeType === 3) { to.appendChild(document.createTextNode(n.nodeValue)); continue; }
-          if (n.nodeType !== 1) continue;
-          const tag = n.tagName.toUpperCase();
-          if (SAFE_MD_DROP.has(tag)) continue;
-          if (!SAFE_MD_TAGS.has(tag)) { copy(n, to); continue; }
-          const el = document.createElement(tag.toLowerCase());
-          if (tag === 'A' && safeUrl(n.getAttribute('href'))) { el.setAttribute('href', n.getAttribute('href')); el.setAttribute('rel', 'noopener noreferrer'); el.setAttribute('target', '_blank'); }
-          if (tag === 'IMG') { if (!safeUrl(n.getAttribute('src'), true)) continue; el.setAttribute('src', n.getAttribute('src')); el.setAttribute('alt', n.getAttribute('alt') || ''); }
-          if ((tag === 'A' || tag === 'IMG') && n.getAttribute('title')) el.setAttribute('title', n.getAttribute('title'));
-          if (tag === 'CODE' && /^language-[\w-]+$/.test(n.getAttribute('class') || '')) el.setAttribute('class', n.getAttribute('class'));
-          if (tag === 'OL' && /^\d+$/.test(n.getAttribute('start') || '')) el.setAttribute('start', n.getAttribute('start'));
-          to.appendChild(el); copy(n, el);
-        }
-      };
-      copy(doc.body, out);
-      return out.innerHTML;
-    }
     // Who works on a ticket (Alex, 2026-11-25). Mirrors buildable() in ~/ops/loop/nightly-loop.py: the builder takes open
     // bugs and approved ideas; stage "pm" is the VPS PM's; proposals and needs-Alex tickets wait on Alex.
     function ticketOwner(f) {
@@ -6477,7 +6449,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const msgs = (designerSession && designerSession.messages) || [];
       box.innerHTML = msgs.map(m => m.role === 'user'
         ? `<div class="flex justify-end"><div class="max-w-[85%] bg-indigo-600/80 text-white rounded-xl rounded-br-sm px-3 py-2 whitespace-pre-wrap break-words">${escapeHtml(m.text)}</div></div>`
-        : `<div class="flex"><div class="max-w-[85%] bg-dark-bg border border-dark-border text-gray-800 dark:text-gray-200 rounded-xl rounded-bl-sm px-3 py-2 break-words prose prose-sm dark:prose-invert prose-p:leading-snug prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-a:text-indigo-500 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600">${marked.parse(m.text)}</div></div>`
+        : `<div class="flex"><div class="max-w-[85%] bg-dark-bg border border-dark-border text-gray-800 dark:text-gray-200 rounded-xl rounded-bl-sm px-3 py-2 break-words prose prose-sm dark:prose-invert prose-p:leading-snug prose-pre:bg-gray-100 dark:prose-pre:bg-black/50 prose-a:text-indigo-500 marker:text-indigo-400 dark:prose-code:text-indigo-200 prose-code:text-indigo-600">${safeMd(m.text)}</div></div>`
       ).join('');
       box.scrollTop = box.scrollHeight;
     }

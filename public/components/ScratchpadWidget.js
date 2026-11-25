@@ -73,7 +73,7 @@ class ScratchpadWidget extends HTMLElement {
     const textarea = this.querySelector('textarea');
     const preview = this.querySelector('[data-md-preview]');
     if (!textarea || !preview || !textarea.value.trim()) return;
-    preview.innerHTML = marked.parse(textarea.value);
+    preview.innerHTML = window.safeMd(textarea.value);
     this.wireCheckboxes(preview, textarea);
     textarea.classList.add('hidden');
     preview.classList.remove('hidden');

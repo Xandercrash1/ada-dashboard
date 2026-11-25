@@ -63,7 +63,7 @@
     r.html = (t) => esc(typeof t === 'string' ? t : (t && (t.text || t.raw)) || '');   // never render raw HTML
     const link = r.link;
     r.link = function (a, b, c) { const h = link.apply(this, arguments); return String(h).replace('<a ', '<a target="_blank" rel="noopener noreferrer" '); };
-    return marked.parse(String(text || ''), { renderer: r, breaks: true });
+    return window.safeHtml(marked.parse(String(text || ''), { renderer: r, breaks: true }));   // and no javascript: links (2026-11-25)
   }
   const prose = 'prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-a:text-indigo-500';
 
