@@ -23,6 +23,7 @@
 
 const engine = require('./todo-engine');
 const store = require('./todo-store');
+const subscriptions = require('./subscriptions');
 const { normalizeTask } = require('./todo-validate');
 
 function parseArgs(argv) {
@@ -159,7 +160,8 @@ function cmdComplete(args) {
     };
     completed.unshift(entry);
     store.writeCompleted(completed);
-    const remaining = tasks.filter(t => t.id !== task.id); // id-targeted — §1.1
+    let remaining = tasks.filter(t => t.id !== task.id); // id-targeted — §1.1
+    remaining = subscriptions.onTaskCompleted(task, remaining); // subscription-card autopay hook
     store.writeTasks(remaining);
     result = { success: true, completedEntry: entry };
   });
