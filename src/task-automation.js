@@ -84,7 +84,7 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
     }
     try {
       const before = store.readTasks();
-      const after = rule.onComplete(job.task, before, { source: `automation:${job.rule}`, depth: job.depth, upsertAutoTask, today: engine.todayString(), now: clock() });
+      const after = rule.onComplete(job.task, before, { source: `automation:${job.rule}`, origin: job.source, depth: job.depth, upsertAutoTask, today: engine.todayString(), now: clock() });
       if (Array.isArray(after) && after !== before) store.writeTasks(after);
       drop();
       log({ key: job.key, rule: job.rule, taskId: job.task.id, result: 'done', attempts: job.attempts + 1, source: job.source });

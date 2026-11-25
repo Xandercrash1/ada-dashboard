@@ -36,6 +36,12 @@ _Alex, 2026-11-24: one documented system for automatic tasks, used by every proj
   - `GET /api/automation` (admin) returns the queue, the dead list, recent runs and the rules.
 - **Repeating tasks:** the "roll a missed skippable task forward" step is saved by the worker. `GET /api/todo` only shows the rolled view and never writes.
 
+## Tickets (phase 2, 2026-11-24)
+- **One write path:** every ticket write (`data/feedback.json`) goes through `src/ticket-store.js`, which has a cross-process lockfile (`data/.feedback.lock`). That covers the routes, the agent `feedback` tool, the bug crawler, the deploy auto-close, the purge and the dead-letter hook. Sessions use the API, never the file. **Lock order is always the todo lock, then the ticket lock.**
+- **Repeats:** a ticket filed with a `dedupeKey` that matches an existing ticket doesn't make a new one. If that ticket is open it's updated (`repeats`, `lastSeenAt`, a note); if it's closed it's reopened with a dated note. Only admins and the server's own scripts can set a key.
+- **Self-closing:** `POST /api/feedback/resolve {dedupeKey, note}` (admin) closes the open ticket with that key. The health check files one ticket per check (`health:<check>`) and resolves it when the check passes again. The bug crawler keys by title (`crawler:<slug>`), and dead-letter tickets by job key.
+- **Tickets that need Alex** (`needsAlex: true`, set by the API, the agent tool or the person button on the ticket card) get exactly one task: `autoKind: ticket`, `autoKey` = ticket id, project AI Server. Checking that task off closes the ticket (the `ticket-task` rule). Closing, deleting or unflagging the ticket closes the task. `src/ticket-tasks.js` `sync()` reconciles both directions every minute and after each ticket change, so a lost run is repaired. A deleted task unflags its ticket instead of coming back.
+
 ## Adding a rule
 1. Write the handler in its project's module (pure where possible), safe to run twice.
 2. Register it in `src/automation-rules.js`.
@@ -45,10 +51,11 @@ _Alex, 2026-11-24: one documented system for automatic tasks, used by every proj
 ## Current rules
 | Rule | Project, owner | What it does |
 |---|---|---|
-| `subcard-autopay` | Subscriptions (Mac PM) | Checking off "Switch X to the subscription card" marks X on the card and keeps one "Set the subscription card's autopay to $T" task up to date (`src/subscriptions.js`, 55 checks in `subscriptions.test.js`). |
+| `subcard-autopay` | Subscriptions (Mac PM) | Checking off "Switch X to the subscription card" marks X on the card and keeps one "Set the subscription card's autopay to $T" task up to date (`src/subscriptions.js`, 56 checks in `subscriptions.test.js`). |
+| `ticket-task` | Tickets (VPS PM) | Checking off a ticket's task closes the ticket (`src/ticket-tasks.js`, tests in `ticket-store.test.js`). |
 | `then` (built in) | any | `task.then` chains. |
 
 ## Scope
 - **In:** dashboard tasks (`data/todo_tasks.json`), including repeating tasks.
-- **Next (phase 2, to discuss with Alex):** feedback tickets (`health-check.py`, `bug-crawler.js` and `weekly-sweep.py` create and update them).
+- **In since phase 2:** feedback tickets (above).
 - **Project boards** (`project-dash.js` lanes) join **project by project**. Fiverr is the first contender. Candidate rules are listed in the vault plan.

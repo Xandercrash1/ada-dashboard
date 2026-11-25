@@ -11,4 +11,9 @@ const subscriptions = require('./subscriptions');
 // "Set the subscription card's autopay to $T" task up to date. Safe to run twice (subscriptions.test.js).
 automation.register('subcard-autopay', { onComplete: (task, tasks) => subscriptions.onTaskCompleted(task, tasks) });
 
+// Tickets (VPS PM, phase 2): Alex checking off a ticket's task closes the ticket. The other direction, and repairs,
+// are ticket-tasks.js sync(), run by the server worker. Safe to run twice (closing a closed ticket does nothing).
+const tickets = require('./ticket-store').open(require('./todo-store').DATA_DIR);
+automation.register('ticket-task', { onComplete: require('./ticket-tasks').rule(tickets) });
+
 module.exports = automation;

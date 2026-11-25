@@ -4324,9 +4324,12 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
 
                 <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${statusClass} uppercase flex-shrink-0">${escapeHtml(f.status)}</span>
                 ${f.status === 'in-progress' && f.stagedAt ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-amber-950/70 text-amber-300 border-amber-800/80 flex-shrink-0" title="A linked agent staged and verified this fix; it auto-closes when Staging is pushed to Live">STAGED — CLOSES ON DEPLOY</span>` : ''}
+                ${f.needsAlex && f.status !== 'done' && f.status !== 'wont-do' ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-sky-950/70 text-sky-300 border-sky-800/80 flex-shrink-0" title="Only Alex can do the next step. It has a task on his list; checking that off closes this ticket.">NEEDS ALEX · TASK</span>` : ''}
+                ${f.repeats > 1 ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-gray-800 text-gray-300 border-gray-700 flex-shrink-0" title="The same problem was reported again; it updated or reopened this ticket instead of filing a new one${f.lastSeenAt ? ' (last ' + escapeHtml(new Date(f.lastSeenAt).toLocaleString()) + ')' : ''}">SEEN ${Number(f.repeats)}×</span>` : ''}
                 ${f.status === 'in-progress' && f.sessionId ? `<button onclick="switchServerSubTab('agents'); selectSession('${escapeHtml(f.sessionId)}')" class="text-[10px] text-purple-400 hover:text-purple-300 underline decoration-dotted flex-shrink-0" title="Open the linked agent session"><i class="fa-solid fa-robot"></i> session</button>` : ''}
               </div>
               <div class="flex items-center gap-1.5 flex-shrink-0">
+                ${f.status !== 'done' && f.status !== 'wont-do' ? `<button onclick="toggleFeedbackNeedsAlex('${f.id}', ${!f.needsAlex})" class="${f.needsAlex ? 'text-sky-300' : 'text-gray-500'} hover:text-sky-200 text-xs p-1" title="${f.needsAlex ? 'Stop needing Alex (closes its task)' : 'Needs Alex: put a task on his list'}"><i class="fa-solid fa-user-check"></i></button>` : ''}
                 <button onclick="openAgentForFeedback('${f.id}')" class="text-indigo-400 hover:text-indigo-300 text-xs p-1" title="Summon Agent to solve this">
                   <i class="fa-solid fa-robot"></i>
                 </button>
@@ -4402,6 +4405,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       } finally {
         if (submitBtn) submitBtn.disabled = false;
       }
+    }
+
+    async function toggleFeedbackNeedsAlex(id, needsAlex) {
+      try {
+        const res = await fetch(`/api/feedback/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ needsAlex }) });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+        await loadFeedback();
+      } catch (err) { alert('Failed to update: ' + err.message); }
     }
 
     async function updateFeedbackStatus(id, status) {

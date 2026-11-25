@@ -200,12 +200,9 @@ if (!fs.existsSync(PAGES_REGISTRY_FILE)) {
   writePagesRegistry([]);
 }
 
-function readFeedback() {
-  return readJsonStoreOrThrow(FEEDBACK_FILE);
-}
-function writeFeedback(items) {
-  fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(items, null, 2));
-}
+// Tickets: one locked write path for every writer (src/ticket-store.js, docs/TASK-AUTOMATION.md § Tickets).
+const tickets = require('./ticket-store').open(DATA_DIR);
+function readFeedback() { return tickets.read(); }
 
 // --- Notifications store (fb-1787765370485) ---------------------------------
 // A small ring buffer of events the UI should surface even when nobody was
@@ -2185,7 +2182,9 @@ const AGENT_TOOLS_DECLARATION = [
             processedBy: { type: 'STRING', description: 'For action=update. Free text identifying you (the agent) as the one working this item.' },
             notes: { type: 'STRING', description: 'For action=update. Closing note — what you did, or why not.' },
             title: { type: 'STRING', description: 'For action=create. The title of the ticket.' },
-            body: { type: 'STRING', description: 'For action=create. Detailed description of the bug or feature.' }
+            body: { type: 'STRING', description: 'For action=create. Detailed description of the bug or feature.' },
+            needsAlex: { type: 'BOOLEAN', description: 'For create/update. True when only Alex can do the next step (a sudo command, a sign-in, a decision): it puts one task on his list, and checking that task off closes the ticket.' },
+            dedupeKey: { type: 'STRING', description: 'Optional, for action=create. A stable key for this problem (e.g. "crawler:login-500"). Filing the same key again updates or reopens the existing ticket instead of making a new one.' }
           },
           required: ['action']
         }
@@ -2449,38 +2448,21 @@ function executeLocalTool(toolName, args, role, sessionId) {
           resolve({ count: items.length, priorityOrder: FEEDBACK_TYPE_IDS, items });
         } else if (action === 'create') {
           if (!args.filterType || !args.title) return resolve({ error: 'filterType (as type) and title are required for action=create' });
-          const items = readFeedback();
-          const now = new Date().toISOString();
-          const newItem = {
-            id: 'fb-' + Date.now(),
-            type: args.filterType,
-            title: (args.title || '').trim(),
-            body: args.body || '',
-            status: 'new',
-            createdAt: now,
-            updatedAt: now,
-            processedAt: null,
-            processedBy: null,
-            notes: null
-          };
-          items.unshift(newItem);
-          writeFeedback(items);
-          resolve({ success: true, item: newItem });
+          const r = tickets.create({ type: args.filterType, title: args.title, body: args.body || '', needsAlex: args.needsAlex === true ? true : undefined, dedupeKey: args.dedupeKey });
+          if (r.error) return resolve({ error: r.error });
+          syncTicketTasks();
+          resolve({ success: true, outcome: r.outcome, item: r.item });
         } else if (action === 'update') {
           if (!args.id) return resolve({ error: 'id is required for action=update' });
-          const items = readFeedback();
-          const idx = items.findIndex(i => i.id === args.id);
-          if (idx === -1) return resolve({ error: `No feedback item with id ${args.id}` });
-          const result = applyFeedbackUpdate(items[idx], { status: args.status, processedBy: args.processedBy, notes: args.notes });
+          const result = tickets.update(args.id, { status: args.status, processedBy: args.processedBy, notes: args.notes, needsAlex: typeof args.needsAlex === 'boolean' ? args.needsAlex : undefined });
           if (result.error) return resolve({ error: result.error });
-          writeFeedback(items);
-          resolve({ success: true, item: items[idx] });
+          syncTicketTasks();
+          resolve({ success: true, item: result.item });
         } else if (action === 'delete') {
           if (!args.id) return resolve({ error: 'id is required for action=delete' });
-          const items = readFeedback();
-          const filtered = items.filter(i => i.id !== args.id);
-          if (filtered.length === items.length) return resolve({ error: `No feedback item with id ${args.id}` });
-          writeFeedback(filtered);
+          const r = tickets.remove(args.id);
+          if (r.error) return resolve({ error: r.error });
+          syncTicketTasks();
           resolve({ success: true });
         } else {
           resolve({ error: `Unknown feedback action "${action}". Use list, update, or delete.` });
@@ -2590,8 +2572,7 @@ app.post('/api/agent/sessions', (req, res) => {
   // ignored — session creation must never fail over a dead ticket. Items
   // already done/wont-do are linked but NOT reopened.
   const feedbackId = isAdminReq(req) ? (req.body || {}).feedbackId : undefined;   // pages users never touch tickets
-  if (feedbackId) {
-    const items = readFeedback();
+  if (feedbackId) tickets.mutate((items) => {
     const item = items.find(i => i.id === feedbackId);
     if (item) {
       newSession.feedbackId = feedbackId;
@@ -2599,7 +2580,21 @@ app.post('/api/agent/sessions', (req, res) => {
       if (item.status === 'new' || item.status === 'in-progress') {
         const modelLabel = (getModelById(sessionModel) || {}).label || sessionModel;
         applyFeedbackUpdate(item, { status: 'in-progress', processedBy: `${newSession.name} (${modelLabel})` });
+      } else {
+        item.updatedAt = new Date().toISOString();
+      }
+    }
+  });
 
+  sessions.unshift(newSession);
+  writeSessions(sessions);
+  // modelWarning is response-only (not persisted to disk) — additive field, existing
+  // callers that ignore it see the exact same session shape as before.
+  res.status(201).json(modelWarning ? { ...newSession, modelWarning } : newSession);
+});
+
+// Top level since phase 2 (2026-11-24): it had been pasted inside the POST handler above, so it was only
+// registered after a session was started from a ticket.
 app.patch('/api/agent/sessions/:id', (req, res) => {
   const { id } = req.params;
   const updates = req.body;
@@ -2617,20 +2612,6 @@ app.patch('/api/agent/sessions/:id', (req, res) => {
   
   writeSessions(sessions);
   res.json(session);
-});
-
-      } else {
-        item.updatedAt = new Date().toISOString();
-      }
-      writeFeedback(items);
-    }
-  }
-
-  sessions.unshift(newSession);
-  writeSessions(sessions);
-  // modelWarning is response-only (not persisted to disk) — additive field, existing
-  // callers that ignore it see the exact same session shape as before.
-  res.status(201).json(modelWarning ? { ...newSession, modelWarning } : newSession);
 });
 
 // Change a session's model permanently (contract §2). Unknown id -> 400.
@@ -3390,7 +3371,7 @@ CRITICAL RULES:
 First, verify your changes work on staging using \`bash ~/ops/stage-check.sh\`.
 Second, use git to add, commit, and push your changes to GitHub from the staging directory (\`git commit -am "..." && git push origin main\`).
 Finally, tell Alex what you built, and include the exact string ${PROMOTE_ACTION_TOKEN} in your message. The UI will render this as a clickable button that pulls the latest main branch from GitHub into the Live server.
-6. A feedback store exists at /home/ubuntu/dashboard/data/feedback.json. Work items in priority order: bug > improvement > feature > chore > idea. If using Gemini, use the 'feedback' tool. If using Claude, read and modify the JSON file directly via bash. ALWAYS set status="done", processedBy="your name", and notes="what you did" when finishing an item.
+6. A feedback store exists at /home/ubuntu/dashboard/data/feedback.json. Work items in priority order: bug > improvement > feature > chore > idea. If using Gemini, use the 'feedback' tool. If using Claude, use the API on localhost (GET/POST /api/feedback, PATCH /api/feedback/<id>), never edit the JSON file directly: every ticket write goes through one locked path. ALWAYS set status="done", processedBy="your name", and notes="what you did" when finishing an item.
 7. ASYNC COMMUNICATION & AUTONOMY: You can send messages to the chat asynchronously without ending your turn by POSTing to http://127.0.0.1:${PORT}/api/agent/sessions/<your-session-id>/messages with body {"text": "your message", "role": "agent"}. (Gemini can also use the 'send_message' tool).
 8. SCHEDULING & DEFERRING WORK: You can queue tasks to run autonomously later by POSTing to http://127.0.0.1:${PORT}/api/agent/scheduled with body {"sessionId": "<your-session-id>", "prompt": "task description", "runAt": "ISO8601-timestamp", "frequencyMinutes": <optional-integer-minutes>, "source": "agent", "model": "<model-id>"}. (Gemini can also use the 'schedule_prompt' tool). Set frequencyMinutes (10 to 129600) to make it recurring. This allows you to split large tasks, retry after rate limits, or run background loops. The preApproveDeploy flag on scheduled items is reserved for Alex via the dashboard Scheduler tab — agents must NEVER set it; the server strips it from non-manual sources.
 9. HOMEPAGE LIVE DOCUMENT: The dashboard Home tab is a fixed page (public/components/HomeView.js) and does not show widgets. Only its announcement comes from the JSON file at ${HOMEPAGE_FILE}; to change the page itself, change the component through the normal deploy path. Custom pages still use widgets. The file's schema: { announcement: {title, text, icon, visible}, sections: {stats, quickLinks} (booleans to hide the built-in stat boxes / quick links), widgets: [{id, title, icon (FontAwesome class like fa-chart-line), accent (indigo|purple|emerald|rose|amber|sky), html (trusted HTML for the card body; may embed live stats via <span data-home-stat="todo|jobs|cpu|bugs"></span>), link: {label, tab (home|todo|tools|server) OR href (URL)}, hidden}] }. Max 24 widgets. Homepage design work belongs to the dedicated "designer" role/agent when possible. To change the announcement, edit this file directly (Claude: bash; Gemini: file tools) — changes appear on the next browser refresh with NO server restart and NO promote, because data/ is never synced by promote.sh. Keep it valid JSON; malformed content is dropped by the server's sanitizer. A homepage widget's html body MAY embed the chat widget element (see rule 10) — e.g. <ada-widget type="countdown" id="x" target="ISO" remove-on-complete="true"></ada-widget> — which is the ONLY way to get self-deleting/conditional behavior on the homepage (the ada-countdown component does NOT self-delete; note remove-on-complete only hides the card body client-side, the JSON entry remains until deleted). WARNING: homepage.json is last-writer-wins with no merge — ALWAYS re-read the file immediately before writing, because another agent or the dashboard UI may have changed it since you last looked (a stale write clobbered a sibling agent's widget on 2026-09-02).
@@ -4304,7 +4285,7 @@ const FEEDBACK_PURGED_FILE = path.join(DATA_DIR, 'feedback-purged.jsonl');
 function purgeArchivedFeedback() {
   try {
     const nowMs = todoEngine.now().getTime();
-    const items = readFeedback();
+    return tickets.mutate((items) => {
     const keep = [], purge = [];
     for (const i of items) {
       const closed = i.status === 'done' || i.status === 'wont-do';
@@ -4314,9 +4295,10 @@ function purgeArchivedFeedback() {
     if (!purge.length) return 0;
     const purgedAt = new Date(nowMs).toISOString();
     fs.appendFileSync(FEEDBACK_PURGED_FILE, purge.map(i => JSON.stringify({ ...i, purgedAt })).join('\n') + '\n');
-    writeFeedback(keep);
+    items.splice(0, items.length, ...keep);
     console.log(`[feedback] purged ${purge.length} archived ticket(s) older than 30 days (recorded in feedback-purged.jsonl)`);
     return purge.length;
+    });
   } catch (err) {
     console.error('[feedback] purge failed:', err.message);
     return 0;
@@ -4327,23 +4309,7 @@ setInterval(purgeArchivedFeedback, 6 * 60 * 60 * 1000);
 
 // Shared by the HTTP route and the agent tool (executeLocalTool) below, so
 // both paths apply the exact same validation and processedAt semantics.
-function applyFeedbackUpdate(item, patch) {
-  if (patch.status !== undefined) {
-    if (!FEEDBACK_STATUSES.includes(patch.status)) {
-      return { error: `Invalid status "${patch.status}". Must be one of: ${FEEDBACK_STATUSES.join(', ')}` };
-    }
-    // processedAt is set the first time status leaves 'new' — never overwritten
-    // again after that (contract §2).
-    if (item.status === 'new' && patch.status !== 'new' && !item.processedAt) {
-      item.processedAt = new Date().toISOString();
-    }
-    item.status = patch.status;
-  }
-  if (patch.processedBy !== undefined) item.processedBy = patch.processedBy;
-  if (patch.notes !== undefined) item.notes = patch.notes;
-  item.updatedAt = new Date().toISOString();
-  return { item };
-}
+function applyFeedbackUpdate(item, patch) { return tickets.applyUpdate(item, patch); }
 
 // --- Feedback lifecycle automation (plans/feedback_lifecycle_automation.md) ---
 // Canonical promote-button trigger. Module scope: used by runAgentTurn's role
@@ -4367,14 +4333,14 @@ function containsPromoteToken(text) {
 // the promote endpoint then closes staged items when Alex clicks the button.
 function markFeedbackStaged(session, text) {
   if (!session || !session.feedbackId || !containsPromoteToken(text)) return;
-  const items = readFeedback();
-  const item = items.find(i => i.id === session.feedbackId);
-  if (!item || item.status !== 'in-progress' || item.stagedAt) return;
-  const now = new Date().toISOString();
-  item.stagedAt = now;
-  item.updatedAt = now;
-  writeFeedback(items);
-  console.log(`[feedback] ${item.id} staged by session ${session.id}`);
+  tickets.mutate((items) => {
+    const item = items.find(i => i.id === session.feedbackId);
+    if (!item || item.status !== 'in-progress' || item.stagedAt) return;
+    const now = new Date().toISOString();
+    item.stagedAt = now;
+    item.updatedAt = now;
+    console.log(`[feedback] ${item.id} staged by session ${session.id}`);
+  });
 }
 
 // Alex's deploy click is the confirmation-of-completion signal — the endpoint
@@ -4383,18 +4349,19 @@ function markFeedbackStaged(session, text) {
 // items without stagedAt are never touched. stagedAt is kept as the audit
 // record of when the agent declared the fix staged.
 function closeStagedFeedbackOnPromote(nowIso) {
-  const items = readFeedback();
+  const { closed } = tickets.mutate((items) => {
   const closed = [];
   for (const item of items) {
     if (item.status === 'in-progress' && item.stagedAt) {
       const note = `[auto] Closed by Staging → Live deploy at ${nowIso}`;
       item.notes = item.notes ? `${item.notes}\n${note}` : note;
-      item.status = 'done';
-      item.updatedAt = nowIso;
+      tickets.applyUpdate(item, { status: 'done' }, nowIso);
       closed.push(item.id);
     }
   }
-  if (closed.length) writeFeedback(items);
+  return { closed };
+  });
+  if (closed.length) syncTicketTasks();
   return closed;
 }
 
@@ -4422,52 +4389,45 @@ app.get('/api/feedback', (req, res) => {
 });
 
 app.post('/api/feedback', (req, res) => {
-  const { type, title, body, urgency } = req.body || {};
-  if (!type || !FEEDBACK_TYPE_IDS.includes(type)) {
-    return res.status(400).json({ error: `Invalid type "${type}". Must be one of: ${FEEDBACK_TYPE_IDS.join(', ')}` });
-  }
-  const trimmedTitle = (title || '').trim();
-  if (!trimmedTitle) {
-    return res.status(400).json({ error: 'title is required and must be non-empty.' });
-  }
+  const { type, title, body, urgency, dedupeKey, needsAlex } = req.body || {};
+  // Only admins and the server's own scripts may flag a ticket for Alex or key it (pages users file plain tickets).
+  const trusted = isAdminReq(req);
+  let r;
+  try { r = tickets.create({ type, title, body, urgency, dedupeKey: trusted ? dedupeKey : undefined, needsAlex: trusted && needsAlex === true ? true : undefined }); }
+  catch (e) { return res.status(500).json({ error: e.message }); }
+  if (r.error) return res.status(400).json({ error: r.error });
+  syncTicketTasks();
+  res.status(r.outcome === 'created' ? 201 : 200).json({ ...r.item, outcome: r.outcome });
+});
 
-  const items = readFeedback();
-  const now = new Date().toISOString();
-  const newItem = {
-    id: `fb-${Date.now()}`,
-    type,
-    title: trimmedTitle,
-    body: typeof body === 'string' ? body : '',
-    status: 'new',
-    createdAt: now,
-    updatedAt: now,
-    processedAt: null,
-    processedBy: null,
-    notes: null
-  };
-  items.unshift(newItem);
-  writeFeedback(items);
-  res.status(201).json(newItem);
+// The owner of a condition (e.g. the health check) closes its own open ticket when the condition clears.
+app.post('/api/feedback/resolve', (req, res) => {
+  if (!isAdminReq(req)) return res.status(403).json({ error: 'Admins only.' });
+  const { dedupeKey, note } = req.body || {};
+  if (!dedupeKey) return res.status(400).json({ error: 'dedupeKey is required.' });
+  try {
+    const r = tickets.resolve(String(dedupeKey), { note: note ? String(note).slice(0, 300) : undefined });
+    if (r.item) syncTicketTasks();
+    res.json({ closed: !!r.item, item: r.item });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.patch('/api/feedback/:id', (req, res) => {
-  const items = readFeedback();
-  const idx = items.findIndex(i => i.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Feedback item not found' });
-
-  const { status, processedBy, notes } = req.body || {};
-  const result = applyFeedbackUpdate(items[idx], { status, processedBy, notes });
+  const { status, processedBy, notes, needsAlex } = req.body || {};
+  let result;
+  try { result = tickets.update(req.params.id, { status, processedBy, notes, needsAlex: typeof needsAlex === 'boolean' ? needsAlex : undefined }); }
+  catch (e) { return res.status(500).json({ error: e.message }); }
+  if (result.notFound) return res.status(404).json({ error: 'Feedback item not found' });
   if (result.error) return res.status(400).json({ error: result.error });
-
-  writeFeedback(items);
-  res.json(items[idx]);
+  syncTicketTasks();
+  res.json(result.item);
 });
 
 app.delete('/api/feedback/:id', (req, res) => {
-  const items = readFeedback();
-  const filtered = items.filter(i => i.id !== req.params.id);
-  if (filtered.length === items.length) return res.status(404).json({ error: 'Feedback item not found' });
-  writeFeedback(filtered);
+  let r;
+  try { r = tickets.remove(req.params.id); } catch (e) { return res.status(500).json({ error: e.message }); }
+  if (r.notFound) return res.status(404).json({ error: 'Feedback item not found' });
+  syncTicketTasks();
   res.json({ success: true });
 });
 
@@ -4586,13 +4546,16 @@ app.delete('/api/todo/tasks/:id', (req, res) => {
 const automation = require('./task-automation').create({
   store: todoStore, engine: todoEngine, sharing,
   onDeadLetter: (job, why) => {
-    const items = readFeedback(); const at = new Date().toISOString();
-    items.unshift({ id: `fb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, type: 'bug', title: `Task automation stuck: ${job.rule} (${(job.task && job.task.name) || job.key})`,
-      body: `The automation job ${job.key} gave up after ${job.attempts} tries: ${why}\nIt is in data/automation-dead.json; nothing was undone.`, status: 'new', createdAt: at, updatedAt: at, processedAt: null, processedBy: null, notes: null });
-    writeFeedback(items);
+    const r = tickets.create({ type: 'bug', title: `Task automation stuck: ${job.rule} (${(job.task && job.task.name) || job.key})`, dedupeKey: `automation-dead:${job.key}`,
+      body: `The automation job ${job.key} gave up after ${job.attempts} tries: ${why}\nIt is in data/automation-dead.json; nothing was undone.` });
+    if (r.error) throw new Error(r.error);
   },
 });
 // Shared scheduled/backlog completion for callers already inside the store lock (the Subscriptions on-card route).
+// Tickets that need Alex have one task each; the two close together (src/ticket-tasks.js). Run after every ticket
+// change and by the worker; never while holding the ticket lock (the todo lock always comes first).
+const ticketTasks = require('./ticket-tasks').create({ tickets, store: todoStore, automation, upsertAutoTask: require('./task-automation').upsertAutoTask, engine: todoEngine });
+function syncTicketTasks() { try { return ticketTasks.sync(); } catch (e) { console.error('[tickets] task sync failed (the worker tries again):', e.message); return null; } }
 function completeTaskLocked(tasks, task, opts) { return automation.completeLocked(tasks, task, opts).body.completedEntry; }
 // The worker: retries queued jobs and persists repeating-task roll-forward, once a minute and at start-up.
 function automationTick() {
@@ -4604,6 +4567,7 @@ function automationTick() {
       if (changed) todoStore.writeTasks(tasks);
     });
   } catch (e) { console.error('[automation] tick failed:', e.message); }
+  syncTicketTasks();   // after the todo lock is released: sync takes it itself
 }
 setTimeout(automationTick, 5000).unref();
 setInterval(automationTick, 60000).unref();

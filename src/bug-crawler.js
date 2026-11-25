@@ -90,23 +90,21 @@ ${newLogs.slice(-MAX_LOG_CHARS)}
     return;
   }
 
-  const feedback = fs.existsSync(FEEDBACK_FILE) ? JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf8')) : [];
-  const now = new Date().toISOString();
-  feedback.unshift({
-    id: 'fb-' + Date.now(),
+  // One locked write path for tickets (src/ticket-store.js). The same title again updates or reopens that ticket.
+  const title = ticket.title || 'Automated Bug Report';
+  const r = require('./ticket-store').open(path.dirname(FEEDBACK_FILE)).create({
     type: 'bug',
-    title: ticket.title || 'Automated Bug Report',
+    title,
     body: ticket.body || 'The crawler detected an anomaly but failed to format the description.',
     urgency: ticket.urgency || 'normal',
-    status: 'new',
-    createdAt: now,
-    updatedAt: now,
+    // The fallback title says nothing about the bug, so it is never used as a key (unrelated reports would merge).
+    dedupeKey: !ticket.title ? undefined : 'crawler:' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80),
     processedBy: `crawler-${result.model}`,
     notes: 'Agent-made: generated autonomously by the nightly bug crawler from the dashboard error log. Verify before acting.'
   });
-  fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(feedback, null, 2));
+  if (r.error) throw new Error(r.error);
   advanceCursor();
-  console.log(`[Crawler] ${result.model} filed bug ticket:`, ticket.title);
+  console.log(`[Crawler] ${result.model} ${r.outcome} bug ticket:`, title);
 }
 
 run();
