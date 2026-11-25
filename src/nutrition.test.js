@@ -856,6 +856,10 @@ test('household log: off by default, own settings only, opt-in enforced, self al
   assert.ok((await t.call('amy', '303', 'GET', '/day?date=2026-11-25')).json.entries.some((e) => e.name === 'Chili' && e.note === 'logged by Amy from Kitchen'));
   // a bad amount writes nothing for anyone
   assert.throws(() => n.household.logShared({ by: 'amy', eaters: [{ username: 'amy', servings: 1 }, { username: 'bob', servings: -1 }], ...dish }), /Servings/);
+  // Tighter limits for someone else's log (review 2026-11-25): at most 4 servings, at most 3,000 kcal a serving.
+  assert.throws(() => n.household.logShared({ by: 'amy', eaters: [{ username: 'bob', servings: 5 }], ...dish }), /at most 4 servings/);
+  assert.doesNotThrow(() => n.household.logShared({ by: 'amy', eaters: [{ username: 'amy', servings: 5 }], ...dish }));
+  assert.throws(() => n.household.logShared({ by: 'amy', eaters: [{ username: 'bob', servings: 1 }], ...dish, per: { calories: 3001 } }), /3,000 kcal/);
   assert.strictEqual((await t.call('bob', '303', 'GET', '/day?date=2026-11-25')).json.entries.filter((e) => e.name === 'Chili').length, 1);
   t.close();
 });

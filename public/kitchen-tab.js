@@ -222,7 +222,7 @@
       const r = await api('/eaten', { method: 'POST', body: { recipeId: e.recipeId, planId: e.planId || undefined, meal: e.meal, date: e.date, eaters, per: Object.keys(per).length ? per : undefined, saveDefault: e.saveDefault } });
       S.v = r.state; S.eat = null;
       const ok = r.results.filter((x) => x.ok).map((x) => x.name), no = r.results.filter((x) => !x.ok).map((x) => x.name);
-      flash(`${ok.length ? `Logged ${r.dish} for ${ok.join(', ')}.` : 'Nothing was logged.'}${no.length ? ` Couldn't log for ${no.join(', ')} (they haven't allowed it).` : ''}`, !ok.length);
+      flash(`${ok.length ? `Logged ${r.dish} for ${ok.join(', ')}.` : 'Nothing was logged.'}${no.length ? ` Couldn't log for ${no.join(', ')} (not turned on in their Nutrition settings, or their log couldn't take it).` : ''}`, !ok.length);
     } catch (err) { flash(err.message, true); }
   }
 
