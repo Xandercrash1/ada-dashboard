@@ -67,6 +67,8 @@ app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1
 require('./grimoire-proxy').mountGrimoirePreview(app, { isAdminReq: (req) => isAdminReq(req) });   // /grimoire-next/ preview (2026-11-10)
 // Direct link to Nutrition (admin and 303): serves the app, which opens the view. Guests go Home.
 app.get('/nutrition', (req, res) => (req.user && req.user.role === 'guest') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
+// Direct link to Subscriptions (admin only; the app itself keeps non-admins on Home). The API enforces admin on its own routes.
+app.get('/subscriptions', (req, res) => (req.user && req.user.role !== 'admin') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
 app.get('/kitchen', (req, res) => (req.user && req.user.role === 'guest') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
 app.use(express.static(path.join(__dirname, '../public')));
 const MEDIA_DIR = path.join(__dirname, '../data/media');
@@ -1261,6 +1263,7 @@ const foodLookup = require('./food-lookup').create();
 foodLookup.mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
 require('./nutrition').create({ dataDir: DATA_DIR, limits: aiLimits, lookup: (q, brands) => foodLookup.lookup(q, brands) }).mount(app, { ownerName });   // Nutrition tab: per-person food log, targets, Coach (admin + 303)
 require('./kitchen').create({ dataDir: DATA_DIR, limits: aiLimits }).mount(app, { ownerName });   // Kitchen tab: inventory, meal planner, assistant (prototype, 2026-11-24)
+subscriptions.mount(app, { isAdminReq });   // Subscriptions page: admin only, checked on each route (no non-admin allowlist line on purpose)
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./backups-status').create().mount(app, { isAdminReq });   // Server tab > Health & Stats: read-only Backups card (filesystem only, no restic)
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)

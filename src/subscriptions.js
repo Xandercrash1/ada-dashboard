@@ -18,6 +18,7 @@
 const path = require('path');
 const todoStore = require('./todo-store');
 const todoEngine = require('./todo-engine');
+const todoValidate = require('./todo-validate');
 
 const SUBS_FILE = path.join(todoStore.DATA_DIR, 'subscriptions.json');
 const AUTO_KIND = 'subcard-autopay';
@@ -109,4 +110,105 @@ function onTaskCompleted(completedTask, tasks) {
   return r.tasks;
 }
 
-module.exports = { SUBS_FILE, AUTO_KIND, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, onTaskCompleted };
+// ---------------------------------------------------------------------------
+// Subscriptions page (admin only): totals, add-a-subscription, routes.
+// ---------------------------------------------------------------------------
+
+// Small settings object. cardArrival = the day the subscription card shows up.
+const SETTINGS = { cardArrival: '2026-12-09', cap: 300 };
+
+const r2 = n => Math.round(n * 100) / 100;
+const hasPrice = s => s.price != null && Number.isFinite(Number(s.price));
+const NOTE = 'Subscription consolidation: dashboard → Subscriptions page.';
+
+function computeTotals(subs, settings = SETTINGS) {
+  const onCardMonthly = r2(computeTotal(subs).items.reduce((a, s) => a + Number(s.price), 0));
+  const off = subs.filter(s => !s.onCard && hasPrice(s));
+  const notMovedMonthly = r2(off.filter(s => s.cycle === 'monthly').reduce((a, s) => a + Number(s.price), 0));
+  const notMovedYearly = r2(off.filter(s => s.cycle === 'yearly').reduce((a, s) => a + Number(s.price), 0));
+  return { onCardMonthly, autopay: r2(onCardMonthly + BUFFER + MIN_PAYMENT), notMovedMonthly, notMovedYearly, cap: settings.cap, cardArrival: settings.cardArrival };
+}
+
+/** validateNew(body) -> { value:{name,price,cycle} } | { errors:[...] } */
+function validateNew(body) {
+  const b = body || {};
+  const errors = [];
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  if (!name) errors.push('name is required');
+  else if (name.length > 100) errors.push('name must be 100 characters or fewer');
+  let price = null;
+  if (b.price !== undefined && b.price !== null && b.price !== '') {
+    const n = typeof b.price === 'number' ? b.price : (typeof b.price === 'string' && b.price.trim() !== '' ? Number(b.price) : NaN);
+    if (!Number.isFinite(n)) errors.push('price must be a number');
+    else if (n < 0) errors.push('price must be 0 or more');
+    else price = r2(n);
+  }
+  const cycle = b.cycle === undefined || b.cycle === null || b.cycle === '' ? 'monthly' : b.cycle;
+  if (cycle !== 'monthly' && cycle !== 'yearly') errors.push('cycle must be monthly or yearly');
+  return errors.length ? { errors } : { value: { name, price, cycle } };
+}
+
+/** Switch-task due date: the later of the card arrival and tomorrow. */
+function switchDueDate(today, arrival = SETTINGS.cardArrival) {
+  const tomorrow = todoEngine.addDays(today, 1);
+  return arrival > tomorrow ? arrival : tomorrow;
+}
+
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'subscription';
+}
+
+function newScheduledTask(name, dueDate, nowIso) {
+  const { task, errors } = todoValidate.normalizeTask({ type: 'scheduled', name, project: 'Chores', priority: 'Low', notes: NOTE, dueDate }, null);
+  if (errors) throw new Error(errors.join('; '));
+  return { id: todoEngine.generateId(), ...task, tags: [], owner: 'alex', sharedWith: [], sourceFile: null, createdAt: nowIso, updatedAt: nowIso };
+}
+
+/** planCreate(subs, tasks, value, now, today) -> { subs, tasks, row, createdTasks }. Pure. */
+function planCreate(subs, tasks, value, now, today, settings = SETTINGS) {
+  const nowIso = now.toISOString();
+  const switchTask = newScheduledTask(`Switch ${value.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
+  const createdTasks = [switchTask];
+  if (value.price === null) {
+    createdTasks.push(newScheduledTask(`Add the price for ${value.name} to the subscriptions list`, todoEngine.addDays(today, 1), nowIso));
+  }
+  let id = slugify(value.name), n = 2;
+  while (subs.some(s => s.id === id)) id = `${slugify(value.name)}-${n++}`;
+  const row = { id, name: value.name, price: value.price, cycle: value.cycle, onCard: false, onCardAt: null, switchTaskId: switchTask.id };
+  return { subs: subs.concat([row]), tasks: tasks.concat(createdTasks), row, createdTasks };
+}
+
+/** Store-backed create: one todo-store lock around both the tasks file and subscriptions file. */
+function createSubscription(value) {
+  return todoStore.withLock(() => {
+    const subs = readSubscriptions();
+    const tasks = todoStore.readTasks();
+    const r = planCreate(subs, tasks, value, new Date(), todoEngine.todayString());
+    todoStore.writeTasks(r.tasks);
+    writeSubscriptions(r.subs);
+    return r;
+  });
+}
+
+// Admin-only, checked on the routes themselves (no non-admin allowlist line in server.js).
+function mount(app, { isAdminReq }) {
+  const guard = (req, res, next) => (isAdminReq(req) ? next() : res.status(403).json({ error: 'Not available for your account.' }));
+  app.get('/api/subscriptions', guard, (req, res) => {
+    try {
+      const rows = readSubscriptions();
+      const byId = new Map(todoStore.readTasks().map(t => [t.id, t]));
+      res.json({ rows: rows.map(s => ({ ...s, switchDue: (byId.get(s.switchTaskId) || {}).dueDate || null })), totals: computeTotals(rows), settings: SETTINGS });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+  app.post('/api/subscriptions', guard, (req, res) => {
+    try {
+      const v = validateNew(req.body);
+      if (v.errors) return res.status(400).json({ error: v.errors.join('; '), errors: v.errors });
+      const r = createSubscription(v.value);
+      res.status(201).json({ row: r.row, tasks: r.createdTasks.map(t => ({ id: t.id, name: t.name, dueDate: t.dueDate })), taskIds: r.createdTasks.map(t => t.id) });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+}
+
+module.exports = { SUBS_FILE, AUTO_KIND, SETTINGS, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, onTaskCompleted,
+  computeTotals, validateNew, switchDueDate, planCreate, createSubscription, mount };
