@@ -58,6 +58,7 @@
     .guest-no-tasks #tab-btn-todo, .guest-no-tasks #mob-btn-todo, .guest-no-projects #tab-btn-projects, .guest-no-projects #mob-btn-projects, .role-guest .not-guest { display: none !important; }
   </style>
   <script type="module" src="/components/index.js"></script>
+  <script src="/error-report.js"></script><!-- sends this page's JS errors to the nightly loop (2026-11-25) -->
   <script src="/components/BubbleManager.js"></script>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
@@ -1888,7 +1889,7 @@
               </div>
             </div>
             ${dateLabel ? `<div class="text-xs text-gray-400">${escapeHtml(dateLabel)}</div>` : ''}
-            ${t.notes ? `<div class="todo-note text-xs text-gray-400 leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-code:text-indigo-500 dark:prose-code:text-indigo-300 line-clamp-3 cursor-pointer" onclick="this.classList.toggle('line-clamp-3')" title="Click to expand / collapse">${marked.parse(t.notes)}</div>` : ''}
+            ${t.notes ? `<div class="todo-note text-xs text-gray-400 leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-code:text-indigo-500 dark:prose-code:text-indigo-300 line-clamp-3 cursor-pointer" onclick="this.classList.toggle('line-clamp-3')" title="Click to expand / collapse">${safeMd(t.notes)}</div>` : ''}
             <div class="flex items-center gap-3 text-[11px] text-gray-500 pt-0.5 flex-wrap">
               <span class="inline-flex items-center gap-1 text-indigo-400 font-medium"><i class="fa-solid fa-tag text-[9px]"></i> ${escapeHtml(t.project || '')}</span>
               ${todoPeopleChips(t)}
@@ -4331,9 +4332,13 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
                 ${f.status === 'in-progress' && f.stagedAt ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-amber-950/70 text-amber-300 border-amber-800/80 flex-shrink-0" title="A linked agent staged and verified this fix; it auto-closes when Staging is pushed to Live">STAGED — CLOSES ON DEPLOY</span>` : ''}
                 ${f.needsAlex && f.status !== 'done' && f.status !== 'wont-do' ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-sky-950/70 text-sky-300 border-sky-800/80 flex-shrink-0" title="Only Alex can do the next step. It has a task on his list; checking that off closes this ticket.">NEEDS ALEX · TASK</span>` : ''}
                 ${f.repeats > 1 ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-gray-800 text-gray-300 border-gray-700 flex-shrink-0" title="The same problem was reported again; it updated or reopened this ticket instead of filing a new one${f.lastSeenAt ? ' (last ' + escapeHtml(new Date(f.lastSeenAt).toLocaleString()) + ')' : ''}">SEEN ${Number(f.repeats)}×</span>` : ''}
+                ${(() => { const o = ticketOwner(f); return o && o.label ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${o.cls} flex-shrink-0" title="${escapeHtml(o.tip)}">${o.label}</span>` : ''; })()}
                 ${f.status === 'in-progress' && f.sessionId ? `<button onclick="switchServerSubTab('agents'); selectSession('${escapeHtml(f.sessionId)}')" class="text-[10px] text-purple-400 hover:text-purple-300 underline decoration-dotted flex-shrink-0" title="Open the linked agent session"><i class="fa-solid fa-robot"></i> session</button>` : ''}
               </div>
               <div class="flex items-center gap-1.5 flex-shrink-0">
+                ${(() => { const o = ticketOwner(f); if (!o || !(window.ME && window.ME.role === 'admin') || ['building', 'ready', 'deploying'].includes(f.stage)) return '';
+                  return (o.who !== 'builder' ? `<button onclick="assignTicket('${f.id}', 'builder')" class="text-gray-500 hover:text-emerald-300 text-xs p-1" title="Give to the nightly builder (a ticket-sized fix, tried overnight)"><i class="fa-solid fa-hammer"></i></button>` : '')
+                    + (o.who !== 'pm' ? `<button onclick="assignTicket('${f.id}', 'pm')" class="text-gray-500 hover:text-purple-300 text-xs p-1" title="Give to the VPS PM (bigger work, planned with you)"><i class="fa-solid fa-user-gear"></i></button>` : ''); })()}
                 ${f.status !== 'done' && f.status !== 'wont-do' ? `<button onclick="toggleFeedbackNeedsAlex('${f.id}', ${!f.needsAlex})" class="${f.needsAlex ? 'text-sky-300' : 'text-gray-500'} hover:text-sky-200 text-xs p-1" title="${f.needsAlex ? 'Stop needing Alex (closes its task)' : 'Needs Alex: put a task on his list'}"><i class="fa-solid fa-user-check"></i></button>` : ''}
                 <button onclick="openAgentForFeedback('${f.id}')" class="text-indigo-400 hover:text-indigo-300 text-xs p-1" title="Summon Agent to solve this">
                   <i class="fa-solid fa-robot"></i>
@@ -4350,7 +4355,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
               </div>
             </div>
             <h4 class="text-sm font-semibold text-gray-100">${escapeHtml(f.title)}</h4>
-            ${f.body ? `<div class="text-xs text-gray-400 leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-img:max-h-60 prose-img:rounded-xl">${marked.parse(f.body)}</div>` : ''}
+            ${f.body ? `<div class="text-xs text-gray-400 leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-img:max-h-60 prose-img:rounded-xl">${safeMd(f.body)}</div>` : ''}
             ${f.notes ? `<div class="text-[11px] text-gray-400 bg-dark-bg border border-dark-border rounded-lg px-2.5 py-1.5 flex items-start gap-1.5"><i class="fa-solid fa-robot text-purple-400 mt-0.5"></i><span><span class="text-purple-300 font-semibold">${f.processedBy ? escapeHtml(f.processedBy) + ': ' : 'Agent note: '}</span>${escapeHtml(f.notes)}</span></div>` : ''}
             <div class="text-[10px] text-gray-500">${escapeHtml(created)}</div>
           </div>
@@ -4410,6 +4415,64 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       } finally {
         if (submitBtn) submitBtn.disabled = false;
       }
+    }
+
+    // Markdown from text other people or the nightly loop wrote (ticket bodies, task notes; review 2026-11-25). An
+    // allowlist: the rendered HTML is parsed inertly and rebuilt from fresh elements of plain tags with a few safe
+    // attributes. Unknown elements (custom widgets, noscript and so on) are unwrapped to their text; script-like ones dropped.
+    const SAFE_MD_TAGS = new Set(['P', 'BR', 'HR', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'DEL', 'CODE', 'PRE', 'KBD', 'BLOCKQUOTE', 'UL', 'OL', 'LI', 'A',
+      'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'IMG', 'SPAN', 'DIV', 'SUP', 'SUB']);
+    const SAFE_MD_DROP = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'NOSCRIPT', 'TEXTAREA', 'TITLE', 'XMP', 'NOEMBED', 'NOFRAMES', 'PLAINTEXT']);
+    const safeUrl = (v, img) => (img ? /^(https?:\/\/|\/(?!\/))/i : /^(https?:\/\/|mailto:|\/(?!\/)|#)/i).test(String(v || '').trim());
+    function safeMd(text) {
+      const doc = new DOMParser().parseFromString('<!doctype html><body>' + marked.parse(String(text || '')), 'text/html');   // inert: no scripts run
+      const out = document.createElement('div');
+      const copy = (from, to) => {
+        for (const n of from.childNodes) {
+          if (n.nodeType === 3) { to.appendChild(document.createTextNode(n.nodeValue)); continue; }
+          if (n.nodeType !== 1) continue;
+          const tag = n.tagName.toUpperCase();
+          if (SAFE_MD_DROP.has(tag)) continue;
+          if (!SAFE_MD_TAGS.has(tag)) { copy(n, to); continue; }
+          const el = document.createElement(tag.toLowerCase());
+          if (tag === 'A' && safeUrl(n.getAttribute('href'))) { el.setAttribute('href', n.getAttribute('href')); el.setAttribute('rel', 'noopener noreferrer'); el.setAttribute('target', '_blank'); }
+          if (tag === 'IMG') { if (!safeUrl(n.getAttribute('src'), true)) continue; el.setAttribute('src', n.getAttribute('src')); el.setAttribute('alt', n.getAttribute('alt') || ''); }
+          if ((tag === 'A' || tag === 'IMG') && n.getAttribute('title')) el.setAttribute('title', n.getAttribute('title'));
+          if (tag === 'CODE' && /^language-[\w-]+$/.test(n.getAttribute('class') || '')) el.setAttribute('class', n.getAttribute('class'));
+          if (tag === 'OL' && /^\d+$/.test(n.getAttribute('start') || '')) el.setAttribute('start', n.getAttribute('start'));
+          to.appendChild(el); copy(n, el);
+        }
+      };
+      copy(doc.body, out);
+      return out.innerHTML;
+    }
+    // Who works on a ticket (Alex, 2026-11-25). Mirrors buildable() in ~/ops/loop/nightly-loop.py: the builder takes open
+    // bugs and approved ideas; stage "pm" is the VPS PM's; proposals and needs-Alex tickets wait on Alex.
+    function ticketOwner(f) {
+      if (f.status === 'done' || f.status === 'wont-do') return null;
+      const B = 'bg-emerald-950/70 text-emerald-300 border-emerald-800/80', P = 'bg-purple-950/70 text-purple-300 border-purple-800/80';
+      const W = 'bg-sky-950/70 text-sky-300 border-sky-800/80', U = 'bg-gray-800 text-gray-400 border-gray-700';
+      if (f.stage === 'building') return { who: 'builder', label: 'BUILDER · BUILDING', cls: B, tip: 'The nightly builder is working on it now.' };
+      if (f.stage === 'ready' || f.stage === 'deploying') return { who: 'builder', label: 'BUILDER · TESTED', cls: B, tip: 'Built and tested; a "Deploy" task is on your list.' };
+      if (f.stage === 'deployed') return { who: 'builder', label: 'BUILDER · DEPLOYED', cls: B, tip: 'The builder\'s fix is live.' };
+      if (f.stage === 'pm') return { who: 'pm', label: 'VPS PM', cls: P, tip: 'Bigger than a ticket-sized fix: the VPS PM looks into it and plans it with you.' };
+      if (f.needsAlex) return { who: 'alex', label: '', cls: W, tip: '' };   // the NEEDS ALEX badge already says it
+      if (f.stage === 'proposed') return { who: 'alex', label: 'WAITING ON YOU', cls: W, tip: 'An idea waiting for your yes on the Home Proposals card.' };
+      if (f.stage === 'declined') return null;
+      if (f.status === 'in-progress' && f.sessionId) return { who: 'agent', label: 'AGENT SESSION', cls: U, tip: 'A linked agent session is working on it.' };
+      const key = f.dedupeKey || '';
+      if (f.source === 'loop-project' || f.source === 'loop-big' || key.startsWith('health:') || key.startsWith('automation-dead:'))
+        return { who: 'pm', label: 'VPS PM', cls: P, tip: 'Server and project items: the VPS PM handles these.' };
+      if (f.type === 'bug' || f.stage === 'approved') return { who: 'builder', label: 'BUILDER', cls: B, tip: f.stage === 'failed' ? 'The last build failed; the builder tries once more.' : 'The nightly builder tries it (two a night, oldest first).' };
+      return { who: 'none', label: 'UNASSIGNED', cls: U, tip: 'Nobody picks this up on their own. Give it to the builder or the VPS PM.' };
+    }
+    async function assignTicket(id, who) {
+      const body = who === 'pm' ? { stage: 'pm' } : { stage: 'approved', buildAttempts: 0, needsAlex: false };
+      try {
+        const res = await fetch(`/api/feedback/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+        await loadFeedback();
+      } catch (err) { alert('Failed to update: ' + err.message); }
     }
 
     async function toggleFeedbackNeedsAlex(id, needsAlex) {

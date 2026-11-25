@@ -41,6 +41,8 @@ app.set('case sensitive routing', true);
 const CORS_ALLOWED_ORIGINS = ['https://303dashboard.duckdns.org'];
 app.use(cors({ origin: (origin, cb) => cb(null, !!origin && CORS_ALLOWED_ORIGINS.includes(origin)) }));
 app.use(express.json({ limit: '50mb' }));              // must precede mountAuth: /api/login reads req.body
+const errorReport = require('./error-report').create({ dataDir: path.join(__dirname, '../data') });
+app.use(errorReport.capture);   // every 5xx answer goes to data/error-reports.jsonl for the nightly loop (Alex, 2026-11-25)
 const { requireAuth, users: userStore } = mountAuth(app, {
   usersFile: path.join(__dirname, '../data/users.json'),   // per instance: live and staging have separate accounts
   loginHtmlFile: path.join(__dirname, '../public/login.html'),
@@ -1154,6 +1156,7 @@ function authorizeRole(req, res, next) {
   if (!p.startsWith('/api/')) return (m === 'GET' || m === 'HEAD') ? next() : deny();   // the app shell, components, media files (the /media guard narrows those)
   let mm;
   if (p === '/api/me' && m === 'GET') return next();
+  if (p === '/api/client-error' && m === 'POST') return next();   // src/error-report.js: anyone signed in, guests too, may report a browser error
   if (p === '/api/me/password' && m === 'POST') return next();
   if ((p === '/api/me/profile' && m === 'PATCH') || (p === '/api/me/avatar' && m === 'POST')) return next();
   // Guest: the homepage (Alex, 2026-11-09), plus a read-only look at pages, tasks and
@@ -1261,6 +1264,7 @@ const foodLookup = require('./food-lookup').create();
 foodLookup.mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
 require('./nutrition').create({ dataDir: DATA_DIR, limits: aiLimits, lookup: (q, brands) => foodLookup.lookup(q, brands) }).mount(app, { ownerName });   // Nutrition tab: per-person food log, targets, Coach (admin + 303)
 require('./kitchen').create({ dataDir: DATA_DIR, limits: aiLimits }).mount(app, { ownerName });   // Kitchen tab: inventory, meal planner, assistant (prototype, 2026-11-24)
+errorReport.mount(app);   // POST /api/client-error: browser errors for the nightly loop (public/error-report.js)
 subscriptions.mount(app, { isAdminReq, completeScheduled: completeTaskLocked });   // Subscriptions page: admin only, checked on each route (no non-admin allowlist line on purpose)
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./backups-status').create().mount(app, { isAdminReq });   // Server tab > Health & Stats: read-only Backups card (filesystem only, no restic)
