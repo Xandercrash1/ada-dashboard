@@ -25,14 +25,25 @@ const crypto = require('crypto');
 
 const MAX_ATTEMPTS = 5;
 const MAX_DEPTH = 3;
-const BACKOFF_MS = [10e3, 60e3, 5 * 60e3, 30 * 60e3, 2 * 3600e3];
+const BACKOFF_MS = [60e3, 5 * 60e3, 30 * 60e3, 2 * 3600e3];   // after failures 1-4; the 5th is final. The worker ticks once a minute.
 const rules = new Map();
 
-function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock = () => new Date(), onDeadLetter = () => {} }) {
+function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock = () => new Date(), onDeadLetter = null }) {
   const file = (n) => path.join(dataDir, n);
-  const read = (n, dflt) => { try { return JSON.parse(fs.readFileSync(file(n), 'utf8')); } catch (e) { if (e.code === 'ENOENT') return dflt; throw e; } };
+  // A broken automation file must never block a completion: it is set aside (kept, renamed) and started fresh.
+  const read = (n, dflt) => {
+    let raw;
+    try { raw = fs.readFileSync(file(n), 'utf8'); } catch (e) { if (e.code === 'ENOENT') return dflt; throw e; }
+    try { return JSON.parse(raw); } catch (e) {
+      const aside = `${file(n)}.corrupt-${Date.now()}`;
+      try { fs.renameSync(file(n), aside); } catch (_) { /* already moved */ }
+      console.error(`[automation] ${n} was unreadable; kept as ${path.basename(aside)} and started fresh`);
+      return dflt;
+    }
+  };
   const write = (n, v) => { const f = file(n), tmp = `${f}.${process.pid}.${Date.now()}.tmp`; fs.writeFileSync(tmp, JSON.stringify(v, null, 1)); fs.renameSync(tmp, f); };
   const now = () => clock().toISOString();
+  const isAuto = (source) => String(source || '').startsWith('automation:');
   const log = (e) => write('automation-log.json', read('automation-log.json', []).concat({ at: now(), ...e }).slice(-1000));
 
   function enqueue(jobs) {
@@ -51,7 +62,8 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
   function jobsFor(task, { source, depth }) {
     const stamp = task.type === 'recurring' ? `:${engine.todayString()}` : '';
     const out = [...rules.keys()].map((rule) => ({ key: `${rule}:${task.id}${stamp}`, rule, task, source, depth }));
-    if (task.then && task.type !== 'recurring') out.push({ key: `then:${task.id}`, rule: 'then', task, source, depth: depth + 1 });
+    // Only automation counts toward the loop cap: a person ticking off a chain by hand never hits it.
+    if (task.then && task.type !== 'recurring') out.push({ key: `then:${task.id}`, rule: 'then', task, source, depth: isAuto(source) ? depth + 1 : 0 });
     return out;
   }
 
@@ -63,7 +75,10 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
     const rule = job.rule === 'then' ? { onComplete: thenRule } : rules.get(job.rule);
     if (!rule) return dead(job, `no rule called "${job.rule}" is registered`);
     // Only act on completions that really happened (the queue is written before the completion is saved).
-    if (job.task.type !== 'recurring' && store.readTasks().some((t) => t.id === job.task.id)) {
+    const saved = job.task.type === 'recurring'
+      ? store.readTasks().some((t) => t.id === job.task.id && t.lastCompleted === job.key.split(':').pop())
+      : !store.readTasks().some((t) => t.id === job.task.id);
+    if (!saved) {
       if (Date.parse(job.createdAt) < Date.parse(now()) - 60e3) { drop(); log({ key: job.key, rule: job.rule, taskId: job.task.id, result: 'dropped', why: 'the completion was never saved' }); return true; }
       return false;
     }
@@ -82,11 +97,19 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
       return false;
     }
   }
+  // One ticket per dead job. The CLI has no ticket hook, so the server's worker files any it left (ticketed: false).
+  function ticketDead() {
+    if (!onDeadLetter) return;
+    const list = read('automation-dead.json', []);
+    let changed = false;
+    for (const d of list.filter((x) => !x.ticketed)) { try { onDeadLetter(d, d.why); d.ticketed = true; changed = true; } catch (e) { /* tried again next tick */ } }
+    if (changed) write('automation-dead.json', list);
+  }
   function dead(job, why) {
     write('automation-queue.json', read('automation-queue.json', []).filter((j) => j.id !== job.id));
     write('automation-dead.json', read('automation-dead.json', []).concat({ ...job, why, deadAt: now() }).slice(-200));
     log({ key: job.key, rule: job.rule, taskId: job.task && job.task.id, result: 'dead', attempts: job.attempts, error: why });
-    try { onDeadLetter(job, why); } catch (e) { /* the dead list itself is the record */ }
+    ticketDead();
     return true;
   }
 
@@ -103,7 +126,8 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
    * -> { status, body }   body is the same shape the Tasks route has always returned:
    *    repeating tasks: the updated task; others: { success: true, completedEntry }
    */
-  function completeLocked(tasks, task, { source = 'user', depth = task.autoDepth || 0 } = {}) {
+  function completeLocked(tasks, task, { source = 'user', depth } = {}) {
+    depth = isAuto(source) ? (depth != null ? depth : task.autoDepth || 0) : 0;
     let body;
     if (task.type === 'recurring') {
       const today = engine.todayString();
@@ -128,7 +152,8 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
     return { status: 200, body: { success: true, completedEntry: entry } };
   }
 
-  // A rule closing its own task when its condition is met. Call inside store.withLock().
+  // A rule's condition owner closing its task when the condition is met. Call inside store.withLock(), from a route or
+  // the worker — NOT from inside a rule's onComplete (it writes the store, and the rule's own write would undo it).
   function resolveAuto(autoKind, autoKey, { rule = autoKind, depth = 0 } = {}) {
     const tasks = store.readTasks();
     const t = tasks.find((x) => x.autoKind === autoKind && (autoKey == null || x.autoKey === autoKey));
@@ -141,6 +166,7 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
     const due = read('automation-queue.json', []).filter((j) => j.nextAt <= now());
     let ran = 0;
     for (const j of due) { runJob(j); ran++; }
+    ticketDead();
     return ran;
   }
   const status = () => ({ queue: read('automation-queue.json', []), dead: read('automation-dead.json', []), log: read('automation-log.json', []).slice(-50).reverse(), rules: [...rules.keys()] });

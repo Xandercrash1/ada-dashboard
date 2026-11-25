@@ -4587,7 +4587,7 @@ const automation = require('./task-automation').create({
   store: todoStore, engine: todoEngine, sharing,
   onDeadLetter: (job, why) => {
     const items = readFeedback(); const at = new Date().toISOString();
-    items.unshift({ id: `fb-${Date.now()}`, type: 'bug', title: `Task automation stuck: ${job.rule} (${(job.task && job.task.name) || job.key})`,
+    items.unshift({ id: `fb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, type: 'bug', title: `Task automation stuck: ${job.rule} (${(job.task && job.task.name) || job.key})`,
       body: `The automation job ${job.key} gave up after ${job.attempts} tries: ${why}\nIt is in data/automation-dead.json; nothing was undone.`, status: 'new', createdAt: at, updatedAt: at, processedAt: null, processedBy: null, notes: null });
     writeFeedback(items);
   },
@@ -4598,7 +4598,8 @@ function completeTaskLocked(tasks, task, opts) { return automation.completeLocke
 function automationTick() {
   try {
     todoStore.withLock(() => {
-      automation.drain();
+      // Separate tries: a problem with the queue must never stop repeating tasks rolling forward.
+      try { automation.drain(); } catch (e) { console.error('[automation] drain failed:', e.message); }
       const { tasks, changed } = todoEngine.rollForward(todoStore.readTasks(), todoEngine.todayString());
       if (changed) todoStore.writeTasks(tasks);
     });

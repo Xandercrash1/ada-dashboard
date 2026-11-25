@@ -62,21 +62,49 @@ test('a failing rule never undoes the completion; it retries with backoff and de
   reset(); A.register('flaky', { onComplete: () => { if (fail) throw new Error('boom'); } });
   store.writeTasks([sched('b')]);
   auto.completeLocked(store.readTasks(), store.readTasks()[0]);
-  fail = false; advance(20e3); auto.drain();
+  fail = false; advance(70e3); auto.drain();   // first retry is about a minute later
   assert.deepStrictEqual(rd('automation-queue.json'), []);
   assert.ok(rd('automation-log.json').some((l) => l.key === 'flaky:b' && l.result === 'done'));
 });
 
-test('then-chains create the next task, and a chain that keeps going stops at depth 3', () => {
+test('then-chains create the next task; a hand-ticked chain never hits the cap, an automated one stops at depth 3', () => {
   reset(); const { store, auto, rd } = setup();
-  const loop = { name: 'again', dueInDays: 0 }; loop.then = loop;   // a chain that would never end
   store.writeTasks([sched('a', { then: { name: 'Write the thank-you note', dueInDays: 2 } })]);
   auto.completeLocked(store.readTasks(), store.readTasks()[0]);
   const made = store.readTasks()[0];
   assert.strictEqual(made.name, 'Write the thank-you note'); assert.strictEqual(made.dueDate, '2026-11-26'); assert.strictEqual(made.autoKind, 'then');
-  store.writeTasks([sched('x', { then: { name: 'again', then: { name: 'again', then: { name: 'again', then: { name: 'again' } } } } })]);
-  for (let i = 0; i < 6 && store.readTasks().length; i++) auto.completeLocked(store.readTasks(), store.readTasks()[0]);
+  let chain = { name: 'last' }; for (let i = 5; i >= 1; i--) chain = { name: `step ${i}`, then: chain };
+  store.writeTasks([sched('x', { then: chain })]);
+  const names = [];
+  for (let i = 0; i < 8 && store.readTasks().length; i++) { const t = store.readTasks()[0]; names.push(t.name); auto.completeLocked(store.readTasks(), t); }
+  assert.deepStrictEqual(names, ['x', 'step 1', 'step 2', 'step 3', 'step 4', 'step 5', 'last']);   // by hand: no cap
+  assert.deepStrictEqual(rd('automation-dead.json'), []);
+  store.writeTasks([sched('y', { then: { name: 'deep' } })]);
+  auto.completeLocked(store.readTasks(), store.readTasks()[0], { source: 'automation:test', depth: 3 });   // an automation already 3 deep
   assert.ok(rd('automation-dead.json').some((d) => /deeper than 3/.test(d.why)));
+});
+
+test('a broken automation file never blocks a completion; it is set aside and started fresh', () => {
+  reset(); const { store, auto, rd } = setup();
+  A.register('noop', { onComplete: () => undefined });
+  fs.writeFileSync(path.join(store.DATA_DIR, 'automation-log.json'), '{not json');
+  store.writeTasks([sched('a')]);
+  const r = auto.completeLocked(store.readTasks(), store.readTasks()[0]);
+  assert.strictEqual(r.body.success, true); assert.deepStrictEqual(store.readTasks(), []);
+  assert.ok(fs.readdirSync(store.DATA_DIR).some((f) => f.startsWith('automation-log.json.corrupt-')));
+});
+
+test('dead jobs from a process without a ticket hook get their ticket from the next worker run', () => {
+  reset(); const { store, rd } = setup();
+  const tickets = [];
+  const cli = A.create({ store, engine, dataDir: store.DATA_DIR });   // like todo-cli: no onDeadLetter
+  const server = A.create({ store, engine, dataDir: store.DATA_DIR, onDeadLetter: (j) => tickets.push(j.key) });
+  store.writeTasks([sched('a', { then: { name: 'x' } })]);
+  cli.completeLocked(store.readTasks(), store.readTasks()[0], { source: 'automation:test', depth: 5 });
+  assert.strictEqual(rd('automation-dead.json')[0].ticketed, undefined);
+  server.drain();
+  assert.deepStrictEqual(tickets, ['then:a']); assert.strictEqual(rd('automation-dead.json')[0].ticketed, true);
+  server.drain(); assert.strictEqual(tickets.length, 1);   // one ticket only
 });
 
 test('a queued job whose completion was never saved is dropped, not run', () => {
@@ -85,9 +113,11 @@ test('a queued job whose completion was never saved is dropped, not run', () => 
   A.register('watch', { onComplete: () => { ran = true; } });
   store.writeTasks([sched('a')]);
   auto.enqueue([{ key: 'watch:a', rule: 'watch', task: sched('a'), depth: 0 }]);   // as if the process died right after queueing
+  store.writeTasks([sched('a'), { id: 'r', type: 'recurring', name: 'Feed cats', frequency: 'Daily', nextDue: '2026-11-24' }]);
+  auto.enqueue([{ key: `watch:r:${engine.todayString()}`, rule: 'watch', task: { id: 'r', type: 'recurring' }, depth: 0 }]);   // a repeating completion that never saved
   advance(120e3); auto.drain();
   assert.strictEqual(ran, false); assert.deepStrictEqual(rd('automation-queue.json'), []);
-  assert.ok(rd('automation-log.json').some((l) => l.result === 'dropped'));
+  assert.strictEqual(rd('automation-log.json').filter((l) => l.result === 'dropped').length, 2);
 });
 
 test('resolveAuto closes a rule\'s own task through the same path', () => {
