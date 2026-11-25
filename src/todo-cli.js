@@ -112,11 +112,19 @@ function cmdAdd(args) {
   output(args.json, newTask, t => console.log(`Added ${t.type} task "${t.name}" (${t.id}) to ${t.project}.`));
 }
 
+// --device X: X's items plus those of every device X reaches over SSH (src/device-reach.js); --exact: X's only;
+// --device none: items with no device (the VPS or Alex's phone).
+function deviceFilter(args) {
+  if (args.device === 'none') return (t) => !t.device;
+  const devs = args.exact ? [args.device] : require('./device-reach').reachable(store.DATA_DIR, args.device);
+  return (t) => devs.includes(t.device);
+}
+
 function cmdList(args) {
   let tasks = store.readTasks();
   if (args.project) tasks = tasks.filter(t => t.project === args.project);
   if (args.type) tasks = tasks.filter(t => t.type === args.type);
-  if (args.device) tasks = tasks.filter(t => (t.device || '') === (args.device === 'none' ? '' : args.device));   // --device adaone | none
+  if (args.device) tasks = tasks.filter(deviceFilter(args));   // --device adaone (+ the devices it reaches; --exact: only it) | none
   output(args.json, tasks, list => {
     if (!list.length) { console.log('No tasks.'); return; }
     for (const t of list) {
@@ -153,7 +161,7 @@ function cmdToday(args) {
     if (changed) store.writeTasks(newTasks);
     return newTasks;
   });
-  const view = engine.buildView(args.device ? rolled.filter(t => (t.device || '') === (args.device === 'none' ? '' : args.device)) : rolled, today);
+  const view = engine.buildView(args.device ? rolled.filter(deviceFilter(args)) : rolled, today);
   const response = { pastDue: view.pastDue, today: view.today, upcoming: view.upcoming, generatedFor: today };
   if (view.flagged && view.flagged.length) response.flagged = view.flagged;
 

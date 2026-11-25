@@ -4578,7 +4578,12 @@ function automationTick() {
   } catch (e) { console.error('[automation] tick failed:', e.message); }
   syncTicketTasks();   // after the todo lock is released: sync takes it itself
   try { loop.syncDeployTasks(); } catch (e) { console.error('[loop] deploy task sync failed:', e.message); }
+  try { deviceReach.ensureSetupTasks({ dataDir: DATA_DIR, store: todoStore, upsertAutoTask: require('./task-automation').upsertAutoTask, engine: todoEngine }); }
+  catch (e) { console.error('[device-reach] setup task check failed:', e.message); }
 }
+// Which device reaches which over SSH (src/device-reach.js): sessions pick up the items of every device they reach.
+const deviceReach = require('./device-reach');
+app.get('/api/device-reach', (req, res) => (isAdminReq(req) ? res.json(deviceReach.read(DATA_DIR)) : res.status(403).json({ error: 'Admins only.' })));
 setTimeout(automationTick, 5000).unref();
 setInterval(automationTick, 60000).unref();
 app.get('/api/automation', (req, res) => (isAdminReq(req) ? res.json(automation.status()) : res.status(403).json({ error: 'Admins only.' })));

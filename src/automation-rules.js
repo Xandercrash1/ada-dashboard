@@ -19,4 +19,8 @@ automation.register('ticket-task', { onComplete: require('./ticket-tasks').rule(
 // Only the live checkout starts one (src/loop.js); a re-run finds the ticket no longer "ready" and does nothing.
 automation.register('loop-deploy', { onComplete: require('./loop').rule(tickets) });
 
+// Devices (VPS PM, 2026-11-25): Alex checking off "Set up SSH from X to Y" records that X reaches Y, so sessions on X
+// also pick up Y's items (src/device-reach.js). Safe to run twice (an existing pair isn't added again).
+automation.register('device-reach', { onComplete: require('./device-reach').rule(require('./todo-store').DATA_DIR) });
+
 module.exports = automation;
