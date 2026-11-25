@@ -43,8 +43,11 @@ function startDeploy(ticketId) {
   if (!isLive()) { console.log(`[loop] deploy of ${ticketId} not started: only the live checkout deploys`); return; }
   // Off until the builder has its sandbox (review 2026-11-25): the same switch as the nightly builder.
   if (!fs.existsSync(path.join(OPS, 'BUILD_ENABLED'))) { console.log(`[loop] deploy of ${ticketId} not started: building and deploying are off`); return; }
-  const out = fs.openSync(path.join(OPS, 'logs', 'deploy.log'), 'a');
-  spawn('setsid', ['python3', path.join(OPS, 'deploy-ticket.py'), ticketId], { detached: true, stdio: ['ignore', out, out] }).unref();
+  // Fully detached (the shell exits at once, so the runner is re-parented away from this process): promote.sh restarts
+  // live mid-deploy, and pm2 kills live's whole process tree (review 2026-11-25).
+  if (!/^fb-[0-9a-z-]+$/.test(ticketId)) return;
+  const log = path.join(OPS, 'logs', 'deploy.log');
+  spawn('sh', ['-c', 'setsid python3 "$1" "$2" >> "$3" 2>&1 < /dev/null &', 'sh', path.join(OPS, 'deploy-ticket.py'), ticketId, log], { detached: true, stdio: 'ignore' }).unref();
 }
 
 function create({ app, tickets, store, upsertAutoTask, engine, automation, isAdminReq, sync }) {
