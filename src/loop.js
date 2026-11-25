@@ -33,21 +33,29 @@ function rule(tickets, { start = startDeploy } = {}) {
     const tk = tickets.read().find((i) => i.id === task.autoKey);
     if (!tk || isClosed(tk) || tk.stage !== 'ready') return undefined;   // nothing waiting (safe to run twice)
     tickets.update(tk.id, { stage: 'deploying', notes: noteOn(tk, `[loop] ${new Date().toISOString()}: Alex ticked "Deploy" (confirmed); deploying.`) });
-    start(tk.id);
+    let why;
+    try { why = start(tk.id); } catch (e) { why = `the deploy runner could not be started (${e.message})`; }
+    if (why) {   // never leave it at "deploying" with nothing running (test review 2026-11-25): back to ready, and tell Alex
+      const cur = tickets.read().find((i) => i.id === tk.id) || tk;
+      tickets.update(tk.id, { stage: 'ready', needsAlex: true, notes: noteOn(cur, `[loop] ${new Date().toISOString()}: the deploy did not start: ${why}. Nothing changed; the VPS PM will put a new Deploy task on your list once it can run.`) });
+    }
     return undefined;
   };
 }
 const noteOn = (tk, line) => (tk.notes ? `${tk.notes}\n${line}` : line);
 
+// Returns null when the runner was started, or why it wasn't.
 function startDeploy(ticketId) {
-  if (!isLive()) { console.log(`[loop] deploy of ${ticketId} not started: only the live checkout deploys`); return; }
+  const refuse = (why) => { console.log(`[loop] deploy of ${ticketId} not started: ${why}`); return why; };
+  if (!isLive()) return refuse('only the live checkout deploys');
   // Off until the builder has its sandbox (review 2026-11-25): the same switch as the nightly builder.
-  if (!fs.existsSync(path.join(OPS, 'BUILD_ENABLED'))) { console.log(`[loop] deploy of ${ticketId} not started: building and deploying are off`); return; }
+  if (!fs.existsSync(path.join(OPS, 'BUILD_ENABLED'))) return refuse('building and deploying are switched off');
+  if (!/^fb-[0-9a-z-]+$/.test(ticketId)) return refuse('the ticket id is malformed');
   // Fully detached (the shell exits at once, so the runner is re-parented away from this process): promote.sh restarts
   // live mid-deploy, and pm2 kills live's whole process tree (review 2026-11-25).
-  if (!/^fb-[0-9a-z-]+$/.test(ticketId)) return;
   const log = path.join(OPS, 'logs', 'deploy.log');
   spawn('sh', ['-c', 'setsid python3 "$1" "$2" >> "$3" 2>&1 < /dev/null &', 'sh', path.join(OPS, 'deploy-ticket.py'), ticketId, log], { detached: true, stdio: 'ignore' }).unref();
+  return null;
 }
 
 function create({ app, tickets, store, upsertAutoTask, engine, automation, isAdminReq, sync }) {
