@@ -23,7 +23,7 @@
 
 const engine = require('./todo-engine');
 const store = require('./todo-store');
-const subscriptions = require('./subscriptions');
+const automation = require('./automation-rules').create({ store, engine, sharing: require('./sharing') });   // docs/TASK-AUTOMATION.md
 const { normalizeTask } = require('./todo-validate');
 
 function parseArgs(argv) {
@@ -132,38 +132,10 @@ function cmdComplete(args) {
   let result;
   store.withLock(() => {
     const tasks = store.readTasks();
-    const idx = tasks.findIndex(t => t.id === id);
-    if (idx === -1) { result = { error: `No task with id ${id}` }; return; }
-    const task = tasks[idx];
-
-    if (task.type === 'recurring') {
-      const nextDue = engine.calcNextDue(task.frequency, today);
-      if (nextDue === null) {
-        result = { error: `Cannot complete "${task.name}": frequency "${task.frequency}" is unparseable, so no next due date could be computed.` };
-        return;
-      }
-      tasks[idx] = { ...task, lastCompleted: today, nextDue, updatedAt: new Date().toISOString() };
-      store.writeTasks(tasks);
-      result = { task: tasks[idx] };
-      return;
-    }
-
-    const completed = store.readCompleted();
-    const entry = {
-      id: `completed-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      taskId: task.id,
-      name: task.name,
-      project: task.project,
-      type: task.type,
-      completedAt: new Date().toISOString(),
-      notes: task.notes || ''
-    };
-    completed.unshift(entry);
-    store.writeCompleted(completed);
-    let remaining = tasks.filter(t => t.id !== task.id); // id-targeted — §1.1
-    remaining = subscriptions.onTaskCompleted(task, remaining); // subscription-card autopay hook
-    store.writeTasks(remaining);
-    result = { success: true, completedEntry: entry };
+    const task = tasks.find(t => t.id === id);
+    if (!task) { result = { error: `No task with id ${id}` }; return; }
+    const r = automation.completeLocked(tasks, task, { source: 'cli' });   // same path as the dashboard: history, rules, queue
+    result = r.status !== 200 ? { error: r.body.error } : task.type === 'recurring' ? { task: r.body } : r.body;
   });
 
   if (result.error) return fail(args.json, result.error);

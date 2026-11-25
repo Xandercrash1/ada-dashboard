@@ -1875,7 +1875,7 @@
           <div class="flex-1 min-w-0 space-y-1">
             <div class="flex items-center justify-between gap-2">
               <h4 class="text-sm font-medium text-gray-200 truncate">
-                <span class="mr-1">${emoji}</span>${escapeHtml(t.name)}
+                <span class="mr-1">${emoji}</span>${escapeHtml(t.name)}${t.autoKind ? ' <span class="ml-1 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-indigo-500/15 text-indigo-300 align-middle" title="Created and kept up to date automatically (task automation)">auto</span>' : ''}
               </h4>
               <div class="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity absolute right-4 top-3 bg-dark-bg/80 backdrop-blur-sm pl-2 rounded-l-lg z-10">
                 <span class="px-2 py-0.5 rounded text-[9px] font-semibold border ${todoPriorityBadgeClass(t.priority)}">${escapeHtml(t.priority || 'Low')}</span>

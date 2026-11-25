@@ -11,6 +11,7 @@ const sharing = require('./sharing');
 const todoEngine = require('./todo-engine');
 const todoStore = require('./todo-store');
 const subscriptions = require('./subscriptions');
+require('./automation-rules');   // registers every task-automation rule (docs/TASK-AUTOMATION.md)
 const todoValidate = require('./todo-validate');
 
 const app = express();
@@ -4480,12 +4481,8 @@ app.delete('/api/feedback/:id', (req, res) => {
 app.get('/api/todo', (req, res) => {
   try {
     const today = todoEngine.todayString();
-    const rolledTasks = todoStore.withLock(() => {
-      const tasks = todoStore.readTasks();
-      const { tasks: newTasks, changed } = todoEngine.rollForward(tasks, today);
-      if (changed) todoStore.writeTasks(newTasks);
-      return newTasks;
-    });
+    // Roll-forward is shown here but saved by the automation worker (automationTick), so a read never writes.
+    const rolledTasks = todoEngine.rollForward(todoStore.readTasks(), today).tasks;
     const view = todoEngine.buildView(rolledTasks.filter(t => taskVisibleTo(req, t)).map(taskView), today);
     const response = {
       pastDue: view.pastDue,
@@ -4585,59 +4582,44 @@ app.delete('/api/todo/tasks/:id', (req, res) => {
 // Scheduled/backlog completion body, shared by the route below and the Subscriptions page's
 // on-card route. MUST run inside todoStore.withLock (not reentrant) with the freshly read `tasks`.
 // Log first, remove second — order preserved from the original. Returns the completed entry.
-function completeTaskLocked(tasks, task) {
-  const completed = todoStore.readCompleted();
-  const entry = {
-    id: `completed-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    taskId: task.id,
-    name: task.name,
-    project: task.project,
-    type: task.type,
-    completedAt: new Date().toISOString(),
-    notes: task.notes || '',
-    tags: [],
-    ...sharing.view(task)
-  };
-  completed.unshift(entry);
-  todoStore.writeCompleted(completed);
-
-  let remaining = tasks.filter(t => t.id !== task.id); // id-targeted (§1.1) — only this row, even with duplicate names
-  remaining = subscriptions.onTaskCompleted(task, remaining); // subscription-card autopay hook (may add/update one task)
-  todoStore.writeTasks(remaining);
-  return entry;
+// Task automation (docs/TASK-AUTOMATION.md): the one completion path, its queue worker and dead-letter tickets.
+const automation = require('./task-automation').create({
+  store: todoStore, engine: todoEngine, sharing,
+  onDeadLetter: (job, why) => {
+    const items = readFeedback(); const at = new Date().toISOString();
+    items.unshift({ id: `fb-${Date.now()}`, type: 'bug', title: `Task automation stuck: ${job.rule} (${(job.task && job.task.name) || job.key})`,
+      body: `The automation job ${job.key} gave up after ${job.attempts} tries: ${why}\nIt is in data/automation-dead.json; nothing was undone.`, status: 'new', createdAt: at, updatedAt: at, processedAt: null, processedBy: null, notes: null });
+    writeFeedback(items);
+  },
+});
+// Shared scheduled/backlog completion for callers already inside the store lock (the Subscriptions on-card route).
+function completeTaskLocked(tasks, task, opts) { return automation.completeLocked(tasks, task, opts).body.completedEntry; }
+// The worker: retries queued jobs and persists repeating-task roll-forward, once a minute and at start-up.
+function automationTick() {
+  try {
+    todoStore.withLock(() => {
+      automation.drain();
+      const { tasks, changed } = todoEngine.rollForward(todoStore.readTasks(), todoEngine.todayString());
+      if (changed) todoStore.writeTasks(tasks);
+    });
+  } catch (e) { console.error('[automation] tick failed:', e.message); }
 }
+setTimeout(automationTick, 5000).unref();
+setInterval(automationTick, 60000).unref();
+app.get('/api/automation', (req, res) => (isAdminReq(req) ? res.json(automation.status()) : res.status(403).json({ error: 'Admins only.' })));
 
 // The important one (contract §4). Semantics differ sharply by type — see
 // spec §5.3-5.4 and contract §1.1/§1.2 for why: id-targeted (never
 // name-targeted, closing the duplicate-name cascade bug), and scheduled/
 // backlog completion writes history BEFORE removing the task (order is
-// load-bearing, preserved from the Python original).
+// load-bearing, preserved from the Python original). All of it lives in task-automation.js now.
 app.post('/api/todo/tasks/:id/complete', (req, res) => {
   try {
     let result;
-    const today = todoEngine.todayString();
     todoStore.withLock(() => {
       const tasks = todoStore.readTasks();
-      const idx = tasks.findIndex(t => t.id === req.params.id);
-      if (idx === -1) { result = { status: 404, body: { error: 'Task not found' } }; return; }
-      const task = tasks[idx];
-
-      if (task.type === 'recurring') {
-        const nextDue = todoEngine.calcNextDue(task.frequency, today);
-        if (nextDue === null) {
-          // Reject rather than writing "—" and orphaning the row, unlike Python (contract §4).
-          result = { status: 400, body: { error: `Cannot complete "${task.name}": frequency "${task.frequency}" is unparseable, so no next due date could be computed.` } };
-          return;
-        }
-        tasks[idx] = { ...task, lastCompleted: today, nextDue, updatedAt: new Date().toISOString() }; // dueTime untouched — preserved via spread
-        todoStore.writeTasks(tasks);
-        result = { status: 200, body: tasks[idx] };
-        return; // Recurring completions are NOT logged to history (spec §5.3/§5.4).
-      }
-
-      // scheduled / backlog: shared with the Subscriptions on-card route.
-      const entry = completeTaskLocked(tasks, task);
-      result = { status: 200, body: { success: true, completedEntry: entry } };
+      const task = tasks.find(t => t.id === req.params.id);
+      result = task ? automation.completeLocked(tasks, task) : { status: 404, body: { error: 'Task not found' } };
     });
     res.status(result.status).json(result.body);
   } catch (err) {
