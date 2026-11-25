@@ -35,12 +35,12 @@
   function badge(it) {
     const d = it.daysLeft;
     if (it.status === 'none') return '<span class="text-xs text-gray-400">keeps</span>';
-    const [cls, txt] = it.status === 'expired' ? ['bg-rose-500/15 text-rose-500', `${-d} day${d === -1 ? '' : 's'} past`]
-      : it.status === 'today' ? ['bg-rose-500/15 text-rose-500', 'use today']
-        : it.status === 'soon' ? ['bg-amber-500/15 text-amber-600 dark:text-amber-400', `${d} day${d === 1 ? '' : 's'} left`]
+    const [cls, txt] = it.status === 'expired' ? ['bg-rose-500/15 text-rose-500', d === -1 ? 'expired' : `expired ${-d} days ago`]
+      : it.status === 'today' ? ['bg-rose-500/15 text-rose-500', 'last day']
+        : it.status === 'soon' ? ['bg-amber-500/15 text-amber-600 dark:text-amber-400', d === 1 ? 'good through tomorrow' : `${d} more days`]
           : it.status === 'week' ? ['bg-yellow-500/10 text-yellow-700 dark:text-yellow-300', `${d} days left`]
             : ['bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', d > 60 ? `${Math.round(d / 30)} months` : `${d} days`];
-    return `<span class="text-xs font-semibold rounded-full px-2 py-0.5 whitespace-nowrap ${cls}" title="Use by ${esc(it.expiresOn)}${it.expirySource === 'label' ? ' (package date)' : ' (estimated)'}">${txt}</span>`;
+    return `<span class="text-xs font-semibold rounded-full px-2 py-0.5 whitespace-nowrap ${cls}" title="Good through ${esc(it.expiresOn)}${it.expirySource === 'label' ? ' (package date)' : ' (estimated)'}">${txt}</span>`;
   }
   const note = () => (S.err ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.err)}</div>` : '') + (S.msg ? `<div class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.msg)}</div>` : '');
 
@@ -118,7 +118,7 @@
       <input name="name" class="${input}" placeholder="What is it? (e.g. Chicken thighs)" maxlength="80" required>
       <div class="grid grid-cols-2 gap-2"><input name="qty" type="number" step="any" min="0" value="1" class="${input}" aria-label="Amount"><input name="unit" class="${input}" placeholder="unit (lb, cups, cans)" maxlength="16"></div>
       <div class="grid grid-cols-3 gap-2">${PLACES.map(([k, n], i) => `<label class="${ghost} flex items-center justify-center gap-1 cursor-pointer has-[:checked]:bg-indigo-600 has-[:checked]:text-white"><input type="radio" name="location" value="${k}" class="sr-only" ${i === 0 ? 'checked' : ''}>${n}</label>`).join('')}</div>
-      <label class="block text-xs text-gray-500">Use-by date on the package (optional; otherwise estimated)<input name="expiresOn" type="date" class="${input} mt-1"></label>
+      <label class="block text-xs text-gray-500">Last good day, if the package says (optional; otherwise estimated)<input name="expiresOn" type="date" class="${input} mt-1"></label>
       <label class="block text-xs text-gray-500">Warn me when it gets down to (optional)<input name="lowAt" type="number" step="any" min="0" class="${input} mt-1"></label>
       <button class="${primary} w-full">Add</button><p class="text-xs text-gray-500">Tip: the assistant can add a whole grocery run at once.</p></form>`);
     for (const [k, n, ic] of PLACES) {
@@ -126,9 +126,9 @@
       out.push(`<div class="${card}"><h3 class="font-semibold mb-1"><i class="fa-solid ${ic} text-indigo-500"></i> ${n} <span class="text-xs text-gray-500 font-normal">${rows.length}</span></h3>
         ${rows.length ? `<ul class="divide-y divide-black/5 dark:divide-white/10">${rows.map(itemRow).join('')}</ul>` : '<p class="text-sm text-gray-500">Empty.</p>'}</div>`);
     }
-    out.push(`<details class="${card}"><summary class="font-semibold cursor-pointer">How long things keep</summary><p class="text-xs text-gray-500 my-2">Days from when it goes in. Moving something to the freezer restarts its clock; a date on the package always wins.</p>
+    out.push(`<details class="${card}"><summary class="font-semibold cursor-pointer">How long things keep</summary><p class="text-xs text-gray-500 my-2">Days it stays good, counting the day it goes in; the last of those is its "last day" and it counts as expired the next day. Moving something to the freezer restarts its clock; a date on the package always wins.</p>
       <table class="w-full text-xs"><thead><tr class="text-gray-500"><th class="text-left py-1">Food</th><th>Fridge</th><th>Freezer</th><th>Pantry</th></tr></thead><tbody>${v.rules.map((r) => `<tr class="border-t border-black/5 dark:border-white/10"><td class="py-1">${esc(r.label)}</td><td class="text-center">${r.fridge || '–'}</td><td class="text-center">${r.freezer || '–'}</td><td class="text-center">${r.pantry || '–'}</td></tr>`).join('')}</tbody></table></details>`);
-    if (v.log.length) out.push(`<details class="${card}"><summary class="font-semibold cursor-pointer">Recent changes</summary><ul class="mt-2 space-y-1 text-xs text-gray-500">${v.log.map((l) => `<li>${esc(new Date(l.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))} · ${l.who === 'assistant' ? 'Assistant' : 'You'}: ${esc(l.summary)}</li>`).join('')}</ul></details>`);
+    if (v.log.length) out.push(`<details class="${card}"><summary class="font-semibold cursor-pointer">Recent changes</summary><ul class="mt-2 space-y-1 text-xs text-gray-500">${v.log.map((l) => `<li>${esc(new Date(l.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))} · ${l.who === 'assistant' ? 'Assistant' : esc(l.who.charAt(0).toUpperCase() + l.who.slice(1))}: ${esc(l.summary)}</li>`).join('')}</ul></details>`);
     return out.join('');
   }
   function itemRow(i) {
@@ -136,7 +136,7 @@
     return `<li class="py-2"><button class="w-full flex items-center justify-between gap-2 text-left min-h-[40px]" data-act="item-open" data-id="${i.id}"><span class="min-w-0"><span class="font-medium">${esc(i.name)}</span> <span class="text-sm text-gray-500">${amount(i.qty, i.unit)}</span>${i.low ? ' <i class="fa-solid fa-battery-quarter text-rose-500" title="Running low"></i>' : ''}</span>${badge(i)}</button>
       ${open ? `<div class="mt-2 space-y-2"><div class="flex gap-2"><input id="kit-use-${i.id}" type="number" step="any" min="0" value="${i.qty <= 1 ? qty(i.qty) : 1}" class="${input} !w-24" aria-label="Amount used"><button class="${ghost} flex-1" data-act="item-use" data-id="${i.id}">Used this much</button></div>
         <div class="grid grid-cols-3 gap-2">${PLACES.filter(([k]) => k !== i.location).map(([k, n]) => `<button class="${ghost}" data-act="item-move" data-id="${i.id}" data-to="${k}">To ${n.toLowerCase()}</button>`).join('')}<button class="${ghost} text-rose-500" data-act="item-del" data-id="${i.id}">${i.status === 'expired' ? 'Toss' : 'Remove'}</button></div>
-        <p class="text-xs text-gray-500">In the ${esc(i.location)} since ${esc(i.placedOn || i.addedOn)}${i.expiresOn ? `, use by ${esc(i.expiresOn)} (${i.expirySource === 'label' ? 'package date' : 'estimated'})` : ''}.</p></div>` : ''}</li>`;
+        <p class="text-xs text-gray-500">In the ${esc(i.location)} since ${esc(i.placedOn || i.addedOn)}${i.expiresOn ? `, good through ${esc(i.expiresOn)} (${i.expirySource === 'label' ? 'package date' : 'estimated'}); expired the day after` : ''}.</p></div>` : ''}</li>`;
   }
 
   // ---------- Assistant
@@ -145,7 +145,7 @@
     const msgs = S.chat.map((m) => m.role === 'user'
       ? `<div class="flex justify-end"><div class="max-w-[85%] rounded-2xl rounded-br-md bg-indigo-600 text-white px-3 py-2 text-sm whitespace-pre-line">${esc(m.content)}</div></div>`
       : `<div class="max-w-[90%] rounded-2xl rounded-bl-md bg-black/5 dark:bg-white/10 px-3 py-2 text-sm whitespace-pre-line">${esc(m.content)}${(m.done && m.done.length) ? `<ul class="mt-2 pt-2 border-t border-black/10 dark:border-white/10 text-xs space-y-0.5">${m.done.map((x) => `<li><i class="fa-solid fa-check text-emerald-500"></i> ${esc(x)}</li>`).join('')}</ul>` : ''}${(m.problems && m.problems.length) ? `<ul class="mt-1 text-xs text-rose-500">${m.problems.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div>`).join('');
-    return `<div class="${card} space-y-3"><div class="space-y-2" id="kit-chat">${msgs || '<p class="text-sm text-gray-500">Tell me what you bought, what you cooked or used, or ask what to make. I keep the inventory and the plan up to date as we talk.</p>'}
+    return `<div class="${card} space-y-3"><div class="space-y-2" id="kit-chat">${msgs || '<p class="text-sm text-gray-500">Tell me what you bought, what you cooked or used, or ask what to make. The kitchen is shared by the house, so everyone sees the same inventory and plan; this chat is just yours.</p>'}
       ${S.busy ? '<div class="text-sm text-gray-500"><i class="fa-solid fa-spinner fa-spin"></i> Thinking…</div>' : ''}</div>
       <div class="flex flex-wrap gap-2">${chips.map((c) => `<button class="text-xs rounded-full px-3 py-2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300" data-act="chip" data-q="${esc(c)}">${esc(c.trim())}</button>`).join('')}</div>
       <form data-form="chat" class="flex gap-2 items-end"><textarea id="kit-input" rows="2" class="${input}" placeholder="e.g. Picked up 2 lb ground beef, a dozen eggs and spinach" maxlength="2000"></textarea><button class="${primary}" ${S.busy ? 'disabled' : ''} aria-label="Send"><i class="fa-solid fa-paper-plane"></i></button></form>

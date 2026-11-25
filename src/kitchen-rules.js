@@ -4,7 +4,8 @@
  * No I/O here, so all of it is unit-tested in kitchen.test.js.
  *
  * Shelf lives are conservative home-kitchen figures (USDA/FoodKeeper style), in days, counted
- * from the day an item goes into that place. Moving an item (fridge -> freezer, freezer -> fridge
+ * from the day an item goes into that place (that day counts as day 1). An item's date is its last good
+ * day: on that day it shows "last day", and from the next day it counts as expired. Moving an item (fridge -> freezer, freezer -> fridge
  * to thaw) restarts the clock for the new place. A date printed on the package always wins.
  */
 'use strict';
@@ -75,7 +76,8 @@ function shelfLife(category, location, fromDate) {
   const s = SHELF[category] || SHELF.other;
   const days = s[location] != null ? s[location] : null;
   if (days == null) return null;
-  return { date: addDays(fromDate, days), days };
+  // The date is the LAST GOOD DAY (Alex, 2026-11-24): 4 days for meat put in on the 24th = good through the 27th, expired on the 28th.
+  return { date: addDays(fromDate, days - 1), days };
 }
 
 // ---- units: everything converts to a base of grams, millilitres or count

@@ -10,7 +10,7 @@ const kitchen = require('./kitchen');
 const NOW = new Date('2026-11-24T17:00:00Z');   // 12:00 Eastern, Tuesday
 
 test('shelf life: raw meat 4 days in the fridge, much longer frozen; poultry 2', () => {
-  assert.deepStrictEqual(R.shelfLife('meat', 'fridge', '2026-11-24'), { date: '2026-11-28', days: 4 });
+  assert.deepStrictEqual(R.shelfLife('meat', 'fridge', '2026-11-24'), { date: '2026-11-27', days: 4 });
   assert.strictEqual(R.shelfLife('meat', 'freezer', '2026-11-24').days, 180);
   assert.strictEqual(R.shelfLife('poultry', 'fridge', '2026-11-24').days, 2);
   assert.strictEqual(R.shelfLife('dry', 'fridge', '2026-11-24'), null);
@@ -48,6 +48,16 @@ test('planCook: soonest-expiring first, missing, short and unsure', () => {
   const short = R.planCook({ ingredients: [{ name: 'soy sauce', qty: 1, unit: 'cup' }] }, items);
   assert.strictEqual(short.missing[0].short, 0.38);   // 16 tbsp needed, 10 on hand: 6 tbsp short, in the recipe's unit (cups)
 });
+test('home card: only items on their last good day', async () => {
+  const { s, call } = server();
+  try {
+    await call('POST', '/items', { name: 'Chicken thighs', qty: 1, unit: 'lb', location: 'fridge', expiresOn: '2026-11-24' });
+    await call('POST', '/items', { name: 'Milk', qty: 1, unit: 'gallon', expiresOn: '2026-11-23' });
+    await call('POST', '/items', { name: 'Eggs', qty: 12, unit: '' });
+    const r = await call('GET', '/today', null, { 'x-user': 'paige', 'x-role': '303' });
+    assert.deepStrictEqual(r.body.lastDay.map((i) => i.name), ['Chicken thighs']);
+  } finally { s.close(); }
+});
 test('freshness and low stock', () => {
   assert.strictEqual(R.freshness({ expiresOn: '2026-11-23' }, '2026-11-24').status, 'expired');
   assert.strictEqual(R.freshness({ expiresOn: '2026-11-26' }, '2026-11-24').status, 'soon');
@@ -71,17 +81,20 @@ test('items: expiry from the rules, package date wins, moving to the freezer res
   const { s, call } = server();
   try {
     let r = await call('POST', '/items', { name: 'Pork chops', qty: 4, unit: '', location: 'fridge' });
-    assert.strictEqual(r.body.item.expiresOn, '2026-11-28');
+    assert.strictEqual(r.body.item.expiresOn, '2026-11-27');   // last good day
     r = await call('POST', '/items', { name: 'Milk', qty: 1, unit: 'gallon', expiresOn: '2026-12-02' });
     assert.strictEqual(r.body.item.expirySource, 'label');
     const chops = r.body.state.items.find((i) => i.name === 'Pork chops');
     r = await call('PATCH', `/items/${chops.id}`, { location: 'freezer' });
-    assert.strictEqual(r.body.state.items.find((i) => i.id === chops.id).expiresOn, R.addDays('2026-11-24', 180));
+    assert.strictEqual(r.body.state.items.find((i) => i.id === chops.id).expiresOn, R.addDays('2026-11-24', 179));
     r = await call('POST', '/items', { name: 'Pork chops', qty: 2, unit: '', location: 'freezer' });   // tops up the same row
     assert.strictEqual(r.body.state.items.filter((i) => i.name === 'Pork chops').length, 1);
     assert.strictEqual(r.body.state.items.find((i) => i.name === 'Pork chops').qty, 6);
     assert.strictEqual((await call('GET', '/state', null, { 'x-role': 'guest' })).status, 403);
-    assert.strictEqual((await call('GET', '/state', null, { 'x-user': 'paige' })).body.items.length, 0);   // each person has their own kitchen
+    assert.strictEqual((await call('GET', '/state', null, { 'x-user': 'paige', 'x-role': '303' })).body.items.length, 2);   // the 303 household shares one kitchen
+    assert.strictEqual((await call('GET', '/state', null, { 'x-user': 'tester', 'x-role': 'pages' })).body.items.length, 0);   // other accounts keep their own
+    const td = await call('GET', '/today');
+    assert.deepStrictEqual(td.body.lastDay, []);
   } finally { s.close(); }
 });
 
@@ -122,7 +135,7 @@ test('assistant: block applied by the server, a cook with something missing turn
     await call('POST', '/assistant', { message: 'Bought a pound of ground beef and a box of spaghetti. Save my bolognese recipe.' });
     let st = await wait();
     assert.strictEqual(st.view.items.length, 2);
-    assert.strictEqual(st.view.items.find((i) => i.name === 'Ground beef').expiresOn, '2026-11-26');
+    assert.strictEqual(st.view.items.find((i) => i.name === 'Ground beef').expiresOn, '2026-11-25');
     assert.strictEqual(st.view.recipes.length, 1);
     assert.ok(st.messages.at(-1).done.length >= 3);
     await call('POST', '/assistant', { message: 'Making the bolognese tonight' });
@@ -131,7 +144,7 @@ test('assistant: block applied by the server, a cook with something missing turn
     assert.strictEqual(st.view.items.length, 2);   // nothing taken yet
     await call('POST', '/assistant', { message: 'Yes I bought a can' });
     st = await wait();
-    assert.match(seen[2], /WAITING ON THE PERSON/);
+    assert.match(seen[2], /WAITING ON THEM/);
     assert.strictEqual(st.view.items.length, 0);   // beef, spaghetti and the can all used up
   } finally { s.close(); }
 });

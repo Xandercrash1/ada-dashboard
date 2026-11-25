@@ -87,6 +87,11 @@ class HomeView extends HTMLElement {
     this.events = [];
     this.innerHTML = `<div class="h-wrap">
       <header><h1 data-r="hello"></h1><p class="h-sub" data-r="date"></p></header>
+      <section aria-labelledby="h-kitchen" data-r="kitchen" hidden><h2 id="h-kitchen">Kitchen</h2>
+        <p class="h-sum" data-r="ksum"></p>
+        <ul class="h-rows" data-r="krows"></ul>
+        <button type="button" class="h-link" data-r="kopen">Open Kitchen</button>
+      </section>
       <div class="h-cols">
         <section aria-labelledby="h-today"><h2 id="h-today">Today</h2>
           <p class="h-sum" data-r="sum" aria-live="polite"></p>
@@ -119,6 +124,7 @@ class HomeView extends HTMLElement {
     this.querySelectorAll('[data-r]').forEach(n => { this.r[n.dataset.r] = n; });
     this.r.nedit.onclick = () => window.openAnnouncementModal();
     this.r.all.onclick = () => window.switchTab('todo');
+    this.r.kopen.onclick = () => window.switchTab('kitchen');
     this.r.pick.onclick = () => this.r.ask.showModal();
     this.r.ano.onclick = () => this.r.ask.close();
     this.r.ask.onclick = e => { if (e.target === this.r.ask) this.r.ask.close(); };   // the backdrop
@@ -148,7 +154,22 @@ class HomeView extends HTMLElement {
     this.loadHouse();
     this.loadPages();
     this.loadEvents();   // the server returns only events shared with this account
+    if (['admin', '303'].includes(this.me.role)) this.loadKitchen();
     if (this.isAdmin) this.loadAdmin();
+  }
+
+  // Kitchen (2026-11-24): shows only while something in the shared 303 kitchen is on its last good day; otherwise hidden.
+  async loadKitchen() {
+    let items = [];
+    try { items = (await getJson('/api/kitchen/today')).lastDay || []; } catch (e) { /* no card */ }
+    this.r.kitchen.hidden = !items.length;
+    if (!items.length) return;
+    this.r.ksum.textContent = items.length === 1 ? 'Last day to use' : `${items.length} things on their last day`;
+    this.r.krows.replaceChildren(...items.slice(0, 6).map(i => {
+      const li = el('li', 'h-event'), name = el('span', '', i.name), amt = el('span', 'h-who', `${Math.round(i.qty * 100) / 100}${i.unit ? ' ' + i.unit : ''} · ${i.location}`);
+      li.append(name, amt);
+      return li;
+    }));
   }
 
   // The announcement editor saved: draw what it wrote without refetching.
