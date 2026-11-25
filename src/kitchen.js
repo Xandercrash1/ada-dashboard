@@ -23,7 +23,7 @@ const { execFile } = require('child_process');
 const { today: easternToday } = require('./ai-limits');
 const R = require('./kitchen-rules');
 
-const VERSION = '0.1.0';
+const VERSION = '0.1';   // alpha 0.1 (Alex, 2026-11-24); round-1 fixes go in 0.1.1, beta is 0.2
 const MODEL = 'claude-sonnet-5-5';
 const TIMEOUT_MS = 120000;
 const USER_RE = /^[a-z][a-z0-9_-]{1,31}$/;

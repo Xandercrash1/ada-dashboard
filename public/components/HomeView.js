@@ -159,7 +159,6 @@ class HomeView extends HTMLElement {
     this.loadHouse();
     this.loadPages();
     this.loadEvents();   // the server returns only events shared with this account
-    if (['admin', '303'].includes(this.me.role)) this.loadKitchen();
     if (this.isAdmin) this.loadAdmin();
   }
 
@@ -382,7 +381,13 @@ class HomeView extends HTMLElement {
       ? [['todo', 'Tasks'], ['projects', 'Projects'], ['tools', 'Scripts']]
       : guest ? [] : [['todo', 'Tasks']];
     // Project pages live on their project's hub, as in the top bar.
-    const own = pages.filter(p => !p.project || p.kind === 'builtin').map(p => [p.id, p.title]);   // builtin: a built-in view listed like a page (its id is the view's id)
+    // homeFor (Kitchen, 2026-11-24): a built-in view can be shared through its project but put on Home only for some
+    // people, e.g. only Alex while it's in alpha. Entries are usernames or '@303' (admin and 303 accounts).
+    const onHome = p => !p.homeFor || p.homeFor.includes(this.me.username) || (p.homeFor.includes('@303') && ['admin', '303'].includes(this.me.role));
+    const own = pages.filter(p => (!p.project || p.kind === 'builtin') && onHome(p)).map(p => [p.id, p.title]);   // builtin: a built-in view listed like a page (its id is the view's id)
+    // The Kitchen cards follow the Kitchen's Home link: whoever has the link on Home gets the cards.
+    const kitchen = pages.find(p => p.id === 'kitchen' && p.kind === 'builtin');
+    if (kitchen && onHome(kitchen)) this.loadKitchen(); else { this.r.kitchen.hidden = true; this.r.meals.hidden = true; }
     this.r.pages.hidden = guest && !own.length;
     // Sites on this server, for Alex only (2026-11-10). Opened from here so the sign-in cookie
     // (SameSite=Strict) goes along; a link tapped in another app arrives signed out.
