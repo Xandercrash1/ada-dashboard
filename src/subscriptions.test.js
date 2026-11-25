@@ -94,4 +94,67 @@ check('totals: math', subs.computeTotals(tl, { cardArrival: '2026-12-09', cap: 3
   { onCardMonthly: 15.5, autopay: 55.5, notMovedMonthly: 18.98, notMovedYearly: 60, cap: 300, cardArrival: '2026-12-09' });
 check('totals: empty', subs.computeTotals([]).autopay, 40);
 
+// --- on-card route (markOnCard) against a temp data dir, plus the shared completion ---
+{
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const todoStore = require('./todo-store');
+  // DATA_DIR is fixed at ../data, so back up and restore whatever the store files hold.
+  const files = [subs.SUBS_FILE, path.join(todoStore.DATA_DIR, 'todo_tasks.json'), path.join(todoStore.DATA_DIR, 'todo_completed.json')];
+  const backup = files.map(f => (fs.existsSync(f) ? fs.readFileSync(f) : null));
+  try {
+    // Mirror of server.js completeTaskLocked (log first, remove second, then the hook).
+    const complete = (tasks, task) => {
+      const completed = todoStore.readCompleted();
+      const entry = { id: 'completed-test', taskId: task.id, name: task.name, project: task.project, type: task.type, completedAt: NOW.toISOString(), notes: task.notes || '', tags: [] };
+      completed.unshift(entry); todoStore.writeCompleted(completed);
+      todoStore.writeTasks(subs.onTaskCompleted(task, tasks.filter(t => t.id !== task.id)));
+      return entry;
+    };
+    const seed = (rowsArr, tasksArr) => { subs.writeSubscriptions(rowsArr); todoStore.writeTasks(tasksArr); todoStore.writeCompleted([]); };
+
+    // 1. existing switch task
+    seed([row('x', 1, 'monthly', false, 't1'), row('y', 6.5, 'monthly', true, 't2')], [sched('t1', 'Switch X to the subscription card')]);
+    let res = subs.markOnCard('x', complete);
+    check('on-card: status 200', res.status, 200);
+    check('on-card: switch task removed', todoStore.readTasks().some(t => t.id === 't1'), false);
+    check('on-card: completed entry exists', todoStore.readCompleted().map(c => c.taskId), ['t1']);
+    check('on-card: row onCard', res.body.row.onCard, true);
+    const ap = todoStore.readTasks().filter(t => t.autoKind === 'subcard-autopay');
+    check('on-card: autopay created at $47.50', [ap.length, ap[0].name, res.body.autopayTaskId === ap[0].id, res.body.totals.autopay], [1, "Set the subscription card's autopay to $47.50", true, 47.5]);
+
+    // 2. already onCard: no-op
+    const before = JSON.stringify([fs.readFileSync(subs.SUBS_FILE, 'utf8'), todoStore.readTasks(), todoStore.readCompleted()]);
+    res = subs.markOnCard('x', complete);
+    check('on-card: already onCard is a no-op', [res.status, JSON.stringify([fs.readFileSync(subs.SUBS_FILE, 'utf8'), todoStore.readTasks(), todoStore.readCompleted()]) === before], [200, true]);
+
+    // 3. missing switch task: sets onCard and updates the existing autopay task in place
+    const rows3 = subs.readSubscriptions().concat([row('z', 2, 'monthly', false, 'gone'), row('w', 3, 'monthly', false, null)]);
+    subs.writeSubscriptions(rows3);
+    res = subs.markOnCard('z', complete);
+    const ap3 = todoStore.readTasks().filter(t => t.autoKind === 'subcard-autopay');
+    check('on-card: missing switch task -> onCard, autopay updated in place', [res.status, res.body.row.onCard, ap3.length, ap3[0].id === ap[0].id, ap3[0].name, todoStore.readCompleted().length],
+      [200, true, 1, true, "Set the subscription card's autopay to $49.50", 1]);
+    check('on-card: missing task notes line', ap3[0].notes.includes('Generated when z was marked on the card on the Subscriptions page.'), true);
+    res = subs.markOnCard('w', complete);
+    check('on-card: no switchTaskId -> onCard, autopay $52.50', [res.body.row.onCard, res.body.totals.autopay], [true, 52.5]);
+
+    // 3b. missing switch task and no autopay task yet: created
+    seed([row('q', 4, 'monthly', false, null)], []);
+    res = subs.markOnCard('q', complete);
+    check('on-card: missing task, no autopay yet -> created', [res.body.row.onCard, todoStore.readTasks().filter(t => t.autoKind === 'subcard-autopay').length, res.body.totals.autopay], [true, 1, 44]);
+
+    // 4. unknown id
+    res = subs.markOnCard('nope', complete);
+    check('on-card: unknown id -> 404', res.status, 404);
+
+    // 5. shared completion on a plain unlinked task: logged, removed, nothing else touched
+    seed([row('x', 1, 'monthly', false, 't1')], [sched('p1', 'Plain'), sched('p2', 'Other')]);
+    const entry = complete(todoStore.readTasks(), todoStore.readTasks()[0]);
+    check('completion: unlinked task logged and removed', [todoStore.readTasks().map(t => t.id), todoStore.readCompleted().map(c => c.taskId), entry.name], [['p2'], ['p1'], 'Plain']);
+    check('completion: unlinked leaves subscriptions untouched', subs.readSubscriptions()[0].onCard, false);
+  } finally {
+    files.forEach((f, i) => { if (backup[i] === null) { try { fs.unlinkSync(f); } catch (e) {} } else fs.writeFileSync(f, backup[i]); });
+  }
+}
+
 console.log(`${passed} checks passed`);

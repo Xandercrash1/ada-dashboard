@@ -37,13 +37,13 @@ function computeTotal(subs) {
   return { items, total: Math.round(total * 100) / 100 };
 }
 
-function buildNotes(items, total, completedName) {
+function buildNotes(items, total, sourceLine) {
   const lines = items.map(s => `${s.name}: $${money(s.price)}`);
   lines.push(`+ $${money(BUFFER)} buffer`);
   lines.push(`+ $${money(MIN_PAYMENT)} minimum payment`);
   lines.push(`= $${money(total)}`);
   lines.push('');
-  lines.push(`Generated when '${completedName}' was checked off.`);
+  lines.push(sourceLine);
   return lines.join('\n');
 }
 
@@ -55,12 +55,20 @@ function buildNotes(items, total, completedName) {
 function processCompletion(subs, tasks, completedTask, now, today) {
   const idx = subs.findIndex(s => s.switchTaskId && s.switchTaskId === completedTask.id);
   if (idx === -1 || completedTask.type === 'recurring') return { subs, tasks, changed: false, autopayTask: null };
+  return applyOnCard(subs, tasks, idx, now, today, `Generated when '${completedTask.name}' was checked off.`);
+}
 
+/**
+ * applyOnCard(subs, tasks, idx, now, today, sourceLine) -> { subs, tasks, changed:true, autopayTask }
+ * Marks subs[idx] onCard and creates (or updates in place) the single autopay task.
+ * Shared by processCompletion (task checked off) and the Subscriptions page's on-card route.
+ */
+function applyOnCard(subs, tasks, idx, now, today, sourceLine) {
   const nowIso = now.toISOString();
   const newSubs = subs.map((s, i) => (i === idx ? { ...s, onCard: true, onCardAt: nowIso } : s));
   const { items, total } = computeTotal(newSubs);
   const name = `Set the subscription card's autopay to $${money(total)}`;
-  const notes = buildNotes(items, total, completedTask.name);
+  const notes = buildNotes(items, total, sourceLine);
 
   const newTasks = tasks.slice();
   const openIdx = newTasks.findIndex(t => t.autoKind === AUTO_KIND);
@@ -190,14 +198,48 @@ function createSubscription(value) {
   });
 }
 
+/**
+ * Store-backed "mark on the card" from the Subscriptions page. One todo-store lock.
+ * completeScheduled(tasks, task) is server.js's shared completion (logs, removes, fires the hook, writes tasks).
+ * -> { status, body }
+ */
+function markOnCard(id, completeScheduled) {
+  return todoStore.withLock(() => {
+    const subs = readSubscriptions();
+    const idx = subs.findIndex(s => s.id === id);
+    if (idx === -1) return { status: 404, body: { error: 'Subscription not found' } };
+    const tasks = todoStore.readTasks();
+    const finish = (rows, taskList) => {
+      const ap = taskList.find(t => t.autoKind === AUTO_KIND);
+      return { status: 200, body: { row: rows.find(s => s.id === id), totals: computeTotals(rows), autopayTaskId: ap ? ap.id : null } };
+    };
+    if (subs[idx].onCard) return finish(subs, tasks);
+    const sw = subs[idx].switchTaskId && tasks.find(t => t.id === subs[idx].switchTaskId && t.type !== 'recurring');
+    if (sw) {
+      completeScheduled(tasks, sw);   // fires onTaskCompleted -> flips onCard, creates/updates autopay
+      return finish(readSubscriptions(), todoStore.readTasks());
+    }
+    const r = applyOnCard(subs, tasks, idx, new Date(), todoEngine.todayString(), `Generated when ${subs[idx].name} was marked on the card on the Subscriptions page.`);
+    todoStore.writeTasks(r.tasks);
+    writeSubscriptions(r.subs);
+    return finish(r.subs, r.tasks);
+  });
+}
+
 // Admin-only, checked on the routes themselves (no non-admin allowlist line in server.js).
-function mount(app, { isAdminReq }) {
+function mount(app, { isAdminReq, completeScheduled }) {
   const guard = (req, res, next) => (isAdminReq(req) ? next() : res.status(403).json({ error: 'Not available for your account.' }));
   app.get('/api/subscriptions', guard, (req, res) => {
     try {
       const rows = readSubscriptions();
       const byId = new Map(todoStore.readTasks().map(t => [t.id, t]));
       res.json({ rows: rows.map(s => ({ ...s, switchDue: (byId.get(s.switchTaskId) || {}).dueDate || null })), totals: computeTotals(rows), settings: SETTINGS });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+  app.post('/api/subscriptions/:id/on-card', guard, (req, res) => {
+    try {
+      const r = markOnCard(req.params.id, completeScheduled);
+      res.status(r.status).json(r.body);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
   app.post('/api/subscriptions', guard, (req, res) => {
@@ -210,5 +252,5 @@ function mount(app, { isAdminReq }) {
   });
 }
 
-module.exports = { SUBS_FILE, AUTO_KIND, SETTINGS, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, onTaskCompleted,
+module.exports = { SUBS_FILE, AUTO_KIND, SETTINGS, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, applyOnCard, markOnCard, onTaskCompleted,
   computeTotals, validateNew, switchDueDate, planCreate, createSubscription, mount };

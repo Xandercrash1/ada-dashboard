@@ -8,7 +8,7 @@
   const root = () => document.getElementById('subscriptions-root');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (n) => '$' + Number(n || 0).toFixed(2);
-  const S = { data: null, err: '', msg: '', dialog: false, busy: false, form: { name: '', price: '', cycle: 'monthly' }, formErr: '' };
+  const S = { data: null, err: '', msg: '', dialog: false, confirm: null, busy: false, form: { name: '', price: '', cycle: 'monthly' }, formErr: '' };
   const input = 'w-full rounded-xl bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 px-3 py-2.5 text-base';
   const btn = 'min-h-[44px] px-4 rounded-xl text-sm font-semibold';
   const primary = btn + ' bg-indigo-600 text-white hover:bg-indigo-500';
@@ -19,7 +19,7 @@
   const api = async (opts) => {
     const o = Object.assign({}, opts);
     if (o.body && typeof o.body !== 'string') { o.body = JSON.stringify(o.body); o.headers = { 'Content-Type': 'application/json' }; }
-    const r = await fetch('/api/subscriptions', o);
+    const r = await fetch('/api/subscriptions' + (o.path || ''), o);
     const b = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
     return b;
@@ -47,7 +47,7 @@
     const body = rows.map((s) => {
       const pill = s.onCard
         ? '<span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">Yes</span>'
-        : '<span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-rose-500/15 text-rose-500">No</span>';
+        : `<button type="button" class="text-xs font-semibold rounded-full px-2 py-0.5 bg-rose-500/15 text-rose-500 cursor-pointer hover:bg-rose-500/30 focus:outline-none focus:ring-2 focus:ring-rose-500/50" title="Mark as on the card" data-act="oncard" data-id="${esc(s.id)}">No</button>`;
       return `<tr class="border-t border-black/5 dark:border-white/10">
         <td class="py-2.5 pr-3 font-medium">${esc(s.name)}</td>
         <td class="py-2.5 pr-3 whitespace-nowrap">${s.price == null ? '<span class="text-gray-400">&mdash;</span>' : money(s.price)}</td>
@@ -74,6 +74,17 @@
       </form></div>`;
   }
 
+  function confirmDialog() {
+    const c = S.confirm; if (!c) return '';
+    return `<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" data-act="backdrop-confirm">
+      <div class="w-full max-w-md ${card} space-y-3" role="dialog" aria-modal="true" aria-labelledby="subs-confirm-h">
+        <h3 id="subs-confirm-h" class="text-lg font-bold">Mark as on the card</h3>
+        <p class="text-sm">Mark ${esc(c.name)} as on the subscription card? This checks off its switch task and updates the autopay task.</p>
+        ${S.confirmErr ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.confirmErr)}</div>` : ''}
+        <div class="flex gap-2 justify-end"><button type="button" class="${ghost}" data-act="confirm-cancel">Cancel</button><button type="button" class="${primary}" data-act="confirm-ok"${S.busy ? ' disabled' : ''}>Confirm</button></div>
+      </div></div>`;
+  }
+
   function render() {
     const el = root(); if (!el) return;
     // Keep the dialog's typed text across re-renders (focus is restored below).
@@ -83,7 +94,7 @@
       ${S.err ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.err)}</div>` : ''}
       ${S.msg ? `<div class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl px-3 py-2 text-sm">${S.msg}</div>` : ''}
       ${d ? cards(d.totals) + table(d.rows) : '<div class="text-sm text-gray-500">Loading&hellip;</div>'}
-    </div>${dialog()}`;
+    </div>${dialog()}${confirmDialog()}`;
   }
 
   async function load() {
@@ -96,9 +107,33 @@
     const act = a.dataset.act;
     if (act === 'add') { S.dialog = true; S.form = { name: '', price: '', cycle: 'monthly' }; S.formErr = ''; render(); const n = root().querySelector('[data-f="name"]'); if (n) n.focus(); }
     else if (act === 'cancel' || (act === 'backdrop' && e.target === a)) { S.dialog = false; render(); }
+    else if (act === 'oncard') {
+      const row = S.data && S.data.rows.find((r) => r.id === a.dataset.id); if (!row) return;
+      S.confirm = { id: row.id, name: row.name }; S.confirmErr = ''; render();
+      const ok = root().querySelector('[data-act="confirm-ok"]'); if (ok) ok.focus();
+    }
+    else if (act === 'confirm-cancel' || (act === 'backdrop-confirm' && e.target === a)) { S.confirm = null; render(); }
+    else if (act === 'confirm-ok') doOnCard();
   }
   function onInput(e) { const f = e.target.dataset && e.target.dataset.f; if (f) S.form[f] = e.target.value; }
-  function onKey(e) { if (e.key === 'Escape' && S.dialog) { S.dialog = false; render(); } }
+  function onKey(e) {
+    if (e.key !== 'Escape') return;
+    if (S.confirm) { S.confirm = null; render(); }
+    else if (S.dialog) { S.dialog = false; render(); }
+  }
+  async function doOnCard() {
+    if (S.busy || !S.confirm) return;
+    const c = S.confirm;
+    S.busy = true; S.confirmErr = ''; render();
+    try {
+      const r = await api({ method: 'POST', path: '/' + encodeURIComponent(c.id) + '/on-card' });
+      S.confirm = null; S.busy = false; S.err = '';
+      S.msg = `Marked ${esc(c.name)} on the card. Autopay is now ${money(r.totals.autopay)}.`;
+      await load();
+      return;
+    } catch (err) { S.confirmErr = err.message; }
+    S.busy = false; render();
+  }
   async function onSubmit(e) {
     if (!e.target.matches('[data-form="add"]')) return;
     e.preventDefault();

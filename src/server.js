@@ -1263,7 +1263,7 @@ const foodLookup = require('./food-lookup').create();
 foodLookup.mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
 require('./nutrition').create({ dataDir: DATA_DIR, limits: aiLimits, lookup: (q, brands) => foodLookup.lookup(q, brands) }).mount(app, { ownerName });   // Nutrition tab: per-person food log, targets, Coach (admin + 303)
 require('./kitchen').create({ dataDir: DATA_DIR, limits: aiLimits }).mount(app, { ownerName });   // Kitchen tab: inventory, meal planner, assistant (prototype, 2026-11-24)
-subscriptions.mount(app, { isAdminReq });   // Subscriptions page: admin only, checked on each route (no non-admin allowlist line on purpose)
+subscriptions.mount(app, { isAdminReq, completeScheduled: completeTaskLocked });   // Subscriptions page: admin only, checked on each route (no non-admin allowlist line on purpose)
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./backups-status').create().mount(app, { isAdminReq });   // Server tab > Health & Stats: read-only Backups card (filesystem only, no restic)
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
@@ -4582,6 +4582,31 @@ app.delete('/api/todo/tasks/:id', (req, res) => {
   }
 });
 
+// Scheduled/backlog completion body, shared by the route below and the Subscriptions page's
+// on-card route. MUST run inside todoStore.withLock (not reentrant) with the freshly read `tasks`.
+// Log first, remove second — order preserved from the original. Returns the completed entry.
+function completeTaskLocked(tasks, task) {
+  const completed = todoStore.readCompleted();
+  const entry = {
+    id: `completed-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    taskId: task.id,
+    name: task.name,
+    project: task.project,
+    type: task.type,
+    completedAt: new Date().toISOString(),
+    notes: task.notes || '',
+    tags: [],
+    ...sharing.view(task)
+  };
+  completed.unshift(entry);
+  todoStore.writeCompleted(completed);
+
+  let remaining = tasks.filter(t => t.id !== task.id); // id-targeted (§1.1) — only this row, even with duplicate names
+  remaining = subscriptions.onTaskCompleted(task, remaining); // subscription-card autopay hook (may add/update one task)
+  todoStore.writeTasks(remaining);
+  return entry;
+}
+
 // The important one (contract §4). Semantics differ sharply by type — see
 // spec §5.3-5.4 and contract §1.1/§1.2 for why: id-targeted (never
 // name-targeted, closing the duplicate-name cascade bug), and scheduled/
@@ -4610,25 +4635,8 @@ app.post('/api/todo/tasks/:id/complete', (req, res) => {
         return; // Recurring completions are NOT logged to history (spec §5.3/§5.4).
       }
 
-      // scheduled / backlog: log first, remove second — order preserved from the original.
-      const completed = todoStore.readCompleted();
-      const entry = {
-        id: `completed-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        taskId: task.id,
-        name: task.name,
-        project: task.project,
-        type: task.type,
-        completedAt: new Date().toISOString(),
-        notes: task.notes || '',
-        tags: [],
-        ...sharing.view(task)
-      };
-      completed.unshift(entry);
-      todoStore.writeCompleted(completed);
-
-      let remaining = tasks.filter(t => t.id !== task.id); // id-targeted (§1.1) — only this row, even with duplicate names
-      remaining = subscriptions.onTaskCompleted(task, remaining); // subscription-card autopay hook (may add/update one task)
-      todoStore.writeTasks(remaining);
+      // scheduled / backlog: shared with the Subscriptions on-card route.
+      const entry = completeTaskLocked(tasks, task);
       result = { status: 200, body: { success: true, completedEntry: entry } };
     });
     res.status(result.status).json(result.body);
