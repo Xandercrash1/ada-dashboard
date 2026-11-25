@@ -10,6 +10,7 @@ const { mountAuth, getClientIp } = require('./auth');
 const sharing = require('./sharing');
 const todoEngine = require('./todo-engine');
 const todoStore = require('./todo-store');
+const subscriptions = require('./subscriptions');
 const todoValidate = require('./todo-validate');
 
 const app = express();
@@ -4622,7 +4623,8 @@ app.post('/api/todo/tasks/:id/complete', (req, res) => {
       completed.unshift(entry);
       todoStore.writeCompleted(completed);
 
-      const remaining = tasks.filter(t => t.id !== task.id); // id-targeted (§1.1) — only this row, even with duplicate names
+      let remaining = tasks.filter(t => t.id !== task.id); // id-targeted (§1.1) — only this row, even with duplicate names
+      remaining = subscriptions.onTaskCompleted(task, remaining); // subscription-card autopay hook (may add/update one task)
       todoStore.writeTasks(remaining);
       result = { status: 200, body: { success: true, completedEntry: entry } };
     });
