@@ -134,6 +134,7 @@ function cmdComplete(args) {
     const tasks = store.readTasks();
     const task = tasks.find(t => t.id === id);
     if (!task) { result = { error: `No task with id ${id}` }; return; }
+    if (task.autoKind === 'deploy') { result = { error: `"${task.name}" deploys to the live dashboard when ticked, so only Alex can tick it, signed in to the dashboard.` }; return; }
     const r = automation.completeLocked(tasks, task, { source: 'cli' });   // same path as the dashboard: history, rules, queue
     result = r.status !== 200 ? { error: r.body.error } : task.type === 'recurring' ? { task: r.body } : r.body;
   });

@@ -21,6 +21,12 @@ const path = require('path');
 
 const TYPES = ['bug', 'improvement', 'feature', 'chore', 'idea'];
 const STATUSES = ['new', 'in-progress', 'done', 'wont-do'];
+// Self-improvement loop (Projects/Auto Ticket Processing/Plan — Self-Improvement Loop.md): where a ticket is in the loop.
+//   proposed -> approved | declined   (Alex, on the Home Proposals card)
+//   building -> ready (a tested change waits for Alex's deploy tick) -> deploying -> deployed
+//   failed (build failed; twice -> flagged to Alex)   pm (too big for the nightly builder: the VPS PM does it with Alex)
+const STAGES = ['proposed', 'approved', 'declined', 'building', 'ready', 'deploying', 'deployed', 'failed', 'pm'];
+const KINDS = ['approval', 'decision', 'hands'];
 const isClosed = (t) => t.status === 'done' || t.status === 'wont-do';
 
 const instances = new Map();   // one store (and one re-entrancy count) per data dir per process
@@ -72,7 +78,7 @@ function build(dataDir) {
       return out;
     });
   }
-  const clearLinks = (t) => { delete t.taskId; delete t.stagedAt; delete t.sessionId; };
+  const clearLinks = (t) => { delete t.taskId; delete t.stagedAt; delete t.sessionId; delete t.stage; delete t.buildAttempts; delete t.laterUntil; };   // a fresh round in the loop too
   const note = (t, line) => { t.notes = t.notes ? `${t.notes}\n${line}` : line; };
   const newId = (items) => { let id = `fb-${Date.now()}`; while (items.some((i) => i.id === id)) id = `fb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`; return id; };
 
@@ -86,6 +92,12 @@ function build(dataDir) {
       if (!isClosed(patch) && isClosed(item)) clearLinks(item);   // reopened by hand: the old task, stage and session are history
       item.status = patch.status;
     }
+    if (patch.stage !== undefined) {
+      if (patch.stage !== null && !STAGES.includes(patch.stage)) return { error: `Invalid stage "${patch.stage}". Must be one of: ${STAGES.join(', ')}` };
+      if (patch.stage === null) delete item.stage; else item.stage = patch.stage;
+    }
+    if (patch.laterUntil !== undefined) { if (patch.laterUntil) item.laterUntil = String(patch.laterUntil); else delete item.laterUntil; }
+    if (patch.buildAttempts !== undefined) item.buildAttempts = Math.max(0, Number(patch.buildAttempts) || 0);
     if (patch.processedBy !== undefined) item.processedBy = patch.processedBy;
     if (patch.notes !== undefined) item.notes = patch.notes;
     if (patch.needsAlex !== undefined) {
@@ -119,11 +131,13 @@ function build(dataDir) {
         note(same, `[auto] Came back ${now}; reopened (it was done)${f.body && f.body !== same.body ? ': ' + String(f.body).slice(0, 300) : ''}.`);
         same.status = 'new'; same.repeats = (same.repeats || 1) + 1; same.lastSeenAt = now; same.updatedAt = now;
         if (f.needsAlex !== undefined) same.needsAlex = !!f.needsAlex;
-        clearLinks(same);   // the old task, stage and session belonged to the last round; the sync makes a new task if needed
+        clearLinks(same);
+        if (STAGES.includes(f.stage)) same.stage = f.stage;   // a re-raised proposal goes back on the card   // the old task, stage and session belonged to the last round; the sync makes a new task if needed
         return { item: same, outcome: 'reopened' };
       }
       const item = { id: newId(items), type: f.type, title, body: typeof f.body === 'string' ? f.body : '', status: 'new',
         createdAt: now, updatedAt: now, processedAt: null, processedBy: f.processedBy || null, notes: f.notes || null,
+        ...(STAGES.includes(f.stage) ? { stage: f.stage } : {}), ...(KINDS.includes(f.kind) ? { kind: f.kind } : {}), ...(f.source ? { source: String(f.source).slice(0, 40) } : {}),
         ...(f.urgency ? { urgency: f.urgency } : {}), ...(key ? { dedupeKey: key } : {}), ...(f.needsAlex ? { needsAlex: true } : {}) };
       items.unshift(item);
       return { item, outcome: 'created' };
@@ -159,4 +173,4 @@ function build(dataDir) {
   return { FILE, LOCK, exists, read, withLock, mutate, create, update, resolve, remove, applyUpdate, isClosed };
 }
 
-module.exports = { open, TYPES, STATUSES, isClosed };
+module.exports = { open, TYPES, STATUSES, STAGES, KINDS, isClosed };

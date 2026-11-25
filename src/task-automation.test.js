@@ -29,7 +29,7 @@ test('completion: history then removal, same body as before; repeating task move
   assert.strictEqual(r.status, 200); assert.strictEqual(r.body.success, true); assert.strictEqual(r.body.completedEntry.taskId, 'a');
   assert.deepStrictEqual(store.readTasks().map((t) => t.id), ['r']);
   const rr = auto.completeLocked(store.readTasks(), store.readTasks()[0]);
-  assert.strictEqual(rr.body.lastCompleted, engine.todayString()); assert.ok(rr.body.nextDue > rr.body.lastCompleted);
+  assert.strictEqual(rr.body.lastCompleted, '2026-11-24'); assert.ok(rr.body.nextDue > rr.body.lastCompleted);
   assert.strictEqual(store.readCompleted().length, 1);
 });
 

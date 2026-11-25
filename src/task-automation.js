@@ -60,7 +60,7 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
     return added;
   }
   function jobsFor(task, { source, depth }) {
-    const stamp = task.type === 'recurring' ? `:${engine.todayString()}` : '';
+    const stamp = task.type === 'recurring' ? `:${engine.todayString(clock())}` : '';
     const out = [...rules.keys()].map((rule) => ({ key: `${rule}:${task.id}${stamp}`, rule, task, source, depth }));
     // Only automation counts toward the loop cap: a person ticking off a chain by hand never hits it.
     if (task.then && task.type !== 'recurring') out.push({ key: `then:${task.id}`, rule: 'then', task, source, depth: isAuto(source) ? depth + 1 : 0 });
@@ -84,7 +84,7 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
     }
     try {
       const before = store.readTasks();
-      const after = rule.onComplete(job.task, before, { source: `automation:${job.rule}`, origin: job.source, depth: job.depth, upsertAutoTask, today: engine.todayString(), now: clock() });
+      const after = rule.onComplete(job.task, before, { source: `automation:${job.rule}`, origin: job.source, depth: job.depth, upsertAutoTask, today: engine.todayString(clock()), now: clock() });
       if (Array.isArray(after) && after !== before) store.writeTasks(after);
       drop();
       log({ key: job.key, rule: job.rule, taskId: job.task.id, result: 'done', attempts: job.attempts + 1, source: job.source });
@@ -130,7 +130,7 @@ function create({ store, engine, sharing = null, dataDir = store.DATA_DIR, clock
     depth = isAuto(source) ? (depth != null ? depth : task.autoDepth || 0) : 0;
     let body;
     if (task.type === 'recurring') {
-      const today = engine.todayString();
+      const today = engine.todayString(clock());
       const nextDue = engine.calcNextDue(task.frequency, today);
       if (nextDue === null) return { status: 400, body: { error: `Cannot complete "${task.name}": frequency "${task.frequency}" is unparseable, so no next due date could be computed.` } };
       const jobs = enqueue(jobsFor(task, { source, depth }));

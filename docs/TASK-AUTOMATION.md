@@ -59,3 +59,11 @@ _Alex, 2026-11-24: one documented system for automatic tasks, used by every proj
 - **In:** dashboard tasks (`data/todo_tasks.json`), including repeating tasks.
 - **In since phase 2:** feedback tickets (above).
 - **Project boards** (`project-dash.js` lanes) join **project by project**. Fiverr is the first contender. Candidate rules are listed in the vault plan.
+
+## Self-improvement loop (2026-11-25)
+_Plan and Alex's rulings: Ada vault `Projects/Auto Ticket Processing/Plan — Self-Improvement Loop.md`. Scripts: `~/ops/loop/` (not in this repo)._
+- **Nightly (11pm Eastern), `~/ops/loop/nightly-loop.py`:** every test file and a headless GET-only check of every tab (`smoke.js`) → keyed bug tickets that close themselves. On a quiet night, ≤3 improvement **proposals** (Sonnet, read-only, one area a night). Then ≤3 stalled-project items (Haiku with excerpts only and no tools): approval items become proposals, decision and hands items get a task for Alex. Model runs use `--safe-mode` and deny reading secrets, the vault and data.
+- **Tickets:** `stage` (proposed → approved / declined, building → ready → deploying → deployed, failed, pm), `kind` (approval / decision / hands), `source` (loop / loop-project). Reopening clears the stage, unless the refile sets one.
+- **Dashboard (`src/loop.js`):** the Home **Proposals** card (Approve / Later / Decline); `POST /api/loop/ready` → one "Deploy: X (tested)" task (`autoKind: deploy`); `GET /api/loop/status`; `POST /api/loop/pause` (kill switch `~/ops/loop/PAUSED`).
+- **Deploy tasks:** only Alex, signed in (not the loopback system admin, not the CLI), can tick one, and the server asks for a confirm first. The `loop-deploy` rule then starts `~/ops/loop/deploy-ticket.py` from the live checkout only.
+- **Builder and deploy runner: OFF** until the builder has a sandbox (a separate user that can't reach the dashboard or read this account's files; it needs Alex's sudo). Both are gated by `~/ops/loop/BUILD_ENABLED`. Why: the builder runs the code it wrote (tests, a boot) before it's reviewed (Opus review, 2026-11-25).

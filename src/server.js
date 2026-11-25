@@ -4374,9 +4374,10 @@ app.get('/api/feedback/types', (req, res) => {
 
 app.get('/api/feedback', (req, res) => {
   let items = readFeedback();
-  const { type, status, includeArchived } = req.query;
+  const { type, status, includeArchived, stage } = req.query;
   items = decorateArchived(items, todoEngine.now().getTime());
   if (type) items = items.filter(i => i.type === type);
+  if (stage) items = items.filter(i => i.stage === stage);
   if (status) {
     // An explicit status filter (e.g. ?status=done) always includes
     // archived items matching it — asking for done items and getting none
@@ -4393,7 +4394,8 @@ app.post('/api/feedback', (req, res) => {
   // Only admins and the server's own scripts may flag a ticket for Alex or key it (pages users file plain tickets).
   const trusted = isAdminReq(req);
   let r;
-  try { r = tickets.create({ type, title, body, urgency, dedupeKey: trusted ? dedupeKey : undefined, needsAlex: trusted && needsAlex === true ? true : undefined }); }
+  try { r = tickets.create({ type, title, body, urgency, dedupeKey: trusted ? dedupeKey : undefined, needsAlex: trusted && needsAlex === true ? true : undefined,
+    ...(trusted ? { stage: (req.body || {}).stage, kind: (req.body || {}).kind, source: (req.body || {}).source } : {}) }); }
   catch (e) { return res.status(500).json({ error: e.message }); }
   if (r.error) return res.status(400).json({ error: r.error });
   syncTicketTasks();
@@ -4413,9 +4415,10 @@ app.post('/api/feedback/resolve', (req, res) => {
 });
 
 app.patch('/api/feedback/:id', (req, res) => {
-  const { status, processedBy, notes, needsAlex } = req.body || {};
+  const { status, processedBy, notes, needsAlex, stage, buildAttempts } = req.body || {};
   let result;
-  try { result = tickets.update(req.params.id, { status, processedBy, notes, needsAlex: typeof needsAlex === 'boolean' ? needsAlex : undefined }); }
+  try { result = tickets.update(req.params.id, { status, processedBy, notes, needsAlex: typeof needsAlex === 'boolean' ? needsAlex : undefined,
+    ...(isAdminReq(req) ? { stage, buildAttempts } : {}) }); }
   catch (e) { return res.status(500).json({ error: e.message }); }
   if (result.notFound) return res.status(404).json({ error: 'Feedback item not found' });
   if (result.error) return res.status(400).json({ error: result.error });
@@ -4556,6 +4559,8 @@ const automation = require('./task-automation').create({
 // change and by the worker; never while holding the ticket lock (the todo lock always comes first).
 const ticketTasks = require('./ticket-tasks').create({ tickets, store: todoStore, automation, upsertAutoTask: require('./task-automation').upsertAutoTask, engine: todoEngine });
 function syncTicketTasks() { try { return ticketTasks.sync(); } catch (e) { console.error('[tickets] task sync failed (the worker tries again):', e.message); return null; } }
+// Self-improvement loop: proposals, ready-to-deploy tasks, status and the kill switch (src/loop.js).
+const loop = require('./loop').create({ app, tickets, store: todoStore, upsertAutoTask: require('./task-automation').upsertAutoTask, engine: todoEngine, automation, isAdminReq, sync: syncTicketTasks });
 function completeTaskLocked(tasks, task, opts) { return automation.completeLocked(tasks, task, opts).body.completedEntry; }
 // The worker: retries queued jobs and persists repeating-task roll-forward, once a minute and at start-up.
 function automationTick() {
@@ -4568,6 +4573,7 @@ function automationTick() {
     });
   } catch (e) { console.error('[automation] tick failed:', e.message); }
   syncTicketTasks();   // after the todo lock is released: sync takes it itself
+  try { loop.syncDeployTasks(); } catch (e) { console.error('[loop] deploy task sync failed:', e.message); }
 }
 setTimeout(automationTick, 5000).unref();
 setInterval(automationTick, 60000).unref();
@@ -4584,6 +4590,16 @@ app.post('/api/todo/tasks/:id/complete', (req, res) => {
     todoStore.withLock(() => {
       const tasks = todoStore.readTasks();
       const task = tasks.find(t => t.id === req.params.id);
+      // A loop deploy task deploys when it's checked off, so it needs an explicit confirm (Alex, 2026-11-25).
+      // Only Alex, signed in, can tick it: never the loopback "system" admin that scripts and agents use (review 2026-11-25).
+      if (task && task.autoKind === 'deploy' && !(req.user && req.user.username === 'alex')) {
+        result = { status: 403, body: { error: 'Only Alex, signed in to the dashboard, can tick a Deploy task.' } };
+        return;
+      }
+      if (task && task.autoKind === 'deploy' && !(req.body && req.body.confirm === true)) {
+        result = { status: 409, body: { needsConfirm: true, error: `Checking this off deploys "${task.name.replace(/^Deploy: /, '')}" to the live dashboard. Are you sure?` } };
+        return;
+      }
       result = task ? automation.completeLocked(tasks, task) : { status: 404, body: { error: 'Task not found' } };
     });
     res.status(result.status).json(result.body);

@@ -87,6 +87,10 @@ class HomeView extends HTMLElement {
     this.events = [];
     this.innerHTML = `<div class="h-wrap">
       <header><h1 data-r="hello"></h1><p class="h-sub" data-r="date"></p></header>
+      <section aria-labelledby="h-props" data-r="props" hidden><h2 id="h-props">Proposals</h2>
+        <p class="h-sum" data-r="psum"></p>
+        <ul class="h-rows" data-r="prows"></ul>
+      </section>
       <section aria-labelledby="h-kitchen" data-r="kitchen" hidden><h2 id="h-kitchen">Kitchen</h2>
         <p class="h-sum" data-r="ksum"></p>
         <ul class="h-rows" data-r="krows"></ul>
@@ -160,6 +164,37 @@ class HomeView extends HTMLElement {
     this.loadPages();
     this.loadEvents();   // the server returns only events shared with this account
     if (this.isAdmin) this.loadAdmin();
+    if (this.isAdmin) this.loadProposals();
+  }
+
+  // Self-improvement loop (Alex, 2026-11-25): ideas the nightly loop proposed, each Approve / Decline / Later.
+  // Shown only when something is waiting; approved ones join the nightly builder's oldest-first queue.
+  async loadProposals() {
+    let list = [];
+    try { list = await getJson('/api/loop/proposals'); } catch (e) { /* no card */ }
+    if (!Array.isArray(list)) list = [];
+    this.r.props.hidden = !list.length;
+    if (!list.length) return;
+    this.r.psum.textContent = list.length === 1 ? '1 idea waiting for a yes or no' : `${list.length} ideas waiting for a yes or no`;
+    this.r.prows.replaceChildren(...list.slice(0, 8).map(t => {
+      const li = el('li', 'h-event'), box = el('div', '');
+      box.style.display = 'grid'; box.style.gap = '4px'; box.style.width = '100%';
+      const name = el('strong', '', t.title), why = el('span', 'h-who', String(t.body || '').split('\n')[0].slice(0, 220));
+      const acts = el('div', 'h-actions');
+      for (const [label, action, go] of [['Approve', 'approve', true], ['Later', 'later', false], ['Decline', 'decline', false]]) {
+        const b = el('button', go ? 'go' : '', label); b.type = 'button';
+        b.onclick = async () => {
+          acts.querySelectorAll('button').forEach(x => { x.disabled = true; });
+          let ok = false;
+          try { ok = (await fetch(`/api/feedback/${encodeURIComponent(t.id)}/proposal`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })).ok; } catch (e) { /* below */ }
+          if (ok) this.loadProposals();
+          else { acts.querySelectorAll('button').forEach(x => { x.disabled = false; }); why.textContent = 'That didn\u2019t save. Try again.'; }
+        };
+        acts.append(b);
+      }
+      box.append(name, why, acts); li.append(box);
+      return li;
+    }));
   }
 
   // Kitchen (2026-11-24): two cards from the shared 303 kitchen, each shown only when it has something:
@@ -258,7 +293,16 @@ class HomeView extends HTMLElement {
     this.doneIds.add(task.id);
     this.drawSummary();
     let ok = false;
-    try { ok = (await fetch(`/api/todo/tasks/${encodeURIComponent(task.id)}/complete`, { method: 'POST' })).ok; } catch (e) { /* handled below */ }
+    const url = `/api/todo/tasks/${encodeURIComponent(task.id)}/complete`;
+    try {
+      let res = await fetch(url, { method: 'POST' });
+      // A loop "Deploy: X (tested)" task deploys when checked off: the server asks for a confirm first.
+      if (res.status === 409) {
+        const d = await res.json().catch(() => ({}));
+        if (d.needsConfirm && confirm(d.error)) res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }) });
+      }
+      ok = res.ok;
+    } catch (e) { /* handled below */ }
     if (ok) return;
     this.doneIds.delete(task.id);
     box.checked = false;

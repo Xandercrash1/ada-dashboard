@@ -1962,7 +1962,12 @@
     async function completeTodoTask(id) {
       const row = document.getElementById(`todo-row-${id}`);
       if (row) { row.style.opacity = '0.35'; row.style.pointerEvents = 'none'; }
-      const result = await todoApiFetch(`/api/todo/tasks/${id}/complete`, { method: 'POST' });
+      let result = await todoApiFetch(`/api/todo/tasks/${id}/complete`, { method: 'POST' });
+      // A loop "Deploy: X (tested)" task deploys when checked off: the server asks for a confirm first.
+      if (result.status === 409 && result.data && result.data.needsConfirm) {
+        result = confirm(result.data.error) ? await todoApiFetch(`/api/todo/tasks/${id}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }) }) : { ok: false, cancelled: true };
+        if (result.cancelled) { if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; } return; }
+      }
       if (!result.ok) {
         if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
         alert('Failed to complete task' + (result.data && result.data.error ? ': ' + result.data.error : '.'));

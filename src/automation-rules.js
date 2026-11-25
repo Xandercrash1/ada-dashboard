@@ -15,5 +15,8 @@ automation.register('subcard-autopay', { onComplete: (task, tasks) => subscripti
 // are ticket-tasks.js sync(), run by the server worker. Safe to run twice (closing a closed ticket does nothing).
 const tickets = require('./ticket-store').open(require('./todo-store').DATA_DIR);
 automation.register('ticket-task', { onComplete: require('./ticket-tasks').rule(tickets) });
+// Self-improvement loop (VPS PM): Alex checking off a "Deploy: X (tested)" task (with its confirm) starts the deploy.
+// Only the live checkout starts one (src/loop.js); a re-run finds the ticket no longer "ready" and does nothing.
+automation.register('loop-deploy', { onComplete: require('./loop').rule(tickets) });
 
 module.exports = automation;

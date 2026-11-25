@@ -248,7 +248,12 @@ class TodoWidget extends HTMLElement {
   async completeTask(id) {
     const row = this.querySelector(`[data-row="${CSS.escape(id)}"]`);
     if (row) { row.style.opacity = '0.35'; row.style.pointerEvents = 'none'; }
-    const r = await this.api(`/api/todo/tasks/${encodeURIComponent(id)}/complete`, { method: 'POST' });
+    let r = await this.api(`/api/todo/tasks/${encodeURIComponent(id)}/complete`, { method: 'POST' });
+    // A loop "Deploy: X (tested)" task deploys when checked off: the server asks for a confirm first.
+    if (r.status === 409 && r.data && r.data.needsConfirm) {
+      if (!confirm(r.data.error)) { if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; } return; }
+      r = await this.api(`/api/todo/tasks/${encodeURIComponent(id)}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }) });
+    }
     if (!r.ok) {
       if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
       this.showError('Could not complete task' + (r.data && r.data.error ? ': ' + r.data.error : '.'));
