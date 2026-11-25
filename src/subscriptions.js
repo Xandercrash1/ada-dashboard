@@ -55,6 +55,8 @@ function buildNotes(items, total, sourceLine) {
 function processCompletion(subs, tasks, completedTask, now, today) {
   const idx = subs.findIndex(s => s.switchTaskId && s.switchTaskId === completedTask.id);
   if (idx === -1 || completedTask.type === 'recurring') return { subs, tasks, changed: false, autopayTask: null };
+  // Already on the card (e.g. a task-automation retry after the autopay task was done): nothing to do. Mac PM OK, 2026-11-24.
+  if (subs[idx].onCard) return { subs, tasks, changed: false, autopayTask: null };
   return applyOnCard(subs, tasks, idx, now, today, `Generated when '${completedTask.name}' was checked off.`);
 }
 

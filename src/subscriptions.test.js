@@ -53,6 +53,12 @@ const u = subs.processCompletion(rows, [sched('q', 'Other')], sched('q', 'Other'
 check('unlinked: no change', [u.changed, u.tasks.length, u.subs === rows], [false, 1, true]);
 const rec = subs.processCompletion(rows, [], { id: 't1', type: 'recurring', name: 'r' }, NOW, TODAY);
 check('recurring: no hook', rec.changed, false);
+// already on card (a retry after the autopay task was done): no change, no new task
+{
+  const onRows = [row('x', 1, 'monthly', true, 't1')], before = [sched('other', 'Something else')];
+  const g = subs.processCompletion(onRows, before, sched('t1', 'Switch X to the subscription card'), NOW, TODAY);
+  check('already on card: no change, no task, inputs returned as-is', [g.changed, g.autopayTask, g.tasks === before, g.subs === onRows, g.tasks.length], [false, null, true, true, 1]);
+}
 
 // --- Subscriptions page: due-date rule, create, validation, totals ---
 check('due: before arrival -> arrival', subs.switchDueDate('2026-11-24', '2026-12-09'), '2026-12-09');
