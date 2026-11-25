@@ -92,6 +92,10 @@ class HomeView extends HTMLElement {
         <ul class="h-rows" data-r="krows"></ul>
         <button type="button" class="h-link" data-r="kopen">Open Kitchen</button>
       </section>
+      <section aria-labelledby="h-meals" data-r="meals" hidden><h2 id="h-meals">Today's meals</h2>
+        <ul class="h-rows" data-r="mrows"></ul>
+        <button type="button" class="h-link" data-r="mopen">Open meal plan</button>
+      </section>
       <div class="h-cols">
         <section aria-labelledby="h-today"><h2 id="h-today">Today</h2>
           <p class="h-sum" data-r="sum" aria-live="polite"></p>
@@ -125,6 +129,7 @@ class HomeView extends HTMLElement {
     this.r.nedit.onclick = () => window.openAnnouncementModal();
     this.r.all.onclick = () => window.switchTab('todo');
     this.r.kopen.onclick = () => window.switchTab('kitchen');
+    this.r.mopen.onclick = () => window.switchTab('kitchen');
     this.r.pick.onclick = () => this.r.ask.showModal();
     this.r.ano.onclick = () => this.r.ask.close();
     this.r.ask.onclick = e => { if (e.target === this.r.ask) this.r.ask.close(); };   // the backdrop
@@ -158,10 +163,18 @@ class HomeView extends HTMLElement {
     if (this.isAdmin) this.loadAdmin();
   }
 
-  // Kitchen (2026-11-24): shows only while something in the shared 303 kitchen is on its last good day; otherwise hidden.
+  // Kitchen (2026-11-24): two cards from the shared 303 kitchen, each shown only when it has something:
+  // food on its last good day, and the meals planned for today.
   async loadKitchen() {
-    let items = [];
-    try { items = (await getJson('/api/kitchen/today')).lastDay || []; } catch (e) { /* no card */ }
+    let items = [], meals = [];
+    try { const k = await getJson('/api/kitchen/today'); items = k.lastDay || []; meals = k.meals || []; } catch (e) { /* no cards */ }
+    this.r.meals.hidden = !meals.length;
+    this.r.mrows.replaceChildren(...meals.map(m => {
+      const li = el('li', 'h-event'), when = el('time', '', m.meal[0].toUpperCase() + m.meal.slice(1)), name = el('span', '', m.title);
+      if (m.cooked) { name.style.textDecoration = 'line-through'; name.style.color = 'var(--h-muted)'; }
+      li.append(when, name);
+      return li;
+    }));
     this.r.kitchen.hidden = !items.length;
     if (!items.length) return;
     this.r.ksum.textContent = items.length === 1 ? 'Last day to use' : `${items.length} things on their last day`;

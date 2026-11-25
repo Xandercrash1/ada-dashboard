@@ -56,6 +56,11 @@ test('home card: only items on their last good day', async () => {
     await call('POST', '/items', { name: 'Eggs', qty: 12, unit: '' });
     const r = await call('GET', '/today', null, { 'x-user': 'paige', 'x-role': '303' });
     assert.deepStrictEqual(r.body.lastDay.map((i) => i.name), ['Chicken thighs']);
+    assert.deepStrictEqual(r.body.meals, []);
+    await call('POST', '/plan', { date: '2026-11-24', meal: 'dinner', title: 'Tacos' });
+    await call('POST', '/plan', { date: '2026-11-24', meal: 'breakfast', title: 'Oatmeal' });
+    await call('POST', '/plan', { date: '2026-11-25', meal: 'dinner', title: 'Not today' });
+    assert.deepStrictEqual((await call('GET', '/today')).body.meals.map((m) => m.title), ['Oatmeal', 'Tacos']);
   } finally { s.close(); }
 });
 test('freshness and low stock', () => {

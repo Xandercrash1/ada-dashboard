@@ -290,8 +290,13 @@ function create({ dataDir, limits, runAssistant = defaultRun, clock = () => new 
     const body = (req) => req.body || {};
 
     router.get('/state', guard((req, res, user) => res.json(stateView(load(user)))));
-    // For the Home card: only what is on its last good day (expired tomorrow). Empty = the card stays hidden.
-    router.get('/today', guard((req, res, user) => { const t = today(); res.json({ today: t, lastDay: load(user).items.filter((i) => i.expiresOn === t).map((i) => ({ id: i.id, name: i.name, qty: i.qty, unit: i.unit, location: i.location })) }); }));
+    // For the two Home cards: what is on its last good day (expired tomorrow) and today's planned meals. Empty = that card stays hidden.
+    router.get('/today', guard((req, res, user) => {
+      const t = today(), d = load(user);
+      res.json({ today: t,
+        lastDay: d.items.filter((i) => i.expiresOn === t).map((i) => ({ id: i.id, name: i.name, qty: i.qty, unit: i.unit, location: i.location })),
+        meals: d.plan.filter((p) => p.date === t).sort((a, b) => MEALS.indexOf(a.meal) - MEALS.indexOf(b.meal)).map((p) => ({ id: p.id, meal: p.meal, title: p.title, cooked: !!p.cooked })) });
+    }));
     router.post('/items', guard((req, res, user) => { const d = load(user); const it = addItem(d, body(req), req.kWho); save(user, d); res.json({ item: it, state: stateView(d) }); }));
     router.patch('/items/:id', guard((req, res, user) => {
       const d = load(user); const it = d.items.find((i) => i.id === req.params.id); if (!it) throw badRequest('That item is gone.');
