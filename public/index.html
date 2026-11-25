@@ -34,7 +34,7 @@
     (function () {
       const nativeFetch = window.fetch.bind(window);
       const PAGES_OK = [/^\/api\/me(\/(password|profile|avatar))?$/, /^\/api\/people$/, /^\/api\/(messages|sites)(\/|$)/, /^\/api\/pages(\/|$)/, /^\/api\/homepage$/, /^\/api\/templates(\/|$)/, /^\/api\/widgets\/sanitize$/,
-        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/agenda(\/events(\/[^/]+)?)?$/, /^\/api\/todo(\/|$)/, /^\/api\/media\/(libraries|files|upload)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/user-projects(\/|$)/, /^\/api\/nutrition(\/|$)/, /^\/api\/food-lookup$/, /^\/api\/login$/, /^\/api\/logout$/];
+        /^\/api\/(weather|glance|agent\/models)$/, /^\/api\/agenda(\/events(\/[^/]+)?)?$/, /^\/api\/todo(\/|$)/, /^\/api\/media\/(libraries|files|upload)$/, /^\/api\/agent\/(sessions|jobs)(\/|$)/, /^\/api\/user-projects(\/|$)/, /^\/api\/nutrition(\/|$)/, /^\/api\/kitchen(\/|$)/, /^\/api\/food-lookup$/, /^\/api\/login$/, /^\/api\/logout$/];
       window.fetch = async function (input, init) {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
@@ -64,6 +64,7 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="projects-tab.js" defer></script><!-- One Ada: Projects tab -->
   <script src="nutrition-tab.js" defer></script><!-- Nutrition tab (admin + 303) -->
+  <script src="kitchen-tab.js" defer></script><!-- Kitchen tab (prototype, 2026-11-24) -->
   <script src="user-projects.js" defer></script><!-- New project button: splash pages and documents -->
   <script>
     const renderer = new marked.Renderer();
@@ -464,6 +465,7 @@
     <!-- ======================================================== -->
     <section id="view-projects" class="hidden space-y-5"><div id="projects-root" class="space-y-5"></div></section><!-- One Ada: Projects tab -->
     <section id="view-nutrition" class="hidden"><div id="nutrition-root"></div></section><!-- Nutrition tab (admin + 303) -->
+    <section id="view-kitchen" class="hidden"><div id="kitchen-root"></div></section><!-- Kitchen tab (prototype) -->
 
     <section id="view-server" class="hidden space-y-5">
       
@@ -1419,9 +1421,9 @@
       currentTab = tab;
       try { localStorage.setItem('ada_activeTab', tab); } catch (e) {}
       
-      const allTabs = ['home', 'todo', 'projects', 'nutrition', 'tools', 'server', ...customPages.map(p => p.id)];
+      const allTabs = ['home', 'todo', 'projects', 'nutrition', 'kitchen', 'tools', 'server', ...customPages.map(p => p.id)];
       onDesignerTabSwitch(tab);
-      const viewTabs = ['home', 'todo', 'projects', 'nutrition', 'tools', 'server'];
+      const viewTabs = ['home', 'todo', 'projects', 'nutrition', 'kitchen', 'tools', 'server'];
       
       allTabs.forEach(t => {
         // Only hide views that actually exist as standalone sections
@@ -1452,11 +1454,14 @@
          const targetView = document.getElementById(`view-${tab}`);
          if (targetView) targetView.classList.remove('hidden');
          if (tab === 'nutrition' && window.AdaNutrition) window.AdaNutrition.show();
+         if (tab === 'kitchen' && window.AdaKitchen) window.AdaKitchen.show();
          if (tab === 'projects' && window.AdaProjects) window.AdaProjects.show();   // One Ada: Projects tab (projects-tab.js)
       }
       // Nutrition has a direct link, /nutrition (works after login); keep the address bar honest.
       if (tab === 'nutrition' && location.pathname !== '/nutrition') history.replaceState(null, '', '/nutrition');
       else if (tab !== 'nutrition' && location.pathname === '/nutrition') history.replaceState(null, '', '/');
+      if (tab === 'kitchen' && location.pathname !== '/kitchen') history.replaceState(null, '', '/kitchen');
+      else if (tab !== 'kitchen' && location.pathname === '/kitchen') history.replaceState(null, '', '/');
       if (tab !== 'projects' && location.hash.startsWith('#projects')) {
          history.replaceState(null, '', location.pathname + location.search);   // leaving Projects drops its deep link
       }
@@ -6834,9 +6839,10 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       let saved = 'home';
       try { saved = localStorage.getItem('ada_activeTab') || 'home'; } catch (e) {}
       if (location.hash.startsWith('#projects')) saved = 'projects';
+      if (location.pathname === '/kitchen' || location.hash === '#kitchen') saved = 'kitchen';
       if (location.pathname === '/nutrition' || location.hash === '#nutrition') saved = 'nutrition';   // direct link   // One Ada deep links (#projects/start, …)
       try {
-        if (!['home', 'todo', 'projects', 'nutrition', 'tools', 'server'].includes(saved)) {
+        if (!['home', 'todo', 'projects', 'nutrition', 'kitchen', 'tools', 'server'].includes(saved)) {
           await (window.__customPagesReady || Promise.resolve());
           if (!customPages.some(p => p.id === saved)) saved = 'home';
         }

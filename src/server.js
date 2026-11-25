@@ -66,6 +66,7 @@ app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1
 require('./grimoire-proxy').mountGrimoirePreview(app, { isAdminReq: (req) => isAdminReq(req) });   // /grimoire-next/ preview (2026-11-10)
 // Direct link to Nutrition (admin and 303): serves the app, which opens the view. Guests go Home.
 app.get('/nutrition', (req, res) => (req.user && req.user.role === 'guest') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
+app.get('/kitchen', (req, res) => (req.user && req.user.role === 'guest') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
 app.use(express.static(path.join(__dirname, '../public')));
 const MEDIA_DIR = path.join(__dirname, '../data/media');
 // Media split (Plan — Roles § Media library): admins see everything. Others see the
@@ -1201,6 +1202,7 @@ function authorizeRole(req, res, next) {
   }
   if (/^\/api\/user-projects(\/|$)/.test(p)) return next();   // src/user-projects.js checks owner and sharing on every route
   if (/^\/api\/nutrition(\/|$)/.test(p)) return next();   // src/nutrition.js: each person reaches only their own file (guests are refused above)
+  if (/^\/api\/kitchen(\/|$)/.test(p)) return next();   // src/kitchen.js: each person reaches only their own file (guests are refused above)
   if (p === '/api/food-lookup' && m === 'GET') return next();   // USDA search, used by Nutrition
   if (p === '/api/media/upload' && m === 'POST') return next();   // the handler limits pages users to images in the shared library
   if (m === 'GET' && ['/api/weather', '/api/glance', '/api/media/libraries', '/api/media/files', '/api/agent/models', '/api/ai-limits'].includes(p)) return next();
@@ -1257,6 +1259,7 @@ require('./user-projects').create({ dataDir: DATA_DIR, projectContext: vaultProj
 const foodLookup = require('./food-lookup').create();
 foodLookup.mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
 require('./nutrition').create({ dataDir: DATA_DIR, limits: aiLimits, lookup: (q, brands) => foodLookup.lookup(q, brands) }).mount(app, { ownerName });   // Nutrition tab: per-person food log, targets, Coach (admin + 303)
+require('./kitchen').create({ dataDir: DATA_DIR, limits: aiLimits }).mount(app, { ownerName });   // Kitchen tab: inventory, meal planner, assistant (prototype, 2026-11-24)
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./backups-status').create().mount(app, { isAdminReq });   // Server tab > Health & Stats: read-only Backups card (filesystem only, no restic)
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
