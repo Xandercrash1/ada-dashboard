@@ -55,8 +55,10 @@ If there is a real crash, unhandled exception, or significant bug, reply with:
   "has_error": true,
   "title": "A short, descriptive title of the bug",
   "body": "What failed, the stack trace summary (file:line where visible), how often it appears, and likely causes.",
-  "urgency": "normal" | "high" | "critical"
+  "urgency": "normal" | "high" | "critical",
+  "needs_alex": false
 }
+Set "needs_alex" to true ONLY when the fix cannot be done by editing the dashboard's code or restarting it: it needs sudo, a sign-in or new key on an outside account, money, or a decision from the owner. Otherwise false.
 If several distinct bugs appear, report the most serious one and list the others briefly at the end of "body".
 
 Logs:
@@ -99,6 +101,7 @@ ${newLogs.slice(-MAX_LOG_CHARS)}
     urgency: ticket.urgency || 'normal',
     // The fallback title says nothing about the bug, so it is never used as a key (unrelated reports would merge).
     dedupeKey: !ticket.title ? undefined : 'crawler:' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80),
+    needsAlex: ticket.needs_alex === true ? true : undefined,   // only Alex can do the next step: one task on his list
     processedBy: `crawler-${result.model}`,
     notes: 'Agent-made: generated autonomously by the nightly bug crawler from the dashboard error log. Verify before acting.'
   });
