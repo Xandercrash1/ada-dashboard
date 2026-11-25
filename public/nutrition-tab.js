@@ -145,7 +145,7 @@
       const es = d ? d.entries.filter((e) => e.meal === m) : [];
       const sub = es.reduce((a, e) => a + e.total.calories, 0);
       return `<section class="${card} overflow-hidden"><div class="flex items-center justify-between px-4 py-3"><h3 class="font-semibold flex items-center gap-2"><i class="fa-solid ${icon} text-indigo-500 w-5 text-center"></i>${name}</h3><div class="flex items-center gap-3"><span class="text-sm text-gray-500 dark:text-gray-400">${es.length ? fmt(sub) + ' kcal' : ''}</span><button data-act="add" data-meal="${m}" class="${primary} !px-3 !py-1.5 !min-h-[40px]" aria-label="Add food to ${name}"><i class="fa-solid fa-plus"></i> Add</button></div></div>
-        ${es.map((e) => `<button data-act="edit" data-id="${esc(e.id)}" class="w-full text-left px-4 py-3 border-t border-gray-200 dark:border-white/10 flex justify-between gap-3 hover:bg-black/5 dark:hover:bg-white/5 min-h-[52px]"><span class="min-w-0"><span class="block truncate">${esc(e.name)}</span><span class="block text-xs text-gray-500 dark:text-gray-400">${esc(e.servings)} &times; ${esc(e.serving || 'serving')} &middot; P ${r0(e.total.protein)} C ${r0(e.total.carbs)} F ${r0(e.total.fat)}</span></span><span class="shrink-0 font-medium">${fmt(e.total.calories)}</span></button>`).join('')}</section>`;
+        ${es.map((e) => `<button data-act="edit" data-id="${esc(e.id)}" class="w-full text-left px-4 py-3 border-t border-gray-200 dark:border-white/10 flex justify-between gap-3 hover:bg-black/5 dark:hover:bg-white/5 min-h-[52px]"><span class="min-w-0"><span class="block truncate">${esc(e.name)}</span><span class="block text-xs text-gray-500 dark:text-gray-400">${esc(e.servings)} &times; ${esc(e.serving || 'serving')} &middot; P ${r0(e.total.protein)} C ${r0(e.total.carbs)} F ${r0(e.total.fat)}</span>${e.source === 'kitchen' && e.note ? `<span class="block text-[11px] text-indigo-500"><i class="fa-solid fa-kitchen-set"></i> ${esc(e.note)}</span>` : ''}</span><span class="shrink-0 font-medium">${fmt(e.total.calories)}</span></button>`).join('')}</section>`;
     }).join('');
     return `<div class="flex items-center justify-between gap-2"><button data-act="day" data-n="-1" class="${ghost} !px-4" aria-label="Previous day"><i class="fa-solid fa-chevron-left"></i></button>
       <div class="text-center"><div class="font-semibold text-lg">${esc(dayWords(S.date))}</div>${S.date !== localToday() ? `<button data-act="day" data-n="0" class="text-xs text-indigo-500">Back to today</button>` : `<div class="text-xs text-gray-500 dark:text-gray-400">${esc(S.date)}</div>`}</div>
@@ -748,7 +748,10 @@
   function profileExtras() {
     const v = S.view; if (!v) return '';
     const a = v.setup.answers;
-    return `<section class="${card} p-4 space-y-2"><h3 class="font-semibold">Goals and plan</h3>${a ? `<p class="text-sm text-gray-500 dark:text-gray-400">Training now: ${esc(a.routine || 'nothing yet')}. Eating now: ${esc(a.diet || 'no plan')}.</p>` : '<p class="text-sm text-gray-500">You have not done the guided setup yet.</p>'}<button data-act="wz-redo" class="${ghost} w-full">${v.setup.done ? 'Redo setup' : 'Start guided setup'}</button>${v.setup.done ? '<p class="text-xs text-gray-500 dark:text-gray-400">The Coach rebuilds your plan from your new answers. You can undo what it changes.</p>' : ''}</section>`;
+    const hl = !!(v.settings && v.settings.householdLog);
+    // Kitchen to Nutrition (2026-11-25): off by default; only this person can turn it on, here.
+    const share = `<section class="${card} p-4 space-y-2"><h3 class="font-semibold">Shared meals</h3><label class="flex items-start gap-3 cursor-pointer min-h-[44px]"><input type="checkbox" data-act="household-log" ${hl ? 'checked' : ''} class="w-5 h-5 mt-0.5 shrink-0"><span class="text-sm">Let the household log shared meals to my food log<span class="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">When someone cooks in Kitchen, they can add the meal to your log here, marked "from Kitchen". They never see your log, totals or goals, and you can edit or delete what they add.</span></span></label></section>`;
+    return share + `<section class="${card} p-4 space-y-2"><h3 class="font-semibold">Goals and plan</h3>${a ? `<p class="text-sm text-gray-500 dark:text-gray-400">Training now: ${esc(a.routine || 'nothing yet')}. Eating now: ${esc(a.diet || 'no plan')}.</p>` : '<p class="text-sm text-gray-500">You have not done the guided setup yet.</p>'}<button data-act="wz-redo" class="${ghost} w-full">${v.setup.done ? 'Redo setup' : 'Start guided setup'}</button>${v.setup.done ? '<p class="text-xs text-gray-500 dark:text-gray-400">The Coach rebuilds your plan from your new answers. You can undo what it changes.</p>' : ''}</section>`;
   }
 
   // ------------------------------------------------------------ shell
@@ -828,6 +831,7 @@
     if (a === 'tab') return setTab(t.dataset.tab);
     if (a === 'goto') return setTab(t.dataset.tab);
     if (a === 'dismiss') { S.err = ''; S.msg = ''; return render(); }
+    if (a === 'household-log') { const on = !!t.checked; api('/api/nutrition/settings', { method: 'PUT', body: { householdLog: on } }).then((st) => { if (S.view) S.view.settings = st; S.err = ''; S.msg = on ? 'The household can now log shared meals to your food log.' : 'Shared meal logging is off.'; render(); }).catch((e) => { S.err = e.message; render(); }); return; }
     if (a === 'day') { const n = Number(t.dataset.n); S.date = n === 0 ? localToday() : shiftDate(S.date, n); return loadDay(); }
     if (a === 'add') return openSheet({ meal: t.dataset.meal });
     if (a === 'edit') { const e = S.day.entries.find((x) => x.id === t.dataset.id); if (e) openSheet({ entry: e }); return; }

@@ -821,3 +821,55 @@ test('after a log the page states the day totals, not the model; context carries
   assert.ok(!s2.messages.at(-1).content.includes('now:'), 'no totals line when only weight was logged');
   t.close(); t2.close();
 });
+
+// ---- Kitchen to Nutrition (2026-11-25): opt-in setting and the household write path
+test('household log: off by default, own settings only, opt-in enforced, self always allowed, no data returned', async () => {
+  const t = await setup();
+  const n = nutrition.create({ dataDir: t.dataDir, clock: () => new Date('2026-11-25T23:00:00Z') });
+  // The setting starts off and is shown with the profile.
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/profile')).json.settings.householdLog, false);
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/settings')).json.householdLog, false);
+  assert.strictEqual((await t.call('amy', '303', 'PUT', '/settings', { householdLog: 'yes' })).status, 400);
+  assert.strictEqual(n.household.optedIn('amy'), false);
+  const dish = { name: 'Chili', serving: '1 bowl', per: { calories: 450, protein: 30, carbs: 40, fat: 15 }, date: '2026-11-25', meal: 'dinner' };
+  // bob has not opted in: refused, nothing written (no file made either)
+  let r = n.household.logShared({ by: 'amy', byName: 'Amy', eaters: [{ username: 'amy', servings: 1 }, { username: 'bob', servings: 2 }], ...dish });
+  assert.deepStrictEqual(r, [{ username: 'amy', ok: true }, { username: 'bob', ok: false }]);
+  assert.ok(!fs.existsSync(path.join(t.dataDir, 'nutrition', 'bob.json')), 'nothing written for bob');
+  // The logger's result carries nothing but ok per name.
+  for (const x of r) assert.deepStrictEqual(Object.keys(x).sort(), ['ok', 'username']);
+  // bob turns it on in HIS settings; amy cannot do it for him (the route only ever touches the caller's file).
+  assert.strictEqual((await t.call('bob', '303', 'PUT', '/settings', { householdLog: true })).json.householdLog, true);
+  assert.strictEqual(n.household.optedIn('bob'), true);
+  await t.call('bob', '303', 'POST', '/entries', food({ date: '2026-11-25', name: 'Secret snack', meal: 'snack' }));
+  r = n.household.logShared({ by: 'amy', byName: 'Amy', eaters: [{ username: 'bob', servings: 2 }], ...dish });
+  assert.deepStrictEqual(r, [{ username: 'bob', ok: true }]);
+  assert.ok(!JSON.stringify(r).includes('Secret'), 'no other person data comes back');
+  const bob = (await t.call('bob', '303', 'GET', '/day?date=2026-11-25')).json.entries;
+  const chili = bob.find((e) => e.name === 'Chili');
+  assert.strictEqual(chili.source, 'kitchen'); assert.strictEqual(chili.note, 'logged by Amy from Kitchen');
+  assert.strictEqual(chili.servings, 2); assert.strictEqual(chili.meal, 'dinner'); assert.strictEqual(chili.total.calories, 900);
+  // bob can edit and delete it like any entry
+  assert.strictEqual((await t.call('bob', '303', 'PATCH', `/entries/${chili.id}`, { servings: 1 })).json.source, 'kitchen');
+  // self is always allowed, even with the setting off
+  assert.strictEqual((await t.call('amy', '303', 'GET', '/settings')).json.householdLog, false);
+  assert.ok((await t.call('amy', '303', 'GET', '/day?date=2026-11-25')).json.entries.some((e) => e.name === 'Chili' && e.note === 'logged by Amy from Kitchen'));
+  // a bad amount writes nothing for anyone
+  assert.throws(() => n.household.logShared({ by: 'amy', eaters: [{ username: 'amy', servings: 1 }, { username: 'bob', servings: -1 }], ...dish }), /Servings/);
+  assert.strictEqual((await t.call('bob', '303', 'GET', '/day?date=2026-11-25')).json.entries.filter((e) => e.name === 'Chili').length, 1);
+  t.close();
+});
+test('household log: the dish is added to each person\'s foods once', async () => {
+  const t = await setup();
+  const n = nutrition.create({ dataDir: t.dataDir });
+  await t.call('cat', '303', 'PUT', '/settings', { householdLog: true });
+  const dish = { name: 'Lasagna', per: { calories: 600, protein: 35 }, date: '2026-11-25', meal: 'dinner' };
+  n.household.logShared({ by: 'dan', eaters: [{ username: 'dan' }, { username: 'cat' }], ...dish });
+  n.household.logShared({ by: 'dan', eaters: [{ username: 'dan' }, { username: 'cat' }], ...dish, name: 'lasagna' });
+  for (const u of ['dan', 'cat']) {
+    const foods = (await t.call(u, '303', 'GET', '/foods')).json;
+    assert.strictEqual(foods.filter((f) => f.name.toLowerCase() === 'lasagna').length, 1, u);
+    assert.strictEqual(foods[0].per.calories, 600);
+  }
+  t.close();
+});

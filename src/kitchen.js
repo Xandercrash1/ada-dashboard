@@ -41,9 +41,27 @@ const text = (v, max, what, required = true) => {
 };
 const line = (v, max, what, required = true) => text(String(v == null ? '' : v).replace(/\s+/g, ' '), max, what, required);
 const qtyOf = (v, what = 'Amount') => { const n = Number(v); if (!Number.isFinite(n) || n < 0 || n > 100000) throw badRequest(`${what} must be a number.`); return R.round2(n); };
-const emptyData = () => ({ items: [], recipes: [], plan: [], chats: {}, pending: {}, log: [] });
+const emptyData = () => ({ items: [], recipes: [], plan: [], chats: {}, pending: {}, log: [], eaters: {} });
+// Calories and macros per serving, typed once per recipe (Kitchen to Nutrition, phase 1). Calories are required, the rest default to 0.
+const PER_KEYS = ['calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium'];
+function cleanPerServing(raw, required) {
+  if (raw == null || raw === '') { if (required) throw badRequest('Type the calories per serving first.'); return null; }
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw badRequest('Nutrition must be an object.');
+  const blank = (v) => v === undefined || v === null || v === '';
+  if (PER_KEYS.every((k) => blank(raw[k]))) { if (required) throw badRequest('Type the calories per serving first.'); return null; }
+  if (blank(raw.calories)) throw badRequest('Type the calories per serving first.');
+  const out = {};
+  for (const k of PER_KEYS) {
+    const n = blank(raw[k]) ? 0 : Number(raw[k]);
+    if (!Number.isFinite(n) || n < 0 || n > (k === 'calories' ? 10000 : 20000)) throw badRequest(`${k} must be a number from 0 up.`);
+    out[k] = Math.round(n * 10) / 10;
+  }
+  return out;
+}
 
-function create({ dataDir, limits, runAssistant = defaultRun, classify = defaultClassify, propose = defaultPropose, clock = () => new Date(), classifyWaitMs = 8000 }) {
+// household (from server.js, optional): { members() -> [{ username, name }] of the 303 household, optedIn(username) -> bool,
+// log({ by, byName, eaters, name, serving, per, date, meal }) -> [{ username, ok }] } (nutrition.js does the writing and the opt-in check).
+function create({ dataDir, limits, runAssistant = defaultRun, classify = defaultClassify, propose = defaultPropose, clock = () => new Date(), classifyWaitMs = 8000, household = null }) {
   const dir = path.join(dataDir, 'kitchen');
   const fileFor = (user) => { if (!USER_RE.test(String(user))) throw badRequest('No such account.'); return path.join(dir, `${user}.json`); };
   const load = (user) => {
@@ -147,7 +165,8 @@ function create({ dataDir, limits, runAssistant = defaultRun, classify = default
     const ing = ingredients.map((x) => ({ name: line(x && x.name, 80, 'Ingredient'), qty: x.qty === '' || x.qty == null ? 0 : qtyOf(x.qty), unit: line(R.normUnit(x.unit), 16, 'Unit', false) }));
     const steps = b.steps !== undefined ? text(b.steps, 4000, 'Steps', false) : prev ? prev.steps : '';
     const tags = b.tags !== undefined ? (Array.isArray(b.tags) ? b.tags : String(b.tags).split(',')).map((t) => line(t, 24, 'Tag', false).toLowerCase()).filter(Boolean).slice(0, 8) : prev ? prev.tags : [];
-    return { ...(prev || { id: newId(), createdOn: today() }), name, servings, ingredients: ing, steps, tags };
+    const per = b.per !== undefined ? cleanPerServing(b.per, false) : prev ? prev.per || null : null;
+    return { ...(prev || { id: newId(), createdOn: today() }), name, servings, ingredients: ing, steps, tags, per };
   }
   const findRecipe = (d, idOrName) => d.recipes.find((r) => r.id === idOrName) || d.recipes.find((r) => R.keyOf(r.name) === R.keyOf(idOrName));
   function cleanPlan(b, d) {
@@ -410,6 +429,65 @@ function create({ dataDir, limits, runAssistant = defaultRun, classify = default
 
     router.post('/plan', guard((req, res, user) => { const d = load(user); if (d.plan.length >= MAX.plan) d.plan = d.plan.slice(-MAX.plan + 1); const p = cleanPlan(body(req), d); d.plan.push(p); save(user, d); res.json({ state: stateView(d, req) }); }));
     router.delete('/plan/:id', guard((req, res, user) => { const d = load(user); d.plan = d.plan.filter((p) => p.id !== req.params.id); save(user, d); res.json({ state: stateView(d, req) }); }));
+
+    // ---- Who ate? (Kitchen to Nutrition, phase 1, Alex 2026-11-25)
+    // The picker lists the signed-in person plus household members who opted in, by name only. Logging writes one
+    // entry into each chosen person's own food log through nutrition.js, which checks the opt-in again; the reply
+    // says only who it worked for. Default eaters per meal live here (shared kitchen file, keyed by the person, names only).
+    const easternHour = () => { const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).formatToParts(clock()); return Number((p.find((x) => x.type === 'hour') || {}).value || 0); };
+    const mealNow = () => { const h = easternHour(); return h < 11 ? 'breakfast' : h < 16 ? 'lunch' : 'dinner'; };
+    const titleCase = (u) => u.charAt(0).toUpperCase() + u.slice(1);
+    // Who can be logged for: yourself always; others only in the shared 303 kitchen, only if they opted in.
+    function eatersFor(req) {
+      const self = req.kWho, members = household && kitchenOf(req) === 'house' ? household.members() : [];
+      const me = members.find((m) => m.username === self);
+      const out = [{ username: self, name: me ? me.name : titleCase(self), self: true }];
+      for (const m of members) if (m.username !== self && household.optedIn(m.username)) out.push({ username: m.username, name: m.name || titleCase(m.username), self: false });
+      return out;
+    }
+    const cleanNames = (v) => { if (!Array.isArray(v) || v.length > 20) throw badRequest('Send a list of names.'); return [...new Set(v.map((x) => String(x || '').toLowerCase()).filter((x) => USER_RE.test(x)))]; };
+    router.get('/eaters', guard((req, res, user) => {
+      const d = load(user), people = eatersFor(req);
+      const p = req.query.planId ? d.plan.find((x) => x.id === req.query.planId) : null;
+      const r = req.query.recipeId ? d.recipes.find((x) => x.id === req.query.recipeId) : p && p.recipeId ? d.recipes.find((x) => x.id === p.recipeId) : null;
+      const t = today();
+      res.json({ available: !!household, people, defaults: (d.eaters || {})[req.kWho] || {}, meal: p ? p.meal : mealNow(), date: p && p.date <= t && p.date >= R.addDays(t, -7) ? p.date : t, today: t,
+        dish: r ? r.name : p ? p.title : null, per: r ? r.per || null : null, servings: r ? r.servings : null });
+    }));
+    router.put('/eaters/defaults', guard((req, res, user) => {
+      const b = body(req); if (!MEALS.includes(b.meal)) throw badRequest('Pick a meal.');
+      const d = load(user); d.eaters = d.eaters || {}; d.eaters[req.kWho] = { ...(d.eaters[req.kWho] || {}), [b.meal]: cleanNames(b.names) };
+      save(user, d); res.json({ defaults: d.eaters[req.kWho] });
+    }));
+    router.post('/eaten', guard((req, res, user) => {
+      if (!household) throw Object.assign(new Error('Logging to Nutrition is not set up here.'), { status: 503 });
+      const b = body(req), d = load(user), t = today();
+      const p = b.planId ? d.plan.find((x) => x.id === b.planId) : null;
+      const r = b.recipeId ? d.recipes.find((x) => x.id === b.recipeId) : p && p.recipeId ? d.recipes.find((x) => x.id === p.recipeId) : null;
+      if (b.recipeId && !r) throw badRequest('That recipe is gone.');
+      const dish = r ? r.name : p ? p.title : line(b.title, 100, 'Meal');
+      const meal = MEALS.includes(b.meal) ? b.meal : p ? p.meal : mealNow();
+      const date = b.date === undefined ? t : b.date;
+      if (!isDate(date) || date > t || date < R.addDays(t, -7)) throw badRequest('Pick a day in the last week.');
+      // Typed nutrition wins and is saved on the recipe; otherwise the recipe's saved numbers are used.
+      const typed = cleanPerServing(b.per, false);
+      const per = typed || (r && r.per) || null;
+      if (!per) throw badRequest('Type the calories per serving first.');
+      if (!Array.isArray(b.eaters) || !b.eaters.length) throw badRequest('Pick who ate.');
+      // Only people the picker would show: yourself, or opted-in members of your household. Anyone else is refused here, before nutrition.js is asked.
+      const allowed = new Map(eatersFor(req).map((x) => [x.username, x]));
+      const want = b.eaters.slice(0, 20).map((x) => ({ username: String((x && x.username) || '').toLowerCase(), servings: x && x.servings === undefined ? 1 : x && x.servings }));
+      const asked = want.filter((x) => allowed.has(x.username));
+      const results = asked.length ? household.log({ by: req.kWho, byName: allowed.get(req.kWho).name, eaters: asked, name: dish, serving: '1 serving', per, date, meal }) : [];
+      const okSet = new Set(results.filter((x) => x.ok).map((x) => x.username));
+      const nameOf = (u) => (allowed.get(u) || { name: titleCase(u) }).name;
+      const out = want.map((x) => ({ username: x.username, name: nameOf(x.username), ok: okSet.has(x.username) }));
+      if (typed && r) r.per = typed;
+      if (b.saveDefault === true) { d.eaters = d.eaters || {}; d.eaters[req.kWho] = { ...(d.eaters[req.kWho] || {}), [meal]: asked.map((x) => x.username) }; }
+      if (okSet.size) note(d, req.kWho, `Logged ${dish} (${meal}) to ${okSet.size} food log${okSet.size > 1 ? 's' : ''}`);
+      save(user, d);
+      res.json({ results: out, dish, meal, date, state: stateView(d, req) });
+    }));
 
     // ---- keyword library (admin): weekly review turns logged decisions into suggestions; approving adds a keyword
     const adminOnly = (req) => { if (!req.user || req.user.role !== 'admin') throw Object.assign(new Error('Only an admin can change the keyword library.'), { status: 403 }); };

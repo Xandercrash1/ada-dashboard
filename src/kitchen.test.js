@@ -201,3 +201,87 @@ test('0.1.1: model only when no date and no keyword; late answers land; fixes lo
     assert.strictEqual((await call('POST', '/keywords/review')).body.added, 0);   // nothing new since
   } finally { s.close(); }
 });
+
+// ---- Who ate? (Kitchen to Nutrition, 2026-11-25): the real nutrition module behind a test household
+const nutrition = require('./nutrition');
+function household(dataDir, members = [['alex', 'Alex'], ['paige', 'Paige'], ['matt', 'Matt']]) {
+  const n = nutrition.create({ dataDir, clock: () => NOW });
+  return { n, h: { members: () => members.map(([username, name]) => ({ username, name })), optedIn: (u) => n.household.optedIn(u), log: (a) => n.household.logShared(a) } };
+}
+function eatServer() {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kitchen-eat-'));
+  const { n, h } = household(dataDir);
+  return { ...server({ dataDir, household: h }), n, dataDir };
+}
+const nutFile = (dataDir, u) => path.join(dataDir, 'nutrition', `${u}.json`);
+const optIn = (dataDir, u, on = true) => { const n = nutrition.create({ dataDir }); const d = n.load(u); d.settings.householdLog = on; n.save(u, d); };
+
+test('who ate: picker shows you plus opted-in members only, names only; defaults pre-fill', async () => {
+  const { s, call, dataDir } = eatServer();
+  try {
+    optIn(dataDir, 'paige');
+    const r = await call('POST', '/recipes', { name: 'Chili', servings: 4, ingredients: [] });
+    const e = (await call('GET', `/eaters?recipeId=${r.body.recipe.id}`)).body;
+    assert.deepStrictEqual(e.people, [{ username: 'alex', name: 'Alex', self: true }, { username: 'paige', name: 'Paige', self: false }]);   // matt did not opt in
+    assert.strictEqual(e.meal, 'lunch'); assert.strictEqual(e.date, '2026-11-24'); assert.strictEqual(e.per, null); assert.strictEqual(e.servings, 4);
+    assert.ok(!JSON.stringify(e).includes('entries') && !JSON.stringify(e).includes('profile'));
+    // Defaults per meal, per person, names only
+    assert.deepStrictEqual((await call('PUT', '/eaters/defaults', { meal: 'dinner', names: ['alex', 'paige', 'Bad Name!'] })).body.defaults, { dinner: ['alex', 'paige'] });
+    assert.deepStrictEqual((await call('GET', '/eaters')).body.defaults, { dinner: ['alex', 'paige'] });
+    assert.deepStrictEqual((await call('GET', '/eaters', null, { 'x-user': 'paige', 'x-role': '303' })).body.defaults, {}, 'each person keeps their own');
+    // a planned meal sets the meal and the date
+    const p = (await call('POST', '/plan', { date: '2026-11-23', meal: 'dinner', recipeId: r.body.recipe.id })).body.state.plan[0];
+    const ep = (await call('GET', `/eaters?planId=${p.id}`)).body;
+    assert.strictEqual(ep.meal, 'dinner'); assert.strictEqual(ep.date, '2026-11-23'); assert.strictEqual(ep.dish, 'Chili');
+  } finally { s.close(); }
+});
+test('who ate: one confirm logs everyone chosen; a non-opted-in person is refused and nothing is written for them', async () => {
+  const { s, call, dataDir, n } = eatServer();
+  try {
+    optIn(dataDir, 'paige');
+    const r = (await call('POST', '/recipes', { name: 'Chili', servings: 4, ingredients: [] })).body.recipe;
+    // no calories anywhere yet: asked to type them
+    assert.strictEqual((await call('POST', '/eaten', { recipeId: r.id, eaters: [{ username: 'alex' }] })).status, 400);
+    const out = await call('POST', '/eaten', { recipeId: r.id, meal: 'dinner', date: '2026-11-24', per: { calories: 450, protein: 30, carbs: 40, fat: 15 },
+      eaters: [{ username: 'alex', servings: 1.5 }, { username: 'paige', servings: 1 }, { username: 'matt', servings: 1 }, { username: 'stranger', servings: 1 }], saveDefault: true });
+    assert.strictEqual(out.status, 200);
+    assert.deepStrictEqual(out.body.results, [{ username: 'alex', name: 'Alex', ok: true }, { username: 'paige', name: 'Paige', ok: true }, { username: 'matt', name: 'Matt', ok: false }, { username: 'stranger', name: 'Stranger', ok: false }]);
+    // entries land only in the chosen, allowed people's own files
+    assert.ok(!fs.existsSync(nutFile(dataDir, 'matt')), 'matt: nothing written'); assert.ok(!fs.existsSync(nutFile(dataDir, 'stranger')));
+    const a = n.load('alex'), pg = n.load('paige');
+    assert.deepStrictEqual(a.entries.map((e) => [e.name, e.servings, e.meal, e.date, e.source, e.note]), [['Chili', 1.5, 'dinner', '2026-11-24', 'kitchen', 'logged by Alex from Kitchen']]);
+    assert.deepStrictEqual(pg.entries.map((e) => [e.name, e.servings, e.note]), [['Chili', 1, 'logged by Alex from Kitchen']]);
+    assert.strictEqual(pg.entries[0].per.calories, 450);
+    // the reply carries no one's log, totals or goals
+    const txt = JSON.stringify(out.body.results);
+    assert.ok(!/calories|entries|targets|goals/.test(txt));
+    // the numbers were saved on the recipe; the next time no typing is needed
+    assert.strictEqual(out.body.state.recipes[0].per.calories, 450);
+    assert.strictEqual((await call('GET', `/eaters?recipeId=${r.id}`)).body.per.protein, 30);
+    assert.deepStrictEqual((await call('GET', '/eaters')).body.defaults.dinner, ['alex', 'paige'], 'saved as the default: only people who could be logged');
+    const again = await call('POST', '/eaten', { recipeId: r.id, meal: 'lunch', eaters: [{ username: 'paige' }] });
+    assert.deepStrictEqual(again.body.results.map((x) => x.ok), [true]);
+    // foods added once, even after two logs
+    assert.strictEqual(n.load('paige').foods.filter((f) => f.name === 'Chili').length, 1);
+    assert.strictEqual(n.load('alex').foods.filter((f) => f.name === 'Chili').length, 1);
+    // paige turns it off: refused from now on
+    optIn(dataDir, 'paige', false);
+    const off = await call('POST', '/eaten', { recipeId: r.id, eaters: [{ username: 'paige' }, { username: 'alex' }] });
+    assert.deepStrictEqual(off.body.results.map((x) => [x.username, x.ok]), [['paige', false], ['alex', true]]);
+    assert.strictEqual(n.load('paige').entries.length, 2);
+    // a day outside the last week is refused
+    assert.strictEqual((await call('POST', '/eaten', { recipeId: r.id, date: '2026-11-25', eaters: [{ username: 'alex' }] })).status, 400);
+  } finally { s.close(); }
+});
+test('who ate: self is always allowed, also for accounts outside the shared kitchen', async () => {
+  const { s, call, n } = eatServer();
+  try {
+    const r = (await call('POST', '/recipes', { name: 'Toast', per: { calories: 120 }, ingredients: [] }, { 'x-user': 'tester', 'x-role': 'pages' })).body.recipe;
+    assert.strictEqual(r.per.calories, 120);
+    const e = (await call('GET', '/eaters', null, { 'x-user': 'tester', 'x-role': 'pages' })).body;
+    assert.deepStrictEqual(e.people.map((p) => p.username), ['tester'], 'no household outside the 303 kitchen');
+    const out = await call('POST', '/eaten', { recipeId: r.id, eaters: [{ username: 'tester' }, { username: 'alex' }] }, { 'x-user': 'tester', 'x-role': 'pages' });
+    assert.deepStrictEqual(out.body.results.map((x) => [x.username, x.ok]), [['tester', true], ['alex', false]]);
+    assert.strictEqual(n.load('tester').entries.length, 1); assert.strictEqual(n.load('alex').entries.length, 0);
+  } finally { s.close(); }
+});

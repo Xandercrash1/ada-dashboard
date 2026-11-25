@@ -1262,8 +1262,16 @@ vaultProjects.mount(app, { isAdminReq, readPagesRegistry });   // One Ada: Proje
 require('./user-projects').create({ dataDir: DATA_DIR, projectContext: vaultProjects.context, limits: aiLimits }).mount(app, { ownerName, isAdminReq, people: () => taskPeople() });   // New project button: splash pages and documents
 const foodLookup = require('./food-lookup').create();
 foodLookup.mount(app);   // USDA nutrient lookup for those pages (ada.lookupFood)
-require('./nutrition').create({ dataDir: DATA_DIR, limits: aiLimits, lookup: (q, brands) => foodLookup.lookup(q, brands) }).mount(app, { ownerName });   // Nutrition tab: per-person food log, targets, Coach (admin + 303)
-require('./kitchen').create({ dataDir: DATA_DIR, limits: aiLimits }).mount(app, { ownerName });   // Kitchen tab: inventory, meal planner, assistant (prototype, 2026-11-24)
+const nutritionApi = require('./nutrition').create({ dataDir: DATA_DIR, limits: aiLimits, lookup: (q, brands) => foodLookup.lookup(q, brands) });
+nutritionApi.mount(app, { ownerName });   // Nutrition tab: per-person food log, targets, Coach (admin + 303)
+// Kitchen to Nutrition (Alex, 2026-11-25): Kitchen's "Who ate?" logs a cooked meal into each chosen person's food log.
+// Not a route: kitchen.js calls nutrition.js directly, which writes only for the caller or people who opted in, and returns only ok/refused.
+const kitchenHousehold = {
+  members: () => (userStore ? userStore.list() : []).filter(u => !u.disabled && ['admin', '303'].includes(u.role)).map(u => ({ username: u.username, name: u.displayName || u.username })),
+  optedIn: (username) => nutritionApi.household.optedIn(username),
+  log: (args) => nutritionApi.household.logShared(args),
+};
+require('./kitchen').create({ dataDir: DATA_DIR, limits: aiLimits, household: kitchenHousehold }).mount(app, { ownerName });   // Kitchen tab: inventory, meal planner, assistant (prototype, 2026-11-24)
 errorReport.mount(app);   // POST /api/client-error: browser errors for the nightly loop (public/error-report.js)
 subscriptions.mount(app, { isAdminReq, completeScheduled: completeTaskLocked });   // Subscriptions page: admin only, checked on each route (no non-admin allowlist line on purpose)
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending

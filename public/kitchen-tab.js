@@ -19,7 +19,8 @@
     if (!r.ok) { const e = new Error(b.error || `HTTP ${r.status}`); e.status = r.status; throw e; }
     return b;
   };
-  const S = { tab: 'plan', v: null, chat: [], busy: false, err: '', msg: '', sheet: null, cook: null, addOpen: false, recipeOpen: false, planOpen: null, editId: null };
+  const S = { tab: 'plan', v: null, chat: [], busy: false, err: '', msg: '', sheet: null, cook: null, eat: null, addOpen: false, recipeOpen: false, planOpen: null, editId: null };
+  const PER = [['calories', 'Calories', 'kcal'], ['protein', 'Protein', 'g'], ['carbs', 'Carbs', 'g'], ['fat', 'Fat', 'g']];
   const PLACES = [['fridge', 'Fridge', 'fa-temperature-low'], ['freezer', 'Freezer', 'fa-snowflake'], ['pantry', 'Pantry', 'fa-box-archive']];
   const MEALS = [['breakfast', 'Breakfast'], ['lunch', 'Lunch'], ['dinner', 'Dinner'], ['snack', 'Snack']];
   const input = 'w-full rounded-xl bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 px-3 py-2.5 text-base';
@@ -68,7 +69,7 @@
   }
   function recipeRow(r) {
     const have = R_have(r);
-    return `<li class="py-2"><details><summary class="flex items-center justify-between gap-2 cursor-pointer list-none"><span class="min-w-0"><span class="font-medium">${esc(r.name)}</span> <span class="text-xs text-gray-500">serves ${r.servings}</span><br><span class="text-xs ${have.missing ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}">${have.missing ? `missing ${have.missing} of ${have.total}` : 'you have everything'}</span></span>
+    return `<li class="py-2"><details><summary class="flex items-center justify-between gap-2 cursor-pointer list-none"><span class="min-w-0"><span class="font-medium">${esc(r.name)}</span> <span class="text-xs text-gray-500">serves ${r.servings}${r.per ? ` · ${qty(r.per.calories)} kcal a serving` : ''}</span><br><span class="text-xs ${have.missing ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}">${have.missing ? `missing ${have.missing} of ${have.total}` : 'you have everything'}</span></span>
       <button class="${btn} bg-emerald-600 text-white !min-h-[36px] !px-3 shrink-0" data-act="cook" data-id="${r.id}"><i class="fa-solid fa-fire-burner"></i> Cook</button></summary>
       <ul class="mt-2 text-sm space-y-0.5">${r.ingredients.map((x) => `<li>${x.qty ? amount(x.qty, x.unit) + ' ' : ''}${esc(x.name)}</li>`).join('')}</ul>
       ${r.steps ? `<p class="mt-2 text-sm whitespace-pre-line text-gray-600 dark:text-gray-300">${esc(r.steps)}</p>` : ''}
@@ -93,6 +94,8 @@
       <input name="servings" type="number" min="1" max="50" value="2" class="${input}" aria-label="Servings">
       <textarea name="ingredients" rows="5" class="${input}" placeholder="One ingredient per line:\n1.5 lb chicken breast\n2 cups rice\n3 cloves garlic\nsalt"></textarea>
       <textarea name="steps" rows="3" class="${input}" placeholder="Steps (optional)"></textarea>
+      <div class="text-xs text-gray-500">Per serving, for the food log (optional; you can also type it after cooking)</div>
+      <div class="grid grid-cols-4 gap-2">${PER.map(([k, n, u]) => `<input name="per.${k}" type="number" inputmode="decimal" step="any" min="0" class="${input} !px-2" placeholder="${n} ${u}" aria-label="${n} per serving (${u})">`).join('')}</div>
       <button class="${primary} w-full">Save recipe</button></form>`;
   const UNIT_WORDS = 'g|grams?|kg|oz|ounces?|lbs?|pounds?|ml|l|liters?|litres?|cups?|tbsp|tablespoons?|tsp|teaspoons?|cans?|jars?|cloves?|bags?|box(es)?|packs?|packages?|bunch|heads?|slices?|pieces?|fillets?|breasts?|dozen|pinch|loaf';
   function parseIngredient(lineStr) {
@@ -178,6 +181,51 @@
       <button class="${primary} w-full mt-4" data-act="cook-go" ${open ? 'disabled style="opacity:.5"' : ''}>${open ? `Answer ${open} question${open > 1 ? 's' : ''} above` : 'Cook it and update the kitchen'}</button></div></div>`;
   }
 
+  // ---------- Who ate? (after cooking: one confirm logs everyone into their own Nutrition food log)
+  function eatSheet() {
+    const e = S.eat; if (!e) return '';
+    const people = e.people.map((p) => `<div class="flex items-center justify-between gap-2 py-1.5"><label class="flex items-center gap-2 text-sm min-h-[40px] cursor-pointer"><input type="checkbox" data-eat-tick="${esc(p.username)}" ${e.ticks[p.username] ? 'checked' : ''} class="w-5 h-5">${esc(p.name)}${p.self ? ' <span class="text-xs text-gray-500">(you)</span>' : ''}</label>
+      <label class="flex items-center gap-1 text-xs text-gray-500">servings <input type="number" min="0.25" max="20" step="0.25" value="${qty(e.servings[p.username] || 1)}" data-eat-serv="${esc(p.username)}" class="${input} !w-20 !py-1.5"></label></div>`).join('');
+    const others = e.people.length > 1 ? '' : '<p class="text-xs text-gray-500">Only you for now. Others in the house show here once they turn on "Let the household log shared meals to my food log" in their Nutrition profile.</p>';
+    const n = Object.values(e.ticks).filter(Boolean).length;
+    return `<div class="fixed inset-0 z-[1100] bg-black/60 flex items-end md:items-center justify-center" data-act="eat-close-bg"><div class="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-t-3xl md:rounded-3xl p-5 space-y-3" data-stop="1" role="dialog" aria-modal="true" aria-label="Who ate?">
+      <div class="flex items-center justify-between"><h3 class="text-lg font-semibold">Who ate ${esc(e.dish)}?</h3><button class="min-h-[44px] px-3 text-gray-400" data-act="eat-close" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
+      <p class="text-xs text-gray-500">Adds it to each person's own food log in Nutrition. You won't see their logs.${e.recipeServings ? ` The recipe serves ${e.recipeServings}.` : ''}</p>
+      <div class="divide-y divide-black/5 dark:divide-white/10">${people}</div>${others}
+      <div class="grid grid-cols-2 gap-2"><select data-eat-meal="1" class="${input}" aria-label="Meal">${MEALS.map(([k, nm]) => `<option value="${k}" ${k === e.meal ? 'selected' : ''}>${nm}</option>`).join('')}</select><input type="date" data-eat-date="1" value="${esc(e.date)}" min="${esc(addDays(e.today, -7))}" max="${esc(e.today)}" class="${input}" aria-label="Day"></div>
+      <div><div class="text-xs text-gray-500 mb-1">Per serving${e.hadPer ? ' (saved on the recipe)' : ' (type once; it is saved on the recipe)'}</div>
+        <div class="grid grid-cols-4 gap-2">${PER.map(([k, nm, u]) => `<label class="text-[11px] text-gray-500">${nm} ${u}<input type="number" inputmode="decimal" step="any" min="0" value="${e.per[k] == null ? '' : esc(e.per[k])}" data-eat-per="${k}" class="${input} !px-2 mt-0.5"></label>`).join('')}</div></div>
+      <label class="flex items-center gap-2 text-sm min-h-[40px]"><input type="checkbox" data-eat-default="1" ${e.saveDefault ? 'checked' : ''} class="w-5 h-5"> Make these my usual eaters for ${esc(e.meal)}</label>
+      <div class="flex gap-2"><button class="${ghost} flex-1" data-act="eat-close">Skip</button><button class="${primary} flex-1" data-act="eat-go" ${n ? '' : 'disabled style="opacity:.5"'}>${n ? `Log for ${n}` : 'Pick who ate'}</button></div></div></div>`;
+  }
+  // Default ticks for a meal: your saved list for that meal (only people the picker shows), or just you.
+  function eatTicks(e) {
+    const shown = new Set(e.people.map((p) => p.username)), saved = (e.defaults[e.meal] || []).filter((u) => shown.has(u));
+    const list = saved.length ? saved : [e.people[0].username];
+    e.ticks = {}; list.forEach((u) => { e.ticks[u] = true; });
+  }
+  async function openEat(recipe, planId) {
+    try {
+      const q = planId ? `planId=${encodeURIComponent(planId)}` : `recipeId=${encodeURIComponent(recipe.id)}`;
+      const r = await api(`/eaters?${q}`);
+      if (!r.available) return;
+      const e = { recipeId: recipe.id, planId, dish: r.dish || recipe.name, people: r.people, defaults: r.defaults || {}, meal: r.meal, date: r.date, today: r.today, recipeServings: r.servings,
+        per: Object.assign({}, r.per || {}), hadPer: !!r.per, servings: {}, saveDefault: false };
+      eatTicks(e); S.eat = e; render();
+    } catch (err) { flash(err.message, true); }
+  }
+  async function sendEat() {
+    const e = S.eat;
+    const eaters = e.people.filter((p) => e.ticks[p.username]).map((p) => ({ username: p.username, servings: Number(e.servings[p.username] || 1) }));
+    const per = {}; PER.forEach(([k]) => { if (e.per[k] !== '' && e.per[k] != null) per[k] = e.per[k]; });
+    try {
+      const r = await api('/eaten', { method: 'POST', body: { recipeId: e.recipeId, planId: e.planId || undefined, meal: e.meal, date: e.date, eaters, per: Object.keys(per).length ? per : undefined, saveDefault: e.saveDefault } });
+      S.v = r.state; S.eat = null;
+      const ok = r.results.filter((x) => x.ok).map((x) => x.name), no = r.results.filter((x) => !x.ok).map((x) => x.name);
+      flash(`${ok.length ? `Logged ${r.dish} for ${ok.join(', ')}.` : 'Nothing was logged.'}${no.length ? ` Couldn't log for ${no.join(', ')} (they haven't allowed it).` : ''}`, !ok.length);
+    } catch (err) { flash(err.message, true); }
+  }
+
   // ---------- render + events
   function render() {
     const el = root(); if (!el) return;
@@ -186,7 +234,7 @@
     const nav = `<div class="grid grid-cols-3 gap-1 p-1 rounded-2xl bg-black/5 dark:bg-white/5" role="tablist">${tabs.map(([k, n, ic]) => `<button role="tab" aria-selected="${S.tab === k}" data-act="tab" data-tab="${k}" class="min-h-[44px] rounded-xl text-[13px] font-semibold flex items-center justify-center gap-1.5 ${S.tab === k ? 'bg-white dark:bg-gray-700 shadow text-indigo-600 dark:text-indigo-300' : 'text-gray-500'}"><i class="fa-solid ${ic}"></i>${n}${k === 'inventory' && alertN ? ` <span class="text-[10px] rounded-full bg-amber-500 text-white px-1.5">${alertN}</span>` : ''}</button>`).join('')}</div>`;
     let body = !S.v ? (S.err ? '' : '<div class="text-sm text-gray-500 p-4"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>') : S.tab === 'plan' ? renderPlan() : S.tab === 'inventory' ? renderInventory() : renderAssistant();
     const draft = (document.getElementById('kit-input') || {}).value || '';
-    el.innerHTML = `<div class="max-w-2xl mx-auto space-y-4 pb-24 md:pb-8 px-1"><div class="flex items-baseline justify-between"><h2 class="text-xl font-bold"><i class="fa-solid fa-kitchen-set text-indigo-500"></i> Kitchen</h2><span class="text-xs text-gray-400">alpha ${esc(S.v ? S.v.version : '')}</span></div>${nav}${note()}${body}</div>${cookSheet()}`;
+    el.innerHTML = `<div class="max-w-2xl mx-auto space-y-4 pb-24 md:pb-8 px-1"><div class="flex items-baseline justify-between"><h2 class="text-xl font-bold"><i class="fa-solid fa-kitchen-set text-indigo-500"></i> Kitchen</h2><span class="text-xs text-gray-400">alpha ${esc(S.v ? S.v.version : '')}</span></div>${nav}${note()}${body}</div>${cookSheet()}${eatSheet()}`;
     const ta = document.getElementById('kit-input'); if (ta && draft) ta.value = draft;
     const ch = document.getElementById('kit-chat'); if (ch && S.tab === 'assistant') ch.lastElementChild && ch.lastElementChild.scrollIntoView({ block: 'nearest' });
   }
@@ -223,7 +271,7 @@
   function onClick(ev) {
     const t = ev.target.closest('[data-act]'); if (!t) return;
     const a = t.dataset.act, id = t.dataset.id;
-    if (a === 'cook-close-bg' && ev.target.closest('[data-stop]')) return;
+    if ((a === 'cook-close-bg' || a === 'eat-close-bg') && ev.target.closest('[data-stop]')) return;
     if (t.tagName === 'BUTTON' && t.closest('summary')) ev.preventDefault();
     if (a === 'tab') { S.tab = t.dataset.tab; S.err = ''; render(); if (S.tab === 'assistant') loadChat(); }
     else if (a === 'add-open') { S.addOpen = !S.addOpen; render(); }
@@ -249,12 +297,24 @@
         if (!r.applied) { c.preview = r; flash('Something changed; check the questions again.', true); return; }
         S.v = r.state; S.cook = null;
         flash(`Cooked ${c.recipe.name}. ${r.used.length ? 'Updated: ' + r.used.map((u) => `${u.name} ${u.gone ? 'used up' : qty(u.left) + ' left'}`).join(', ') + '.' : ''}`);
+        openEat(c.recipe, c.planId);
       }).catch((e) => flash(e.message, true));
     }
+    else if (a === 'eat-close' || a === 'eat-close-bg') { S.eat = null; render(); }
+    else if (a === 'eat-go') sendEat();
   }
   function onInput(ev) {
     const t = ev.target;
     if (t.dataset.typeFor && ev.type === 'change') { const lab = (S.v.types.find((x) => x.id === t.value) || {}).label; run(api(`/items/${t.dataset.typeFor}`, { method: 'PATCH', body: { category: t.value } }), `Changed to ${lab}; its date was worked out again. Thanks, that helps the keyword list learn.`); return; }
+    if (S.eat) {
+      const e = S.eat;
+      if (t.dataset.eatTick) { e.ticks[t.dataset.eatTick] = t.checked; if (ev.type === 'change') render(); return; }
+      if (t.dataset.eatServ) { e.servings[t.dataset.eatServ] = Math.max(0.25, Number(t.value) || 1); return; }
+      if (t.dataset.eatPer) { e.per[t.dataset.eatPer] = t.value === '' ? '' : Number(t.value); return; }
+      if (t.dataset.eatDate) { e.date = t.value; return; }
+      if (t.dataset.eatDefault) { e.saveDefault = t.checked; return; }
+      if (t.dataset.eatMeal && ev.type === 'change') { e.meal = t.value; eatTicks(e); render(); return; }
+    }
     if (t.dataset.cookScale) { S.cook.scale = Math.max(0.25, Number(t.value) || 1); if (ev.type === 'change') rePreview(); }
     if (t.dataset.resQty != null) { const m = askList()[Number(t.dataset.resQty)]; S.cook.resolve[m.ingredient].bought = Number(t.value) || 0; }
     if (t.dataset.resUnit != null) { const m = askList()[Number(t.dataset.resUnit)]; S.cook.resolve[m.ingredient].unit = t.value; }
@@ -276,7 +336,8 @@
     }
     else if (kind === 'recipe') {
       const ingredients = String(fd.ingredients || '').split('\n').map(parseIngredient).filter(Boolean);
-      run(api('/recipes', { method: 'POST', body: { name: fd.name, servings: fd.servings, ingredients, steps: fd.steps } }), `Saved ${fd.name}.`).then((r) => { if (r) { S.recipeOpen = false; render(); } });
+      const per = {}; PER.forEach(([k]) => { if (fd['per.' + k] !== undefined && fd['per.' + k] !== '') per[k] = Number(fd['per.' + k]); });
+      run(api('/recipes', { method: 'POST', body: { name: fd.name, servings: fd.servings, ingredients, steps: fd.steps, per: Object.keys(per).length ? per : undefined } }), `Saved ${fd.name}.`).then((r) => { if (r) { S.recipeOpen = false; render(); } });
     } else if (kind === 'plan') run(api('/plan', { method: 'POST', body: { date: f.dataset.date, meal: fd.meal, recipeId: fd.recipeId || undefined, title: fd.title || undefined } })).then((r) => { if (r) { S.planOpen = null; render(); } });
   }
   function onKey(ev) { if (ev.target.id === 'kit-input' && ev.key === 'Enter' && !ev.shiftKey && window.matchMedia('(min-width: 768px)').matches) { ev.preventDefault(); send(ev.target.value); } }

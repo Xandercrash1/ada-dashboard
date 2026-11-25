@@ -131,7 +131,7 @@ function cleanEntry(b, { partial = false } = {}) {
   if (!partial || b.servings !== undefined) { const s = num(b.servings === undefined ? 1 : b.servings); if (!Number.isFinite(s) || s <= 0 || s > 100) throw badRequest('servings must be more than 0 and at most 100.'); out.servings = Math.round(s * 100) / 100; }
   if (!partial || b.serving !== undefined) out.serving = oneLine(b.serving, 60, 'Serving', false);
   if (!partial || b.per !== undefined) out.per = cleanPer(b.per);
-  if (b.source !== undefined) out.source = ['usda', 'manual', 'myfood', 'migrated', 'estimate'].includes(b.source) ? b.source : 'manual';
+  if (b.source !== undefined) out.source = ['usda', 'manual', 'myfood', 'migrated', 'estimate', 'kitchen'].includes(b.source) ? b.source : 'manual';
   return out;
 }
 
@@ -251,7 +251,15 @@ const emptyData = () => ({
   version: 2, profile: { units: 'imperial', goal: 'maintain', rateKgPerWeek: 0.5, overrides: {} }, entries: [], weights: [], waists: [], foods: [], plans: [], chat: [], legacy: {},
   setup: { done: false }, goals: [], targetMeta: { source: 'formula', reason: '', at: null }, workoutPlan: null, workouts: [], changes: [],
   reviews: { lastAt: null, lastAttemptAt: null, last: null },
+  // Kitchen to Nutrition (Alex, 2026-11-25): off until this person turns it on in their own settings.
+  settings: { householdLog: false },
 });
+const cleanSettings = (b) => {
+  if (!b || typeof b !== 'object' || Array.isArray(b)) throw badRequest('Send the settings as an object.');
+  const out = {};
+  if (b.householdLog !== undefined) { if (typeof b.householdLog !== 'boolean') throw badRequest('householdLog must be true or false.'); out.householdLog = b.householdLog; }
+  return out;
+};
 
 function create({ dataDir, limits, runCoach = defaultRunCoach, clock = () => new Date(), lookup = null }) {
   const dir = path.join(dataDir, 'nutrition');
@@ -264,7 +272,7 @@ function create({ dataDir, limits, runCoach = defaultRunCoach, clock = () => new
     try {
       const d = JSON.parse(fs.readFileSync(f, 'utf8'));
       const base = emptyData();
-      return { ...base, ...d, profile: { ...base.profile, ...(d.profile || {}), overrides: { ...((d.profile && d.profile.overrides) || {}) } } };
+      return { ...base, ...d, profile: { ...base.profile, ...(d.profile || {}), overrides: { ...((d.profile && d.profile.overrides) || {}) } }, settings: { ...base.settings, ...(d.settings || {}) } };
     } catch (e) { if (e.code === 'ENOENT') return emptyData(); throw e; }
   };
   const save = (user, data) => {
@@ -585,7 +593,7 @@ function create({ dataDir, limits, runCoach = defaultRunCoach, clock = () => new
       setup: { done: !!data.setup.done, answers: data.setup.answers || null, completedAt: data.setup.completedAt || null },
       goals: data.goals.map((g) => goalView(data, g, wk)), workoutPlan: data.workoutPlan, week: wk, today: date,
       changes: data.changes.slice(0, 30).map((e) => changeView(data, e)), review: data.reviews.last, reviewDue: reviewDue(data), limit: limitsLeft(req),
-      version: VERSION, deficit: deficitSummary(data, date, 7), safe: Number.isFinite(data.profile.heightCm) ? { minKg: safety.minHealthyKg(data.profile.heightCm), softKg: safety.softKg(data.profile.heightCm), minWaistCm: safety.minWaistCm(data.profile.heightCm) } : null,
+      version: VERSION, settings: data.settings, deficit: deficitSummary(data, date, 7), safe: Number.isFinite(data.profile.heightCm) ? { minKg: safety.minHealthyKg(data.profile.heightCm), softKg: safety.softKg(data.profile.heightCm), minWaistCm: safety.minWaistCm(data.profile.heightCm) } : null,
       maxLossKgWeek: Number.isFinite(data.profile.weightKg) ? safety.maxLossKgPerWeek(data.profile.weightKg) : null, waists: (data.waists || []).slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5),
     };
   }
@@ -737,6 +745,49 @@ function create({ dataDir, limits, runCoach = defaultRunCoach, clock = () => new
   const trimChat = (chat) => chat.slice(-MAX_CHAT);
 
   // ---- routes
+  // ---- Kitchen to Nutrition (Alex, 2026-11-25). Called by kitchen.js through server.js, never a route of its own.
+  // WRITE, NEVER READ: someone else's file is opened only to check their opt-in and append one entry (plus the dish
+  // as a food); nothing from it is returned. The caller gets back only { username, ok } per person.
+  const optedIn = (user) => {
+    if (!USER_RE.test(String(user))) return false;
+    try { return load(user).settings.householdLog === true; } catch (e) { return false; }
+  };
+  function logShared({ by, byName, eaters, name, serving, per, date, meal }) {
+    const caller = String(by || '');
+    if (!USER_RE.test(caller)) throw badRequest('No such account.');
+    if (!isDate(date)) throw badRequest('date must be YYYY-MM-DD.');
+    const m = String(meal || '').toLowerCase();
+    if (!MEALS.includes(m)) throw badRequest('meal must be breakfast, lunch, dinner or snack.');
+    const dish = oneLine(name, 120, 'Food name');
+    const cleanPerServing = cleanPer(per);
+    const sv = oneLine(serving == null ? '1 serving' : serving, 60, 'Serving', false) || '1 serving';
+    const label = oneLine(byName || caller, 40, 'Name', false) || caller;
+    if (!Array.isArray(eaters) || !eaters.length || eaters.length > 20) throw badRequest('Pick who ate.');
+    // Check every amount before anything is written, so a bad one writes nothing.
+    const list = [], seen = new Set();
+    for (const x of eaters) {
+      const user = String((x && x.username) || '').toLowerCase();
+      const s = num(x && x.servings === undefined ? 1 : x && x.servings);
+      if (!Number.isFinite(s) || s <= 0 || s > 20) throw badRequest('Servings must be more than 0 and at most 20.');
+      if (seen.has(user)) continue;
+      seen.add(user); list.push({ user, servings: Math.round(s * 100) / 100 });
+    }
+    const results = [];
+    for (const { user, servings } of list) {
+      if (!USER_RE.test(user)) { results.push({ username: user, ok: false }); continue; }
+      let d;
+      try { d = load(user); } catch (e) { results.push({ username: user, ok: false }); continue; }
+      // The opt-in rule: the caller may always log for themselves; anyone else only after turning it on.
+      if (user !== caller && d.settings.householdLog !== true) { results.push({ username: user, ok: false }); continue; }
+      if (d.entries.length >= MAX_ENTRIES) { results.push({ username: user, ok: false }); continue; }
+      d.entries.push({ id: newId(), date, meal: m, name: dish, servings, serving: sv, per: { ...cleanPerServing }, source: 'kitchen', note: `logged by ${label} from Kitchen`, loggedBy: caller, at: clock().toISOString() });
+      if (d.foods.length < MAX_FOODS && !d.foods.some((f) => String(f.name).toLowerCase() === dish.toLowerCase())) d.foods.push({ id: newId(), name: dish, serving: sv, per: { ...cleanPerServing }, source: 'kitchen' });
+      save(user, d);
+      results.push({ username: user, ok: true });
+    }
+    return results;
+  }
+
   function mount(app, { ownerName }) {
     const express = require('express');
     const router = express.Router();
@@ -754,7 +805,15 @@ function create({ dataDir, limits, runCoach = defaultRunCoach, clock = () => new
 
     router.get('/profile', guard((req, res, user) => {
       const d = load(user);
-      res.json({ profile: d.profile, targets: effectiveTargets(d.profile), computed: computeTargets(d.profile) });
+      res.json({ profile: d.profile, targets: effectiveTargets(d.profile), computed: computeTargets(d.profile), settings: d.settings });
+    }));
+    // Your own settings only (the file is always the signed-in person's).
+    router.get('/settings', guard((req, res, user) => res.json(load(user).settings)));
+    router.put('/settings', guard((req, res, user) => {
+      const d = load(user);
+      d.settings = { ...d.settings, ...cleanSettings(req.body) };
+      save(user, d);
+      res.json(d.settings);
     }));
     router.put('/profile', guard((req, res, user) => {
       const d = load(user);
@@ -1195,7 +1254,7 @@ function create({ dataDir, limits, runCoach = defaultRunCoach, clock = () => new
     app.use('/api/nutrition', router);
   }
 
-  return { mount, load, save, coachSystem };
+  return { mount, load, save, coachSystem, household: { optedIn, logShared } };
 }
 
 function defaultRunCoach({ system, prompt }) {
