@@ -22,6 +22,8 @@ const VALID_TYPES = ['recurring', 'scheduled', 'backlog'];
  * `task` never includes id/createdAt/updatedAt/sourceFile — the caller
  * (server.js / todo-cli.js) owns those.
  */
+const { DEVICES } = require('./item-devices');
+
 function normalizeTask(raw, existing) {
   const errors = [];
   raw = raw || {};
@@ -57,10 +59,17 @@ function normalizeTask(raw, existing) {
   if (tags.some(x => !/^[a-z][a-z0-9_-]{1,31}$/.test(x))) errors.push('tags must be usernames (lowercase letters, digits, - or _)');
   if (tags.length > 20) errors.push('a task can carry at most 20 user tags');
 
+  // Device (Alex, 2026-11-25): the one device an item needs (blank = the VPS or Alex's phone can do it). Session starts
+  // on a device pull only their own items. Matching DEVICE-SETUP.md's Devices table.
+  const deviceRaw = pick('device', null);
+  const device = deviceRaw === null || deviceRaw === undefined || deviceRaw === '' ? null : String(deviceRaw).trim().toLowerCase();
+  if (device !== null && !DEVICES.includes(device)) errors.push(`device must be one of ${DEVICES.join(', ')} (or empty)`);
+
   const task = {
     type,
     name,
     project,
+    device,
     priority: typeof priority === 'string' && priority ? priority : 'Low',
     notes,
     tags,
@@ -149,4 +158,4 @@ function normalizeTask(raw, existing) {
   return { task };
 }
 
-module.exports = { normalizeTask, VALID_TYPES };
+module.exports = { normalizeTask, VALID_TYPES, DEVICES };

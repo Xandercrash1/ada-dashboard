@@ -96,6 +96,10 @@ function build(dataDir) {
       if (patch.stage !== null && !STAGES.includes(patch.stage)) return { error: `Invalid stage "${patch.stage}". Must be one of: ${STAGES.join(', ')}` };
       if (patch.stage === null) delete item.stage; else item.stage = patch.stage;
     }
+    if (patch.device !== undefined) {   // the one device it needs; '' or null = the VPS or Alex's phone (2026-11-25)
+      if (patch.device && !DEVICES.includes(patch.device)) return { error: `Invalid device "${patch.device}". Must be one of: ${DEVICES.join(', ')}` };
+      if (patch.device) item.device = patch.device; else delete item.device;
+    }
     if (patch.laterUntil !== undefined) { if (patch.laterUntil) item.laterUntil = String(patch.laterUntil); else delete item.laterUntil; }
     if (patch.buildAttempts !== undefined) item.buildAttempts = Math.max(0, Number(patch.buildAttempts) || 0);
     if (patch.processedBy !== undefined) item.processedBy = patch.processedBy;
@@ -138,7 +142,8 @@ function build(dataDir) {
       const item = { id: newId(items), type: f.type, title, body: typeof f.body === 'string' ? f.body : '', status: 'new',
         createdAt: now, updatedAt: now, processedAt: null, processedBy: f.processedBy || null, notes: f.notes || null,
         ...(STAGES.includes(f.stage) ? { stage: f.stage } : {}), ...(KINDS.includes(f.kind) ? { kind: f.kind } : {}), ...(f.source ? { source: String(f.source).slice(0, 40) } : {}),
-        ...(f.urgency ? { urgency: f.urgency } : {}), ...(key ? { dedupeKey: key } : {}), ...(f.needsAlex ? { needsAlex: true } : {}) };
+        ...(f.urgency ? { urgency: f.urgency } : {}), ...(key ? { dedupeKey: key } : {}), ...(f.needsAlex ? { needsAlex: true } : {}),
+        ...(DEVICES.includes(f.device) ? { device: f.device } : {}) };
       items.unshift(item);
       return { item, outcome: 'created' };
     });
@@ -173,4 +178,5 @@ function build(dataDir) {
   return { FILE, LOCK, exists, read, withLock, mutate, create, update, resolve, remove, applyUpdate, isClosed };
 }
 
-module.exports = { open, TYPES, STATUSES, STAGES, KINDS, isClosed };
+const { DEVICES } = require('./item-devices');
+module.exports = { open, DEVICES, TYPES, STATUSES, STAGES, KINDS, isClosed };

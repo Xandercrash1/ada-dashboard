@@ -22,7 +22,7 @@ function taskFields(tk, today) {
   return {
     type: 'scheduled', name: `Ticket: ${tk.title}`.slice(0, 200), project: PROJECT, dueDate: today,
     notes: `Dashboard ticket ${tk.id} needs you (Server > Feedback). Checking this off closes the ticket.\n\n${String(tk.body || '').slice(0, 1500)}`,
-    tags: [], owner: 'alex', sharedWith: [],
+    tags: [], owner: 'alex', sharedWith: [], device: tk.device || null,
   };
 }
 

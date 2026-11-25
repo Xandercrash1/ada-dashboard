@@ -31,7 +31,7 @@ function harness({ live = false, buildEnabled = false } = {}) {
   let modPath;
   if (live) {
     const src = path.join(home, 'dashboard', 'src'); fs.mkdirSync(src, { recursive: true });
-    for (const f of ['loop.js', 'ticket-store.js']) fs.copyFileSync(path.join(__dirname, f), path.join(src, f));
+    for (const f of ['loop.js', 'ticket-store.js', 'item-devices.js']) fs.copyFileSync(path.join(__dirname, f), path.join(src, f));
     modPath = path.join(src, 'loop.js');
   } else {
     modPath = path.join(__dirname, 'loop.js');

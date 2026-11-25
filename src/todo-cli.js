@@ -15,7 +15,7 @@
  *   node todo-cli.js add --project "Vault TODO" --type backlog --name "..." [--added 2026-08-26]
  *   node todo-cli.js list [--project X] [--type Y] [--json]
  *   node todo-cli.js complete <id> [--json]
- *   node todo-cli.js today [--json]
+ *   node todo-cli.js today [--device adaone|none] [--json]   (list takes --device too)
  *
  * `--json` on every command for machine-readable output (contract §5 —
  * "the caller is usually an AI agent").
@@ -75,6 +75,7 @@ function cmdAdd(args) {
     type: args.type,
     name: args.name,
     project: args.project,
+    device: args.device,
     priority: args.priority,
     notes: args.notes,
     frequency: args.frequency,
@@ -115,6 +116,7 @@ function cmdList(args) {
   let tasks = store.readTasks();
   if (args.project) tasks = tasks.filter(t => t.project === args.project);
   if (args.type) tasks = tasks.filter(t => t.type === args.type);
+  if (args.device) tasks = tasks.filter(t => (t.device || '') === (args.device === 'none' ? '' : args.device));   // --device adaone | none
   output(args.json, tasks, list => {
     if (!list.length) { console.log('No tasks.'); return; }
     for (const t of list) {
@@ -151,7 +153,7 @@ function cmdToday(args) {
     if (changed) store.writeTasks(newTasks);
     return newTasks;
   });
-  const view = engine.buildView(rolled, today);
+  const view = engine.buildView(args.device ? rolled.filter(t => (t.device || '') === (args.device === 'none' ? '' : args.device)) : rolled, today);
   const response = { pastDue: view.pastDue, today: view.today, upcoming: view.upcoming, generatedFor: today };
   if (view.flagged && view.flagged.length) response.flagged = view.flagged;
 
@@ -185,7 +187,7 @@ function main() {
       default:
         process.stderr.write(
           'Usage: todo-cli.js <add|list|complete|today> [...args] [--json]\n' +
-          '  add --project P --type recurring|scheduled|backlog --name N [--due YYYY-MM-DD] [--next-due YYYY-MM-DD] [--frequency "..."] [--time "8:00pm"] [--priority High|Medium|Low] [--notes "..."] [--skippable true|false] [--end-date YYYY-MM-DD] [--added YYYY-MM-DD]\n' +
+          '  add --project P --type recurring|scheduled|backlog --name N [--due YYYY-MM-DD] [--next-due YYYY-MM-DD] [--frequency "..."] [--time "8:00pm"] [--device mac|adaone|adatwo] [--priority High|Medium|Low] [--notes "..."] [--skippable true|false] [--end-date YYYY-MM-DD] [--added YYYY-MM-DD]\n' +
           '  list [--project P] [--type T]\n' +
           '  complete <id>\n' +
           '  today\n'

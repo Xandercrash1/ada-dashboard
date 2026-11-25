@@ -992,6 +992,15 @@
               <option value="Low">Low</option>
             </select>
           </div>
+          <div class="not-guest">
+            <label class="block text-xs font-semibold text-gray-300 mb-1" title="The one device this needs. Any = the VPS or your phone can do it.">Device</label>
+            <select id="todo-device" class="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+              <option value="">Any</option>
+              <option value="mac">Mac</option>
+              <option value="adaone">AdaOne</option>
+              <option value="adatwo">AdaTwo</option>
+            </select>
+          </div>
         </div>
 
         <div>
@@ -1880,6 +1889,7 @@
                 <span class="mr-1">${emoji}</span>${escapeHtml(t.name)}${t.autoKind ? ' <span class="ml-1 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-indigo-500/15 text-indigo-300 align-middle" title="Created and kept up to date automatically (task automation)">auto</span>' : ''}
               </h4>
               <div class="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity absolute right-4 top-3 bg-dark-bg/80 backdrop-blur-sm pl-2 rounded-l-lg z-10">
+                ${t.device ? `<span class="px-2 py-0.5 rounded text-[9px] font-semibold border bg-gray-800 text-gray-300 border-gray-700" title="Needs this device">${escapeHtml(DEVICE_LABELS[t.device] || t.device)}</span>` : ''}
                 <span class="px-2 py-0.5 rounded text-[9px] font-semibold border ${todoPriorityBadgeClass(t.priority)}">${escapeHtml(t.priority || 'Low')}</span>
                 <button onclick="openEditTodoModal('${escapeHtml(t.id)}')" class="not-guest text-gray-500 hover:text-indigo-400 text-xs p-1 transition-colors" title="Edit">
                   <i class="fa-solid fa-pen"></i>
@@ -2282,6 +2292,7 @@
       document.getElementById('todo-name').value = t.name || '';
       document.getElementById('todo-project').value = t.project || '';
       document.getElementById('todo-priority').value = t.priority || 'Medium';
+      document.getElementById('todo-device').value = t.device || '';
       document.getElementById('todo-notes').value = t.notes || '';
       document.getElementById('todo-type').value = t.type || 'recurring';
       updateTodoTypeVisibility();
@@ -2326,6 +2337,7 @@
         name: document.getElementById('todo-name').value.trim(),
         project: document.getElementById('todo-project').value.trim(),
         priority: document.getElementById('todo-priority').value,
+        device: document.getElementById('todo-device').value || null,
         type,
         notes: document.getElementById('todo-notes').value.trim(),
       };
@@ -4333,6 +4345,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
                 ${f.status === 'in-progress' && f.stagedAt ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-amber-950/70 text-amber-300 border-amber-800/80 flex-shrink-0" title="A linked agent staged and verified this fix; it auto-closes when Staging is pushed to Live">STAGED — CLOSES ON DEPLOY</span>` : ''}
                 ${f.needsAlex && f.status !== 'done' && f.status !== 'wont-do' ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-sky-950/70 text-sky-300 border-sky-800/80 flex-shrink-0" title="Only Alex can do the next step. It has a task on his list; checking that off closes this ticket.">NEEDS ALEX · TASK</span>` : ''}
                 ${f.repeats > 1 ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-gray-800 text-gray-300 border-gray-700 flex-shrink-0" title="The same problem was reported again; it updated or reopened this ticket instead of filing a new one${f.lastSeenAt ? ' (last ' + escapeHtml(new Date(f.lastSeenAt).toLocaleString()) + ')' : ''}">SEEN ${Number(f.repeats)}×</span>` : ''}
+                ${f.device ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-gray-800 text-gray-300 border-gray-700 flex-shrink-0" title="Needs this device">${escapeHtml((DEVICE_LABELS[f.device] || f.device).toUpperCase())}</span>` : ''}
                 ${(() => { const o = ticketOwner(f); return o && o.label ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${o.cls} flex-shrink-0" title="${escapeHtml(o.tip)}">${o.label}</span>` : ''; })()}
                 ${f.status === 'in-progress' && f.sessionId ? `<button onclick="switchServerSubTab('agents'); selectSession('${escapeHtml(f.sessionId)}')" class="text-[10px] text-purple-400 hover:text-purple-300 underline decoration-dotted flex-shrink-0" title="Open the linked agent session"><i class="fa-solid fa-robot"></i> session</button>` : ''}
               </div>
@@ -4344,6 +4357,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
                 <button onclick="openAgentForFeedback('${f.id}')" class="text-indigo-400 hover:text-indigo-300 text-xs p-1" title="Summon Agent to solve this">
                   <i class="fa-solid fa-robot"></i>
                 </button>
+                ${window.ME && window.ME.role === 'admin' && f.status !== 'done' && f.status !== 'wont-do' ? `<select onchange="setTicketDevice('${f.id}', this.value)" title="The one device this needs" class="bg-dark-bg border border-dark-border rounded-lg px-1.5 py-1 text-[10px] text-gray-300 focus:outline-none focus:border-indigo-500">${['', 'mac', 'adaone', 'adatwo'].map((d) => `<option value="${d}" ${(f.device || '') === d ? 'selected' : ''}>${d ? DEVICE_LABELS[d] : 'Any device'}</option>`).join('')}</select>` : ''}
                 <select onchange="updateFeedbackStatus('${f.id}', this.value)" class="bg-dark-bg border border-dark-border rounded-lg px-2 py-1 text-[10px] text-gray-300 focus:outline-none focus:border-indigo-500">
                   <option value="new" ${f.status === 'new' ? 'selected' : ''}>new</option>
                   <option value="in-progress" ${f.status === 'in-progress' ? 'selected' : ''}>in-progress</option>
@@ -4437,6 +4451,14 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         return { who: 'pm', label: 'VPS PM', cls: P, tip: 'Server and project items: the VPS PM handles these.' };
       if (f.type === 'bug' || f.stage === 'approved') return { who: 'builder', label: 'BUILDER', cls: B, tip: f.stage === 'failed' ? 'The last build failed; the builder tries once more.' : 'The nightly builder tries it (two a night, oldest first).' };
       return { who: 'none', label: 'UNASSIGNED', cls: U, tip: 'Nobody picks this up on their own. Give it to the builder or the VPS PM.' };
+    }
+    const DEVICE_LABELS = { mac: 'Mac', adaone: 'AdaOne', adatwo: 'AdaTwo' };
+    async function setTicketDevice(id, device) {
+      try {
+        const res = await fetch(`/api/feedback/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: device || null }) });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+        await loadFeedback();
+      } catch (err) { alert('Failed to update: ' + err.message); }
     }
     async function assignTicket(id, who) {
       const body = who === 'pm' ? { stage: 'pm' } : { stage: 'approved', buildAttempts: 0, needsAlex: false };

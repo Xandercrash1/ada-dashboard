@@ -4399,7 +4399,7 @@ app.post('/api/feedback', (req, res) => {
   const trusted = isAdminReq(req);
   let r;
   try { r = tickets.create({ type, title, body, urgency, dedupeKey: trusted ? dedupeKey : undefined, needsAlex: trusted && needsAlex === true ? true : undefined,
-    ...(trusted ? { stage: (req.body || {}).stage, kind: (req.body || {}).kind, source: (req.body || {}).source } : {}) }); }
+    ...(trusted ? { stage: (req.body || {}).stage, kind: (req.body || {}).kind, source: (req.body || {}).source, device: (req.body || {}).device } : {}) }); }
   catch (e) { return res.status(500).json({ error: e.message }); }
   if (r.error) return res.status(400).json({ error: r.error });
   syncTicketTasks();
@@ -4422,7 +4422,7 @@ app.patch('/api/feedback/:id', (req, res) => {
   const { status, processedBy, notes, needsAlex, stage, buildAttempts } = req.body || {};
   let result;
   try { result = tickets.update(req.params.id, { status, processedBy, notes, needsAlex: typeof needsAlex === 'boolean' ? needsAlex : undefined,
-    ...(isAdminReq(req) ? { stage, buildAttempts } : {}) }); }
+    ...(isAdminReq(req) ? { stage, buildAttempts, device: (req.body || {}).device } : {}) }); }
   catch (e) { return res.status(500).json({ error: e.message }); }
   if (result.notFound) return res.status(404).json({ error: 'Feedback item not found' });
   if (result.error) return res.status(400).json({ error: result.error });
