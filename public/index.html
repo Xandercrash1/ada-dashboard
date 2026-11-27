@@ -6317,7 +6317,7 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       if (!els.length) return;
       els.forEach(el => { el.hidden = true; el.style.display = 'none'; });
       let open = null;
-      try { const r = await fetch('/api/todo/tasks'); if (r.ok) open = new Set((await r.json()).map(t => t.id)); } catch (e) {}
+      try { const r = await fetch('/api/todo/tasks'); if (r.ok) open = new Map((await r.json()).map(t => [t.id, t.name])); } catch (e) {}
       if (!open) return;
       els.forEach(el => {
         const id = el.getAttribute('data-task-done');
@@ -6328,8 +6328,8 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
         el.addEventListener('click', async (e) => {
           e.preventDefault(); e.stopPropagation();
           if (el.dataset.busy) return;
-          const label = (el.textContent || '').trim() || 'this';
-          if (!await adaConfirm({ title: 'Check off task', message: `Mark "${label}" as done?`, confirmLabel: 'Yes, done' })) return;
+          const label = open.get(id) || (el.textContent || '').trim() || 'this task';
+          if (!await adaConfirm({ title: 'Check off task', message: `Check off "${label}"?`, confirmLabel: 'Yes, done' })) return;
           el.dataset.busy = '1';
           try {
             const r = await fetch(`/api/todo/tasks/${encodeURIComponent(id)}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
