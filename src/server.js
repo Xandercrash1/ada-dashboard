@@ -1849,6 +1849,14 @@ app.patch('/api/pages/:id', (req, res) => {
     else if (PROJECT_SLUG_RE.test(req.body.project || '')) pg.project = req.body.project;
     else return res.status(400).json({ error: 'project: lowercase slug' });
   }
+  // homeFor (2026-11-27): who gets a Home tile for this page, also for a project page. Usernames or '@303'; null clears it.
+  if ('homeFor' in req.body) {
+    if (!isAdminReq(req)) return res.status(403).json({ error: 'Only an admin can set homeFor' });
+    const hf = req.body.homeFor;
+    if (hf === null) delete pg.homeFor;
+    else if (Array.isArray(hf) && hf.length >= 1 && hf.length <= 30 && hf.every(x => typeof x === 'string' && /^(@303|[a-z][a-z0-9_-]{1,31})$/.test(x))) pg.homeFor = [...new Set(hf)];
+    else return res.status(400).json({ error: "homeFor: a list of usernames or '@303'" });
+  }
   // Pages that remove themselves (2026-11-27): removeWhenDone lists the task ids whose completion retires the page.
   // Admin-only; null clears it. See src/page-cleanup.js.
   if ('removeWhenDone' in req.body) {
