@@ -171,8 +171,10 @@
     const tone = { short: 'border-rose-500/40 bg-rose-500/10', covers: '', over: '', 'no-autopay': 'border-amber-500/40 bg-amber-500/10' };
     const payoffText = (o) => {
       if (!o) return '';
-      if (o.never) return `<div class="text-rose-500">Never pays off at this rate (${esc(o.reason)})${o.monthlyInterestCents ? `: interest is ${esc(usd(o.monthlyInterestCents))} a month` : ''}.</div>`;
-      return `<div>Rough payoff: ${esc(o.months)} months (${esc(monthLabel(o.payoffMonth))})${o.withInterest ? `, about ${esc(usd(o.interestCents))} interest` : ''}, ${esc(o.label)}.</div>`;
+      if (o.paidOff) return `<div>Probably paid off by now (estimated from the balance entered ${esc(o.elapsedMonths)} months ago).</div>`;
+      const today = o.estimatedToday ? `Estimated today: about ${esc(usd(o.projectedBalanceCents))} left after ${esc(o.elapsedMonths)} months. ` : '';
+      if (o.never) return `<div class="text-rose-500">${today}Never pays off at this rate (${esc(o.reason)})${o.monthlyInterestCents ? `: interest is ${esc(usd(o.monthlyInterestCents))} a month` : ''}.</div>`;
+      return `<div>${today}Rough payoff: ${esc(o.months)} months (${esc(monthLabel(o.payoffMonth))})${o.withInterest ? `, about ${esc(usd(o.interestCents))} interest` : ''}, ${esc(o.label)}.</div>`;
     };
     const checks = p.cardChecks.map((c) => `<div class="${card} ${tone[c.status] || ''} text-sm space-y-1">
       <div class="flex flex-wrap justify-between gap-2"><span class="font-semibold">${esc(c.name)}${c.last4 ? ' ••' + esc(c.last4) : ''}</span>

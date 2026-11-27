@@ -717,6 +717,10 @@ test('agent tool wall (SF1a): run_bash / read_file output holding the store mark
     assert.ok(r.error && /withheld/.test(r.error), command + ' -> ' + JSON.stringify(r).slice(0, 120));
     assert.ok(!JSON.stringify(r).includes('Secret'));
   }
+  // What is NOT caught (by design, so other data isn't withheld): output that holds none of the money-only keys,
+  // e.g. only the "cents" fields of a bill.
+  const leak = await exec('run_bash', { command: `grep -o '"cents":[0-9]*' ${copy}` }, 'debugger', 's1', {});
+  assert.ok(leak.stdout && leak.stdout.includes('"cents":123456'));
   const rf = await exec('read_file', { filePath: copy }, 'debugger', 's1', {});
   assert.ok(rf.error && !JSON.stringify(rf).includes('Secret'));
   assert.deepEqual(await exec('run_bash', { command: 'echo hello' }, 'debugger', 's1', {}), { stdout: 'hello\n' });
@@ -729,13 +733,23 @@ test('agent tool wall (SF1b): after a web search, run_bash and auto-run schedule
   assert.deepEqual(await exec('run_bash', { command: 'ls' }, 'debugger', 's', turn), { ok: true });
   assert.deepEqual(await exec('schedule_prompt', { prompt: 'x', runAt: '2026-12-01T00:00:00Z' }, 'debugger', 's', turn), { ok: true });
   await exec('search_web', { query: 'anything' }, 'debugger', 's', turn);
-  assert.match((await exec('run_bash', { command: 'ls' }, 'debugger', 's', turn)).error, /web tool/);
+  assert.match((await exec('run_bash', { command: 'ls' }, 'debugger', 's', turn)).error, /web or ticket tool/);
   assert.match((await exec('schedule_prompt', { prompt: 'x', runAt: '2026-12-01T00:00:00Z' }, 'debugger', 's', turn)).error, /manual approval/);
   assert.deepEqual(await exec('schedule_prompt', { prompt: 'x' }, 'debugger', 's', turn), { ok: true });   // held for approval: fine
   assert.deepEqual(await exec('read_file', { filePath: '/etc/hostname' }, 'debugger', 's', turn), { ok: true });
   // A new turn starts clean.
   assert.deepEqual(await exec('run_bash', { command: 'ls' }, 'debugger', 's', {}), { ok: true });
   assert.deepEqual(calls.filter(c => c === 'run_bash').length, 2);
+  // The feedback tool (tickets anyone can file) taints too.
+  const t2 = {};
+  await exec('feedback', { action: 'list' }, 'debugger', 's', t2);
+  assert.match((await exec('run_bash', { command: 'ls' }, 'debugger', 's', t2)).error, /Refused/);
+  // A shell command that fetches runs, then taints the rest of the turn.
+  for (const command of ['curl -s example.com', 'WGET x', 'python3 -c "import urllib; urllib.request.urlopen(\'https://x\')"']) {
+    const t3 = {};
+    assert.deepEqual(await exec('run_bash', { command }, 'debugger', 's', t3), { ok: true });
+    assert.match((await exec('run_bash', { command: 'ls' }, 'debugger', 's', t3)).error, /Refused/, command);
+  }
 });
 
 test('server.js wiring: every tool call goes through the wall with a per-turn object; Claude CLI gets the deny settings; dead-letter titles carry no task name', () => {
@@ -758,6 +772,10 @@ test('re-review minors: en/em dashes, invalid date-shaped numbers, rule digit co
   assert.equal(money.maskDigits('12-34-5678'), '••5678');      // month 12, day 34: not a date
   assert.equal(money.maskDigits('13-01-2026'), '••2026');      // month 13: not a date
   assert.equal(money.maskDigits('12-31-2026'), '12-31-2026');
+  assert.equal(money.maskDigits('12-31-1990 and 2100-01-01'), '12-31-1990 and 2100-01-01');
+  assert.equal(money.maskDigits('12-31-1989'), '••1989');     // year outside 1990–2100: treated as a number
+  assert.equal(money.maskDigits('4111-11-11'), '••1111');     // "year" 4111
+  assert.equal(money.maskDigits('01-02-3456'), '••3456');
   assert.equal(money.autopayFromTaskName("Set the subscription card's autopay to $85.00"), 8500);
   assert.equal(money.autopayFromTaskName("Set the subscription card's autopay to $85.001"), null);
   assert.equal(money.autopayFromTaskName("Set the subscription card's autopay to $85.00,1"), null);
@@ -765,6 +783,15 @@ test('re-review minors: en/em dashes, invalid date-shaped numbers, rule digit co
   assert.deepEqual([never.never, never.reason], [true, 'over 100 years at this rate']);
   const slow = money.payoffEstimate(100000, 100, 1, '2026-11');   // $1,000 at 1% paying $1: about 179 years
   assert.deepEqual([slow.never, slow.reason], [true, 'over 100 years at this rate']);
+  // From balanceAsOf: $1,000 entered 3 months ago, paying $100 a month with no APR: about $700 today, 7 more months.
+  assert.equal(money.monthsSince('2026-08-26', '2026-11-26'), 3);
+  assert.equal(money.monthsSince('2026-08-27', '2026-11-26'), 2);
+  const proj = money.payoffEstimate(100000, 10000, null, '2026-11', 3);
+  assert.deepEqual([proj.estimatedToday, proj.projectedBalanceCents, proj.months, proj.payoffMonth], [true, 70000, 7, '2027-06']);
+  const projApr = money.payoffEstimate(100000, 3000, 24, '2026-11', 1);   // one month: 1000 + 20 interest − 30 = 990
+  assert.equal(projApr.projectedBalanceCents, 99000);
+  const gone = money.payoffEstimate(100000, 50000, null, '2026-11', 3);
+  assert.deepEqual([gone.paidOff, gone.estimatedToday], [true, true]);
   const zero = money.payoffEstimate(100000, 3000, 0, '2026-11');
   assert.deepEqual([zero.months, zero.label, zero.interestCents], [34, '0% APR', 0]);
   const { m, setNow } = budgetSetup();
@@ -800,21 +827,28 @@ test('card checks (minor 1): card expenses use the average of full tracked month
   assert.deepEqual([v2.expenseBasis, v2.expenseChargesCents], ['so far', 4000]);
 });
 
-test('lock (minor 4): stale only when the holder pid is gone; a live holder is waited for even when old; rule waits at most 1 s', () => {
+test('lock: stale when the holder pid is gone or the lock is over 30 s old (pid reuse); a fresh live holder is waited for; rule waits at most 1 s', () => {
   const { spawnSync } = require('child_process');
   const { m, dir } = budgetSetup();
   m.readSeeded();
   const deadPid = spawnSync(process.execPath, ['-e', '0']).pid;
   fs.writeFileSync(m.lockFile, `${deadPid}:abc`);   // fresh, but its process is gone: taken over at once
   assert.equal(m.withLock(() => 'ran'), 'ran');
-  fs.writeFileSync(m.lockFile, `${process.pid}:someone`);   // alive (this process), and old: NOT stale
-  const old = new Date(Date.now() - 60000); fs.utimesSync(m.lockFile, old, old);
+  fs.writeFileSync(m.lockFile, `${process.pid}:someone`);   // alive (this process) and fresh: waited for
   assert.throws(() => m.withLock(() => 1), (e) => e.code === 'EBUSY');
   const t0 = Date.now();
   assert.throws(() => money.autopayRule(dir)({ autoKind: 'subcard-autopay', name: "Set the subscription card's autopay to $40.00" }), (e) => e.code === 'EBUSY');
   const waited = Date.now() - t0;
   assert.ok(waited >= 900 && waited < 1600, `rule waited ${waited} ms`);
-  fs.unlinkSync(m.lockFile);
+  // An unrelated live process (pid 1: kill(1, 0) answers EPERM, which reads as alive) holding an OLD lock, as after a
+  // reboot reused the pid: over 30 s old, so it is taken over. Fresh, it is waited for.
+  fs.writeFileSync(m.lockFile, '1:from-before-the-reboot');
+  assert.throws(() => m.withLock(() => 1), (e) => e.code === 'EBUSY');
+  let t = new Date(Date.now() - 20000); fs.utimesSync(m.lockFile, t, t);
+  assert.throws(() => m.withLock(() => 1), (e) => e.code === 'EBUSY');   // 20 s: still waited for
+  t = new Date(Date.now() - 31000); fs.utimesSync(m.lockFile, t, t);
+  assert.equal(m.withLock(() => 'ran'), 'ran');
+  assert.ok(!fs.existsSync(m.lockFile));
 });
 
 test('CLI: add-expense, add-bill (paid-with), list; one JSON line; errors exit 1 and say nothing else', () => {

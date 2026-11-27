@@ -132,7 +132,8 @@ const LONE = (re) => new RegExp(`(?<![\\d.\\/\\-\u2013\u2014])(?:${re})(?![\\d.\
 const DATE_TOKEN_RE = LONE('(\\d{4})([-\\/.])(\\d{1,2})\\2(\\d{1,2})|(\\d{1,2})([-\\/.])(\\d{1,2})\\6(\\d{4}|\\d{2})');
 const AMOUNT_TOKEN_RE = LONE('\\d{1,3}(?:,\\d{3})+\\.\\d{2}|\\d{1,7}\\.\\d{2}');
 // 8+ digits with up to 3 separator characters (spaces, dots, slashes, dashes, en/em dashes) between any two of them.
-// A date-shaped token (NN-NN-NNNN, NNNN-NN-NN…) is kept only when it is a real date (month 1–12, day 1–31); any other
+// A date-shaped token (NN-NN-NNNN, NNNN-NN-NN…) is kept only when it is a real date (month 1–12, day 1–31, a 4-digit
+// year from 1990 to 2100); any other
 // date-shaped 8-digit string is masked like a number.
 const DIGIT_RUN_RE = /\d(?:[\s.\/\-\u2013\u2014]{0,3}\d){7,}/g;   // en and em dashes count as separators too
 const validMD = (m, d) => +m >= 1 && +m <= 12 && +d >= 1 && +d <= 31;
@@ -144,7 +145,8 @@ function maskDigits(value) {
   if ((s.match(/\d/g) || []).length < 8) return s;
   const kept = [];
   const keep = (m) => { kept.push(m); return tag(kept.length - 1); };
-  let g = s.replace(DATE_TOKEN_RE, (m, y1, _s1, m1, d1, m2, _s2, d2) => ((y1 !== undefined ? validMD(m1, d1) : validMD(m2, d2)) ? keep(m) : m));
+  const yearOk = (y) => y.length === 2 || (+y >= 1990 && +y <= 2100);   // a 4-digit year must look like a real one
+  let g = s.replace(DATE_TOKEN_RE, (m, y1, _s1, m1, d1, m2, _s2, d2, y2) => ((y1 !== undefined ? validMD(m1, d1) && yearOk(y1) : validMD(m2, d2) && yearOk(y2)) ? keep(m) : m));
   g = g.replace(AMOUNT_TOKEN_RE, keep);
   const masked = g.replace(DIGIT_RUN_RE, (run) => '••' + run.replace(/\D/g, '').slice(-4));
   return masked.replace(/\u0000([a-z]+)\u0000/g, (m, t) => kept[parseInt(t.split('').map(c => (c.charCodeAt(0) - 97).toString(26)).join(''), 26)]);
@@ -465,8 +467,19 @@ function variableBudget(store, v, month, now) {
  * "ignoring interest". Rough on purpose: no new charges, no fees, no rate changes.
  */
 const PAYOFF_CAP_MONTHS = 1200;   // 100 years
-function payoffEstimate(balanceCents, paymentCents, apr, fromMonth) {
+function payoffEstimate(balanceCents, paymentCents, apr, fromMonth, elapsedMonths = 0) {
   if (!(balanceCents > 0)) return null;
+  if (elapsedMonths > 0) {
+    // The balance was entered elapsedMonths ago: project it to today at the current paydown (with interest when an
+    // APR is set), then estimate from there, labelled "estimated today".
+    const r = apr > 0 ? apr / 1200 : 0;
+    let bal = balanceCents;
+    for (let i = 0; i < elapsedMonths && bal > 0; i++) bal = bal + Math.round(bal * r) - Math.max(0, paymentCents);
+    const out = bal <= 0
+      ? { never: false, withInterest: apr > 0, months: 0, interestCents: null, payoffMonth: fromMonth, label: 'probably paid off by now', paidOff: true }
+      : payoffEstimate(bal, paymentCents, apr, fromMonth, 0);
+    return out && { ...out, estimatedToday: true, projectedBalanceCents: Math.max(0, bal), elapsedMonths };
+  }
   const withInterest = apr != null && apr > 0;
   const aprLabel = apr === 0 ? '0% APR' : withInterest ? `at ${apr}% APR, monthly compounding` : 'ignoring interest';
   if (!(paymentCents > 0)) return { never: true, withInterest, monthlyInterestCents: withInterest ? Math.round(balanceCents * apr / 1200) : 0, reason: 'nothing is paying it down', label: aprLabel };
@@ -586,7 +599,7 @@ function monthPlan(store, month, subs, now, subscriptionTarget) {
       : isSub ? `covers it; ${fmtUsd(paydownReserved)} paying down the old balance${diff ? `, ${fmtUsd(diff)} buffer/extra` : ''}`
       : status === 'covers' ? 'covers it' : `pays ${fmtUsd(diff)} more: paying it down`;
     const paydown = a.autopayCents - chargesCents;   // what actually reduces the balance each month
-    return { ...base, status, diffCents: diff, paydownCents: paydown, message, payoff: a.balanceCents ? payoffEstimate(a.balanceCents, paydown, a.apr, localMonth(now)) : null };
+    return { ...base, status, diffCents: diff, paydownCents: paydown, message, payoff: a.balanceCents ? payoffEstimate(a.balanceCents, paydown, a.apr, localMonth(now), monthsSince(a.balanceAsOf, nyDate(now))) : null };
   });
 
   const priceNeeded = bills.filter(b => b.cents == null).map(b => ({ id: b.id, name: b.name, source: 'bill' }))
@@ -596,6 +609,12 @@ function monthPlan(store, month, subs, now, subscriptionTarget) {
       subscriptionsCents: sum(charges.filter(c => c.kind === 'subscription')), variableCents, loggedCents },
     cashOut: { cents: cashOutCents, byPayer },
     cardChecks, bills, subscriptions: subsRows, variable, oneOffs, byCategory, priceNeeded };
+}
+/** monthsSince('2026-09-15', '2026-11-26') -> 2: whole months from the first date to the second (0 if none or later). */
+function monthsSince(from, to) {
+  if (!from || !/^\d{4}-\d{2}-\d{2}$/.test(from)) return 0;
+  const [y1, m1, d1] = from.split('-').map(Number), [y2, m2, d2] = to.split('-').map(Number);
+  return Math.max(0, (y2 - y1) * 12 + (m2 - m1) - (d2 < d1 ? 1 : 0));
 }
 const fmtUsd = (c) => '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -660,11 +679,14 @@ function moneyToolGuard(toolName, args, { moneyDirs, base = '/home/ubuntu' }) {
   return hit ? 'Permission Denied: the Money data (data/money) is private to Alex and closed to agent tools.' : null;
 }
 
-// The marker, or a JSON key only the store writes (a partial read such as `grep -o` can miss the marker). The keys are
-// written quoted only in data: the source code uses them unquoted. JSON-escaped output (\") is matched too.
-const STORE_KEYS_RE = /\\?"(cents|autopayCents|balanceCents|estimateCents|categorySource|isSubscriptionCard|trackingSince)\\?"\s*:/;
+// The marker, or a JSON key only the money store writes (a partial read such as `grep -o` can miss the marker):
+// categorySource (transactions), isSubscriptionCard and autopayCents (cards), trackingSince (variable categories),
+// everyMonths (bills). Generic keys such as "cents" are left out because other data could use them.
+const STORE_KEYS_RE = /\\?"(categorySource|isSubscriptionCard|autopayCents|trackingSince|everyMonths)\\?"\s*:/;
 const looksLikeStore = (text) => text.includes(STORE_MARKER) || STORE_KEYS_RE.test(text);
-const WEB_TOOLS = new Set(['search_web', 'web_fetch', 'fetch_url', 'browse']);
+// Tools whose results can carry text from outside (the web, or tickets anyone can file) taint the turn.
+const WEB_TOOLS = new Set(['search_web', 'web_fetch', 'fetch_url', 'browse', 'feedback']);
+const FETCHING_SHELL_RE = /curl|wget|https?:/i;   // a shell command that fetches taints the turn too (after it runs)
 const MARKER_REFUSAL = 'Permission Denied: this output came from the Money data (data/money), which is private to Alex. It was withheld.';
 /**
  * guardToolExecutor(rawExecute, { moneyDirs }) -> execute(toolName, args, role, sessionId, turn) for server.js.
@@ -679,10 +701,11 @@ function guardToolExecutor(rawExecute, { moneyDirs }) {
     const t = turn || {};
     const block = moneyToolGuard(toolName, args, { moneyDirs });
     if (block) return { error: block };
-    if (t.webTainted && toolName === 'run_bash') return { error: 'Refused: this turn already used a web tool, so shell commands are off until the next turn (text from the web must not drive the shell).' };
+    if (t.webTainted && toolName === 'run_bash') return { error: 'Refused: this turn already used a web or ticket tool (or fetched with the shell), so shell commands are off until the next turn (text from the web must not drive the shell).' };
     if (t.webTainted && toolName === 'schedule_prompt' && args && args.runAt) return { error: 'Refused: this turn already used a web tool, so prompts can only be queued for manual approval (leave out runAt).' };
     if (WEB_TOOLS.has(toolName)) t.webTainted = true;   // set before the call: a failed search still counts
     const result = await rawExecute(toolName, args, role, sessionId);
+    if (toolName === 'run_bash' && FETCHING_SHELL_RE.test(String((args && args.command) || ''))) t.webTainted = true;
     if ((toolName === 'run_bash' || toolName === 'read_file') && looksLikeStore(JSON.stringify(result || ''))) return { error: MARKER_REFUSAL };
     return result;
   };
@@ -797,7 +820,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
   /**
    * withLock(fn): cross-process lock shared by the server and src/money-cli.js (Opus review M3/M4).
    * The lock file holds "<pid>:<random token>"; release unlinks it only while it still holds OUR token. A lock is
-   * stale only when its process is gone (process.kill(pid, 0) says ESRCH); an unreadable one, when older than 10 s.
+   * stale when its process is gone (process.kill(pid, 0) says ESRCH) or when it is older than 30 s (pid reuse).
    * A stale lock is taken over by renaming it aside (only one contender's rename can win), then retried.
    * Waits are short (10 ms) and bounded by maxWaitMs: 200 ms in the server, 3 s for the CLI. Past that: EBUSY.
    */
@@ -809,7 +832,10 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
       let content = '';
       try { content = fs.readFileSync(lockFile, 'utf8'); } catch (e) { return false; }
       const pid = parseInt(content.split(':')[0], 10);
-      if (!Number.isInteger(pid) || pid <= 0) return Date.now() - fs.statSync(lockFile).mtimeMs > 10000;   // unreadable: age only
+      // Older than 30 s is stale whatever the pid says: after a reboot the pid can belong to an unrelated process
+      // (EPERM reads as alive), which would otherwise jam the lock for good. No write holds it that long.
+      if (Date.now() - fs.statSync(lockFile).mtimeMs > 30000) return true;
+      if (!Number.isInteger(pid) || pid <= 0) return false;                                                 // unreadable and fresh: wait
       try { process.kill(pid, 0); return false; } catch (e) { return e.code === 'ESRCH'; }                  // EPERM = alive
     };
     for (;;) {
@@ -1283,5 +1309,5 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
 }
 
 module.exports = { create, gate, isAlexSession, moneyToolGuard, guardToolExecutor, STORE_MARKER, SUBSCRIPTION_CARD_SEED_CENTS, CLAUDE_DENY_SETTINGS, autopayRule, autopayFromTaskName, maskDigits, parseCsv, parseAmount, parseDate, cleanDescription, merchantOf, fingerprint, compileRules,
-  categorize, escapeCsvCell, detectProfile, resolveProfile, splitHeader, monthlyEquivalent, variableBudget, monthPlan, payoffEstimate, toCents, nyDate, localMonth, MAX_CENTS, KINDS, CYCLES, validateMapping, normalizeRows, summarize, monthTotals, addMonths,
+  categorize, escapeCsvCell, detectProfile, resolveProfile, splitHeader, monthlyEquivalent, variableBudget, monthPlan, payoffEstimate, monthsSince, toCents, nyDate, localMonth, MAX_CENTS, KINDS, CYCLES, validateMapping, normalizeRows, summarize, monthTotals, addMonths,
   TAXONOMY, CATEGORIES, STARTER_RULES, BUILTIN_PROFILES };
