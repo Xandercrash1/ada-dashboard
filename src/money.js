@@ -21,6 +21,29 @@
  *     only ever sees those generic strings).
  *   - CSV export: every cell that starts with = + - @ (or tab / CR) gets a leading single quote.
  *   - No model calls of any kind in this module.
+ *
+ * SCOPE (Alex, 2026-11-26 22:22): statement uploads are ON HOLD. Phase 1 is cards with their autopay, recurring bills,
+ * one-off expenses (groceries, gas, eating out are logged one at a time) and variable-category budgets. The CSV import
+ * below stays built and tested, but the page keeps it collapsed under "Statement import (coming later)".
+ *
+ * API (all under /api/money, JSON in and out, amounts in DOLLARS on input and CENTS on output; alex session only):
+ *   GET    /meta                         categories, kinds, cycles, accounts (subscription card seeded on first load), bills, variable
+ *   GET    /month?month=YYYY-MM          the month view: expectedCents, soFarCents, byCategory, byCard, variable, priceNeeded, oneOffs
+ *   POST   /accounts                     { name, kind: checking|savings|credit card|other, last4?: '1234', autopay?: 125.00, dueDay?: 1–31 }
+ *   PATCH  /accounts/:id                 same fields, partial. The subscription card refuses `autopay` (read live from subscriptions.js)
+ *   DELETE /accounts/:id                 refused for the subscription card, or while expenses/bills point at it
+ *   POST   /bills                        { name, amount?: 15.49 (blank = "price needed"), cycle?: monthly|yearly|weekly|months,
+ *                                          everyMonths?: N (cycle 'months'), category?, accountId?, dueDay?, notes? }
+ *   PATCH  /bills/:id · DELETE /bills/:id
+ *   PUT    /variable                     { category, variable: true|false, estimate?: 400.00 } (monthly estimate, optional)
+ *   POST   /transactions                 one-off: { date: '2026-11-26', amount: 54.20, expense: true, description, category?, accountId? }
+ *                                          (without `expense`, the sign is taken as given: negative = money out). 409 + needsConfirm
+ *                                          for an identical entry the same day; resend with force: true.
+ *   GET    /transactions?month=&q=&category=&accountId=   · PATCH /transactions/:id { category, always? } · DELETE /transactions/:id
+ *   GET    /export.csv?month=            formula-escaped CSV
+ *   Statement import (on hold): POST /import?accountId= (text/csv body, X-Filename: *.csv) · POST /import/:id/map · POST /import/:id/commit
+ *   Rules: POST /rules { pattern, category, priority? } · DELETE /rules/:id · DELETE /profiles/:id · GET /summary?month= (statement view)
+ * Ada on the VPS can also use src/money-cli.js (same store, same validation, same lock): see that file.
  */
 
 const fs = require('fs');
@@ -358,6 +381,104 @@ function summarize(store, month, subs) {
 }
 
 // ---------------------------------------------------------------------------
+// Budget plan: bills, variable categories, one-offs (phase 1 after the 2026-11-26 scope change)
+// ---------------------------------------------------------------------------
+
+// Loaded lazily: subscriptions.js owns the subscription card's autopay formula (computeTotal); never copy it here.
+let subsMod = null;
+const subscriptionsModule = () => (subsMod || (subsMod = require('./subscriptions')));
+
+/** monthlyEquivalent(bill) -> cents per month, or null when the price is not known yet. */
+function monthlyEquivalent(bill) {
+  if (!bill || bill.cents == null) return null;
+  switch (bill.cycle) {
+    case 'yearly': return Math.round(bill.cents / 12);
+    case 'weekly': return Math.round(bill.cents * 52 / 12);
+    case 'months': return Math.round(bill.cents / Math.max(1, bill.everyMonths || 1));
+    default: return bill.cents;
+  }
+}
+
+/** localMonth(date) -> 'YYYY-MM' in the server's time zone (America/New_York on the VPS), not UTC. */
+const localMonth = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const isSpend = (t) => t.cents < 0 && !['income', 'transfer'].includes(topOf(t.category));
+const inCategory = (t, cat) => t.category === cat || (!cat.includes('/') && topOf(t.category) === cat);
+
+/**
+ * variableBudget(store, v, month, now) -> { category, cents, source:'avg'|'estimate'|'none', months, actualCents }
+ * The average of logged spending in the category over the 3 FULL months before `month` (months before the
+ * current calendar month only), divided by the number of those months that have entries. Used once at least one
+ * full month has entries; otherwise the manual estimate.
+ */
+function variableBudget(store, v, month, now) {
+  const current = localMonth(now);
+  const spent = (ym) => store.transactions.filter(t => monthOf(t.date) === ym && inCategory(t, v.category) && isSpend(t));
+  let total = 0, withEntries = 0;
+  for (let i = 1; i <= 3; i++) {
+    const ym = addMonths(month, -i);
+    if (ym >= current) continue;   // not a full month yet
+    const txs = spent(ym);
+    if (txs.length) { withEntries++; total += txs.reduce((a, t) => a - t.cents, 0); }
+  }
+  const actualCents = spent(month).reduce((a, t) => a - t.cents, 0);
+  if (withEntries) return { category: v.category, cents: Math.round(total / withEntries), source: 'avg', months: withEntries, actualCents, estimateCents: v.estimateCents };
+  return { category: v.category, cents: v.estimateCents || 0, source: v.estimateCents == null ? 'none' : 'estimate', months: 0, actualCents, estimateCents: v.estimateCents };
+}
+
+/**
+ * monthPlan(store, month, subs, now, subscriptionAutopay) -> the month view.
+ * expected = recurring bills (monthly equivalent, plus the priced items on the Subscriptions page) + variable budgets.
+ * soFar = the same bills (assumed paid) + one-offs logged in the month. All amounts in cents.
+ */
+function monthPlan(store, month, subs, now, subscriptionAutopay) {
+  const subCard = store.accounts.find(a => a.isSubscriptionCard) || null;
+  const bills = store.recurring.map(b => ({ ...b, monthlyCents: monthlyEquivalent(b) }));
+  const subsRows = (Array.isArray(subs) ? subs : []).filter(s => s && s.name).map(s => {
+    const cents = s.price != null && Number.isFinite(Number(s.price)) ? Math.round(Number(s.price) * 100) : null;
+    return { name: String(s.name), cents, cycle: s.cycle === 'yearly' ? 'yearly' : 'monthly', onCard: !!s.onCard,
+      monthlyCents: cents == null ? null : (s.cycle === 'yearly' ? Math.round(cents / 12) : cents) };
+  });
+  const subsMonthly = subsRows.reduce((a, s) => a + (s.monthlyCents || 0), 0);
+  const billsMonthly = bills.reduce((a, b) => a + (b.monthlyCents || 0), 0) + subsMonthly;
+  const variable = store.variable.map(v => variableBudget(store, v, month, now));
+  const variableMonthly = variable.reduce((a, v) => a + v.cents, 0);
+  const oneOffs = store.transactions.filter(t => monthOf(t.date) === month && isSpend(t)).sort((a, b) => a.date.localeCompare(b.date));
+  const loggedCents = oneOffs.reduce((a, t) => a - t.cents, 0);
+
+  const cats = new Map();
+  const cat = (id) => { if (!cats.has(id)) cats.set(id, { category: id, billsCents: 0, loggedCents: 0, budgetCents: null, budgetSource: null }); return cats.get(id); };
+  for (const b of bills) if (b.monthlyCents) cat(topOf(b.category)).billsCents += b.monthlyCents;
+  if (subsMonthly) cat('subscriptions').billsCents += subsMonthly;
+  for (const t of oneOffs) cat(topOf(t.category)).loggedCents -= t.cents;
+  for (const v of variable) { const c = cat(topOf(v.category)); c.budgetCents = (c.budgetCents || 0) + v.cents; c.budgetSource = v.source; }
+  const byCategory = [...cats.values()].map(c => ({ ...c, expectedCents: c.billsCents + (c.budgetCents || 0), soFarCents: c.billsCents + c.loggedCents }))
+    .sort((a, b) => b.expectedCents - a.expectedCents || b.soFarCents - a.soFarCents);
+
+  const sub = subscriptionAutopay ? subscriptionAutopay(subs) : null;
+  const card = (a) => {
+    const id = a ? a.id : null;
+    const own = bills.filter(b => (b.accountId || null) === id);
+    let billsCents = own.reduce((x, b) => x + (b.monthlyCents || 0), 0);
+    if (a && a.isSubscriptionCard) billsCents += subsRows.filter(s => s.onCard).reduce((x, s) => x + (s.monthlyCents || 0), 0);
+    if (!a) billsCents += subsRows.filter(s => !s.onCard || !subCard).reduce((x, s) => x + (s.monthlyCents || 0), 0);
+    const logged = oneOffs.filter(t => (t.accountId || null) === id).reduce((x, t) => x - t.cents, 0);
+    return { accountId: id, name: a ? a.name : 'No card set', kind: a ? a.kind : null, last4: a ? a.last4 : null, dueDay: a ? a.dueDay : null,
+      isSubscriptionCard: !!(a && a.isSubscriptionCard), autopayCents: a ? (a.isSubscriptionCard ? (sub ? sub.cents : null) : a.autopayCents) : null,
+      autopaySource: a && a.isSubscriptionCard ? 'subscriptions' : (a && a.autopayCents != null ? 'manual' : null),
+      billsCents, loggedCents: logged, billCount: own.length };
+  };
+  const byCard = store.accounts.map(card);
+  const none = card(null);
+  if (none.billsCents || none.loggedCents || none.billCount) byCard.push(none);
+
+  const priceNeeded = bills.filter(b => b.cents == null).map(b => ({ id: b.id, name: b.name, source: 'bill' }))
+    .concat(subsRows.filter(s => s.cents == null).map(s => ({ name: s.name, source: 'subscriptions' })));
+  return { month, expectedCents: billsMonthly + variableMonthly, billsMonthlyCents: billsMonthly, subscriptionsMonthlyCents: subsMonthly, variableMonthlyCents: variableMonthly,
+    loggedCents, soFarCents: billsMonthly + loggedCents, bills, subscriptions: subsRows, variable, oneOffs: oneOffs.map(({ fingerprint: _f, ...t }) => t), byCategory, byCard, priceNeeded,
+    subscriptionCard: subCard ? { accountId: subCard.id, autopayCents: sub ? sub.cents : null, items: sub ? sub.items : [] } : null };
+}
+
+// ---------------------------------------------------------------------------
 // Access guard
 // ---------------------------------------------------------------------------
 
@@ -396,6 +517,7 @@ const newId = (prefix) => `${prefix}-${crypto.randomBytes(6).toString('hex')}`;
 function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
   const dir = path.join(dataDir, 'money');
   const file = path.join(dir, 'money.json');
+  const lockFile = path.join(dir, '.lock');
   const subsFile = subscriptionsFile || path.join(dataDir, 'subscriptions.json');
   const previews = new Map();
 
@@ -404,14 +526,14 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     fs.chmodSync(dir, 0o700);
   }
   function fresh() {
-    return { version: 1, accounts: [], transactions: [], profiles: [],
+    return { version: 1, accounts: [], transactions: [], profiles: [], recurring: [], variable: [],
       rules: STARTER_RULES.map(([priority, pattern, category], i) => ({ id: `starter-${i + 1}`, priority, pattern, category, source: 'starter' })) };
   }
   function read() {
     let raw;
     try { raw = fs.readFileSync(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') return fresh(); throw e; }
     const s = JSON.parse(raw);   // a corrupt file throws: never overwrite it with an empty store
-    for (const k of ['accounts', 'transactions', 'profiles', 'rules']) if (!Array.isArray(s[k])) s[k] = [];
+    for (const k of ['accounts', 'transactions', 'profiles', 'rules', 'recurring', 'variable']) if (!Array.isArray(s[k])) s[k] = [];
     return s;
   }
   function write(store) {
@@ -421,8 +543,31 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     fs.chmodSync(tmp, 0o600);
     fs.renameSync(tmp, file);
   }
+  /**
+   * withLock(fn): cross-process lock (the server and src/money-cli.js share the file). Create-exclusive lockfile,
+   * bounded wait, a lock older than 10 s is treated as stale. Every write path runs inside it.
+   */
+  function withLock(fn) {
+    ensureDir();
+    const deadline = Date.now() + 3000;
+    let fd = null;
+    while (fd === null) {
+      try { fd = fs.openSync(lockFile, 'wx', 0o600); } catch (e) {
+        if (e.code !== 'EEXIST') throw e;
+        try { if (Date.now() - fs.statSync(lockFile).mtimeMs > 10000) { fs.unlinkSync(lockFile); continue; } } catch (e2) { continue; }
+        if (Date.now() > deadline) { const err = new Error('money store is busy'); err.code = 'EBUSY'; throw err; }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      }
+    }
+    try { return fn(); } finally { try { fs.closeSync(fd); fs.unlinkSync(lockFile); } catch (e) { /* already gone */ } }
+  }
   function readSubs() {
     try { const v = JSON.parse(fs.readFileSync(subsFile, 'utf8')); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  }
+  /** The subscription card's autopay, live: subscriptions.js computeTotal() — the same figure as its autopay task. */
+  function subscriptionAutopay(subs = readSubs()) {
+    const { items, total } = subscriptionsModule().computeTotal(subs);
+    return { cents: Math.round(total * 100), items: items.map(s => ({ name: String(s.name), cents: Math.round(Number(s.price) * 100) })) };
   }
 
   function prunePreviews() {
@@ -431,9 +576,21 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     while (previews.size > MAX_PREVIEWS) previews.delete(previews.keys().next().value);
   }
 
-  // --- Accounts ---
+  // --- Accounts (cards) ---
   const KINDS = ['checking', 'savings', 'credit card', 'other'];
-  function validateAccount(b, partial) {
+  const optDay = (v, errors, label) => {
+    if (v === null || v === '' || v === undefined) return null;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > 31) { errors.push(`${label} must be a whole number from 1 to 31`); return null; }
+    return n;
+  };
+  const optCents = (v, errors, label) => {
+    if (v === null || v === '' || v === undefined) return null;
+    const c = typeof v === 'number' ? Math.round(v * 100) : parseAmount(v);
+    if (c === null || !Number.isFinite(c) || c < 0) { errors.push(`${label} must be an amount of 0 or more`); return null; }
+    return c;
+  };
+  function validateAccount(b, partial, existing) {
     const errors = [], v = {};
     if (!partial || b.name !== undefined) {
       const name = typeof b.name === 'string' ? maskDigits(b.name).trim() : '';
@@ -444,7 +601,95 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
       if (b.last4 === null || b.last4 === '') v.last4 = null;
       else if (!/^\d{4}$/.test(String(b.last4))) errors.push('last4 must be exactly 4 digits'); else v.last4 = String(b.last4);
     } else if (!partial) v.last4 = null;
+    if (b.autopay !== undefined && b.autopay !== null && b.autopay !== '' && existing && existing.isSubscriptionCard) errors.push("the subscription card's autopay is read from the Subscriptions page and can't be typed in");
+    else if (b.autopay !== undefined || !partial) v.autopayCents = existing && existing.isSubscriptionCard ? null : optCents(b.autopay, errors, 'autopay');
+    if (b.dueDay !== undefined || !partial) v.dueDay = optDay(b.dueDay, errors, 'due day');
     return errors.length ? { errors } : { value: v };
+  }
+  /** ensureSubscriptionCard(store) -> true if it had to add the card. */
+  function ensureSubscriptionCard(store) {
+    if (store.accounts.some(a => a.isSubscriptionCard)) return false;
+    store.accounts.unshift({ id: newId('acct'), name: 'The subscription card', kind: 'credit card', last4: null, autopayCents: null, dueDay: null, isSubscriptionCard: true, createdAt: clock().toISOString() });
+    return true;
+  }
+  /** readSeeded(): the store, with the subscription card added (and saved) on first load. */
+  function readSeeded() {
+    const s = read();
+    if (s.accounts.some(a => a.isSubscriptionCard)) return s;
+    return withLock(() => { const t = read(); if (ensureSubscriptionCard(t)) write(t); return t; });
+  }
+
+  // --- Recurring bills ---
+  const CYCLES = ['monthly', 'yearly', 'weekly', 'months'];
+  function validateBill(b, partial, store) {
+    const errors = [], v = {};
+    if (!partial || b.name !== undefined) {
+      const name = typeof b.name === 'string' ? maskDigits(b.name).replace(/\s+/g, ' ').trim() : '';
+      if (!name || name.length > 80) errors.push('name: 1–80 characters'); else v.name = name;
+    }
+    if (!partial || b.amount !== undefined) v.cents = optCents(b.amount, errors, 'amount');
+    if (!partial || b.cycle !== undefined) {
+      const cycle = b.cycle == null || b.cycle === '' ? 'monthly' : b.cycle;
+      if (!CYCLES.includes(cycle)) errors.push('cycle must be monthly, yearly, weekly or months'); else v.cycle = cycle;
+    }
+    if (!partial || b.everyMonths !== undefined || b.cycle !== undefined) {
+      const cyc = v.cycle || b.cycle;
+      if (cyc === 'months') {
+        const n = Number(b.everyMonths);
+        if (!Number.isInteger(n) || n < 1 || n > 60) errors.push('every N months: N must be 1 to 60'); else v.everyMonths = n;
+      } else v.everyMonths = null;
+    }
+    if (!partial || b.category !== undefined) {
+      const c = b.category == null || b.category === '' ? 'other' : b.category;
+      if (!CATEGORY_IDS.has(c)) errors.push('unknown category'); else v.category = c;
+    }
+    if (!partial || b.accountId !== undefined) {
+      if (b.accountId == null || b.accountId === '') v.accountId = null;
+      else if (!store.accounts.some(a => a.id === b.accountId)) errors.push('unknown card/account'); else v.accountId = b.accountId;
+    }
+    if (!partial || b.dueDay !== undefined) v.dueDay = optDay(b.dueDay, errors, 'due day');
+    if (!partial || b.notes !== undefined) {
+      const notes = typeof b.notes === 'string' ? maskDigits(b.notes).trim() : '';
+      if (notes.length > 500) errors.push('notes: 500 characters at most'); else v.notes = notes;
+    }
+    return errors.length ? { errors } : { value: v };
+  }
+  function addBill(b) {
+    const store = read();
+    const v = validateBill(b || {}, false, store);
+    if (v.errors) return { status: 400, body: { error: v.errors.join('; '), errors: v.errors } };
+    const bill = { id: newId('bill'), ...v.value, createdAt: clock().toISOString() };
+    store.recurring.push(bill);
+    write(store);
+    return { status: 201, body: { bill: { ...bill, monthlyCents: monthlyEquivalent(bill) } } };
+  }
+  function updateBill(id, b) {
+    const store = read();
+    const bill = store.recurring.find(x => x.id === id);
+    if (!bill) return { status: 404, body: { error: 'Not found' } };
+    const v = validateBill({ cycle: bill.cycle, everyMonths: bill.everyMonths, ...(b || {}) }, true, store);
+    if (v.errors) return { status: 400, body: { error: v.errors.join('; '), errors: v.errors } };
+    Object.assign(bill, v.value);
+    write(store);
+    return { status: 200, body: { bill: { ...bill, monthlyCents: monthlyEquivalent(bill) } } };
+  }
+
+  // --- Variable categories (groceries, gas, eating out…) ---
+  function setVariable(b) {
+    const category = b && b.category;
+    if (!CATEGORY_IDS.has(category)) return { status: 400, body: { error: 'unknown category' } };
+    const errors = [];
+    const estimateCents = optCents(b.estimate, errors, 'estimate');
+    if (errors.length) return { status: 400, body: { error: errors.join('; '), errors } };
+    const store = read();
+    store.variable = store.variable.filter(x => x.category !== category);
+    if (b.variable !== false) store.variable.push({ category, estimateCents });
+    write(store);
+    return { status: 200, body: { variable: store.variable } };
+  }
+
+  function plan(month) {
+    return monthPlan(readSeeded(), month, readSubs(), clock(), subscriptionAutopay);
   }
 
   // --- Import ---
@@ -520,13 +765,15 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
   function addManual(b) {
     const store = read();
     const errors = [];
-    if (!store.accounts.some(a => a.id === b.accountId)) errors.push('choose an account');
+    if (b.accountId == null || b.accountId === '') b = { ...b, accountId: null };
+    else if (!store.accounts.some(a => a.id === b.accountId)) errors.push('unknown card/account');
     const date = parseDate(b.date);
     if (!date) errors.push('date must look like 2026-11-26 or 11/26/2026');
     const description = typeof b.description === 'string' ? maskDigits(b.description).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
     if (!description) errors.push('description is required');
-    const cents = typeof b.amount === 'number' ? Math.round(b.amount * 100) : parseAmount(b.amount);
+    let cents = typeof b.amount === 'number' ? Math.round(b.amount * 100) : parseAmount(b.amount);
     if (cents === null || !Number.isFinite(cents) || cents === 0) errors.push('amount must be a non-zero number (negative = money out)');
+    else if (b.expense === true) cents = -Math.abs(cents);   // an expense: the amount may be typed as positive
     if (b.category != null && b.category !== '' && !CATEGORY_IDS.has(b.category)) errors.push('unknown category');
     if (errors.length) return { status: 400, body: { error: errors.join('; '), errors } };
     const cleaned = cleanDescription(description);
@@ -596,7 +843,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
     const send = (res, out) => res.status(out.status).json(out.body);
     const safe = (fn) => (req, res) => {
-      try { fn(req, res); } catch (err) {
+      try { req.method === 'GET' ? fn(req, res) : withLock(() => fn(req, res)); } catch (err) {
         console.error('[money] request failed:', err && (err.code || err.name) || 'error');   // never the message: it could quote data
         if (!res.headersSent) res.status(500).json({ error: 'Something went wrong on the Money page.' });
       }
@@ -614,24 +861,27 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     };
 
     r.get('/meta', safe((req, res) => {
-      const s = read();
-      res.json({ categories: CATEGORIES, kinds: KINDS, accounts: s.accounts, profiles: BUILTIN_PROFILES.concat(s.profiles).map(({ id, name, builtin }) => ({ id, name, builtin: !!builtin })),
+      const s = readSeeded();
+      const sub = subscriptionAutopay();
+      res.json({ categories: CATEGORIES, kinds: KINDS, cycles: CYCLES,
+        accounts: s.accounts.map(a => (a.isSubscriptionCard ? { ...a, autopayCents: sub.cents, autopaySource: 'subscriptions' } : a)),
+        bills: s.recurring.map(b => ({ ...b, monthlyCents: monthlyEquivalent(b) })), variable: s.variable, profiles: BUILTIN_PROFILES.concat(s.profiles).map(({ id, name, builtin }) => ({ id, name, builtin: !!builtin })),
         rules: compileRules(s.rules).map(x => x.rule) });
     }));
     r.post('/accounts', safe((req, res) => {
-      const v = validateAccount(req.body || {}, false);
+      const v = validateAccount(req.body || {}, false, null);
       if (v.errors) return res.status(400).json({ error: v.errors.join('; '), errors: v.errors });
       const s = read();
-      const acct = { id: newId('acct'), ...v.value, createdAt: clock().toISOString() };
+      const acct = { id: newId('acct'), ...v.value, isSubscriptionCard: false, createdAt: clock().toISOString() };
       s.accounts.push(acct); write(s);
       res.status(201).json({ account: acct });
     }));
     r.patch('/accounts/:id', safe((req, res) => {
-      const v = validateAccount(req.body || {}, true);
-      if (v.errors) return res.status(400).json({ error: v.errors.join('; '), errors: v.errors });
       const s = read();
       const a = s.accounts.find(x => x.id === req.params.id);
       if (!a) return res.status(404).json({ error: 'Not found' });
+      const v = validateAccount(req.body || {}, true, a);
+      if (v.errors) return res.status(400).json({ error: v.errors.join('; '), errors: v.errors });
       Object.assign(a, v.value); write(s);
       res.json({ account: a });
     }));
@@ -639,10 +889,24 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
       const s = read();
       const i = s.accounts.findIndex(x => x.id === req.params.id);
       if (i === -1) return res.status(404).json({ error: 'Not found' });
-      const n = s.transactions.filter(t => t.accountId === req.params.id).length;
-      if (n) return res.status(409).json({ error: `This account has ${n} transactions. Delete those first.` });
+      if (s.accounts[i].isSubscriptionCard) return res.status(409).json({ error: "The subscription card is linked to the Subscriptions page and can't be deleted." });
+      const n = s.transactions.filter(t => t.accountId === req.params.id).length + s.recurring.filter(b => b.accountId === req.params.id).length;
+      if (n) return res.status(409).json({ error: `This card has ${n} expenses or bills. Move or delete those first.` });
       s.accounts.splice(i, 1); write(s);
       res.json({ ok: true });
+    }));
+    r.post('/bills', safe((req, res) => send(res, addBill(req.body || {}))));
+    r.patch('/bills/:id', safe((req, res) => send(res, updateBill(req.params.id, req.body || {}))));
+    r.delete('/bills/:id', safe((req, res) => {
+      const s = read();
+      const i = s.recurring.findIndex(b => b.id === req.params.id);
+      if (i === -1) return res.status(404).json({ error: 'Not found' });
+      s.recurring.splice(i, 1); write(s); res.json({ ok: true });
+    }));
+    r.put('/variable', safe((req, res) => send(res, setVariable(req.body || {}))));
+    r.get('/month', safe((req, res) => {
+      const month = MONTH_RE.test(String(req.query.month || '')) ? String(req.query.month) : localMonth(clock());
+      res.json(plan(month));
     }));
     r.post('/import', upload, safe((req, res) => send(res, startImport(req.body, String(req.query.accountId || ''), req.query.profileId ? String(req.query.profileId) : null))));
     r.post('/import/:id/map', safe((req, res) => send(res, mapImport(req.params.id, req.body || {}))));
@@ -682,7 +946,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
       s.rules.splice(i, 1); write(s); res.json({ ok: true });
     }));
     r.get('/summary', safe((req, res) => {
-      const month = MONTH_RE.test(String(req.query.month || '')) ? String(req.query.month) : clock().toISOString().slice(0, 7);
+      const month = MONTH_RE.test(String(req.query.month || '')) ? String(req.query.month) : localMonth(clock());
       res.json(summarize(read(), month, readSubs()));
     }));
     r.get('/export.csv', safe((req, res) => {
@@ -695,9 +959,9 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     app.use('/api/money', r);
   }
 
-  return { mount, read, write, file, dir, previews, startImport, mapImport, commitImport, addManual, setCategory, listTransactions, exportCsv };
+  return { mount, read, readSeeded, write, withLock, file, dir, previews, addBill, updateBill, setVariable, plan, subscriptionAutopay, ensureSubscriptionCard, validateAccount, startImport, mapImport, commitImport, addManual, setCategory, listTransactions, exportCsv };
 }
 
 module.exports = { create, gate, isAlexSession, maskDigits, parseCsv, parseAmount, parseDate, cleanDescription, merchantOf, fingerprint, compileRules,
-  categorize, escapeCsvCell, detectProfile, resolveProfile, splitHeader, validateMapping, normalizeRows, summarize, monthTotals, addMonths,
+  categorize, escapeCsvCell, detectProfile, resolveProfile, splitHeader, monthlyEquivalent, variableBudget, monthPlan, validateMapping, normalizeRows, summarize, monthTotals, addMonths,
   TAXONOMY, CATEGORIES, STARTER_RULES, BUILTIN_PROFILES };
