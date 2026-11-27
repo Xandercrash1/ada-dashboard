@@ -27,7 +27,8 @@ function daysBetween(fromYmd, toYmd) {
 function pickOldest(tasks, today) {
   const rows = [];
   for (const t of tasks || []) {
-    if (!t || t.autoKind || t.waitsFor || t.type === 'backlog') continue;
+    // Ticket tasks are offered (most overdue items are tickets; deleting one just unflags its ticket, ticket-tasks.js sync).
+    if (!t || (t.autoKind && t.autoKind !== 'ticket') || t.waitsFor || t.type === 'backlog') continue;
     const due = engine.taskDue(t);
     if (!due || !engine.isValidDate(due) || due >= today) continue;
     rows.push({ t, due });

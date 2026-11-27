@@ -227,7 +227,8 @@ class HomeView extends HTMLElement {
       window.openEditTodoModal(t.id, t);
     };
     del.onclick = async () => {
-      const rep = t.type === 'recurring' ? ' This deletes the whole repeating task, not just this time.' : '';
+      const rep = t.type === 'recurring' ? ' This deletes the whole repeating task, not just this time.'
+        : t.autoKind === 'ticket' ? ' Its ticket stays in Server > Feedback but stops asking you.' : '';
       if (!await window.adaConfirm({ title: 'Delete task', message: `Delete \u201c${t.name}\u201d? This can't be undone.${rep}`, confirmLabel: 'Delete', danger: true })) return;
       del.disabled = defer.disabled = true;
       let ok = false;

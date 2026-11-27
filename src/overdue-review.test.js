@@ -58,3 +58,8 @@ test('store: handled date round-trips atomically', () => {
   assert.equal(s.review([sch('a', '2026-11-10')], new Date('2026-11-28T14:00:00Z')).task.id, 'a');
   fs.rmSync(dir, { recursive: true });
 });
+
+test('ticket tasks are offered', () => {
+  const x = r.review({ tasks: [sch('d', '2026-10-01', { autoKind: 'deploy' }), sch('t', '2026-10-05', { autoKind: 'ticket', autoKey: 'fb-1' }), sch('ok', '2026-11-20')], now: NINE });
+  assert.equal(x.task.id, 't');
+});
