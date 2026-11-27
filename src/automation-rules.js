@@ -23,4 +23,8 @@ automation.register('loop-deploy', { onComplete: require('./loop').rule(tickets)
 // also pick up Y's items (src/device-reach.js). Safe to run twice (an existing pair isn't added again).
 automation.register('device-reach', { onComplete: require('./device-reach').rule(require('./todo-store').DATA_DIR) });
 
+// Waits for (VPS PM, 2026-11-26): checking off a task reschedules every task that waits on it (src/waits-for.js).
+// Safe to run twice (the second run finds no task still waiting on it).
+automation.register('waits-for', { onComplete: require('./waits-for').rule });
+
 module.exports = automation;

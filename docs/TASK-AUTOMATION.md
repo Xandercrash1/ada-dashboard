@@ -53,6 +53,7 @@ _Alex, 2026-11-24: one documented system for automatic tasks, used by every proj
 |---|---|---|
 | `subcard-autopay` | Subscriptions (Mac PM) | Checking off "Switch X to the subscription card" marks X on the card and keeps one "Set the subscription card's autopay to $T" task up to date (`src/subscriptions.js`, 56 checks in `subscriptions.test.js`). |
 | `ticket-task` | Tickets (VPS PM) | Checking off a ticket's task closes the ticket (`src/ticket-tasks.js`, tests in `ticket-store.test.js`). |
+| `waits-for` | Tasks (VPS PM, 2026-11-26) | Checking off a task reschedules every backlog/scheduled task whose `waitsFor` is that task: `scheduled`, due `releaseBusinessDays` weekdays (Mon-Fri, no holidays) after the completion day, `waitsFor` cleared, a note line added. Repeating waiters are left alone. While the target is open, waiting tasks are hidden from today/upcoming/past-due and `todo-cli today`; they still show in `list` and Manage (`src/waits-for.js`, `src/waits-for.test.js`). |
 | `then` (built in) | any | `task.then` chains. |
 
 ## Scope

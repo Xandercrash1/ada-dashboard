@@ -302,7 +302,23 @@ function compareBySortKey(a, b) {
  * validated, but it is a defensive net against pre-validation/hand-edited
  * data.
  */
+// Waits for (Alex, 2026-11-26): a task whose waitsFor target is still an open task is hidden from the day view.
+// A target that no longer exists (deleted) means the task isn't waiting. Pass the FULL list, before any filtering.
+function withoutWaiting(tasks) {
+  const open = new Set(tasks.map(t => t.id));
+  return tasks.filter(t => !(t.waitsFor && open.has(t.waitsFor)));
+}
+// Mon-Fri only, no holidays. n=0 returns the same day (even a weekend day).
+function addBusinessDays(ymd, n) {
+  let d = ymd;
+  for (let i = 0; i < n; i++) {
+    do { d = addDays(d, 1); } while (weekdayOf(d) >= 5);
+  }
+  return d;
+}
+
 function buildView(tasks, today) {
+  tasks = withoutWaiting(tasks);
   const windowEnd = addDays(today, 2); // §4.6 — 3-day inclusive window
 
   const pastDue = [];
@@ -456,6 +472,8 @@ module.exports = {
   sortKey,
   compareBySortKey,
   buildView,
+  withoutWaiting,
+  addBusinessDays,
   rollForward,
   generateId
 };

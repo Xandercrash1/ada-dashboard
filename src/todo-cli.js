@@ -76,6 +76,8 @@ function cmdAdd(args) {
     name: args.name,
     project: args.project,
     device: args.device,
+    waitsFor: args['waits-for'],
+    releaseBusinessDays: args['release-business-days'],
     priority: args.priority,
     notes: args.notes,
     frequency: args.frequency,
@@ -161,13 +163,14 @@ function cmdToday(args) {
     if (changed) store.writeTasks(newTasks);
     return newTasks;
   });
-  const view = engine.buildView(args.device ? rolled.filter(deviceFilter(args)) : rolled, today);
+  const awake = engine.withoutWaiting(rolled);   // tasks waiting on another open task stay out of the day view (still in `list`)
+  const view = engine.buildView(args.device ? awake.filter(deviceFilter(args)) : awake, today);
   const response = { pastDue: view.pastDue, today: view.today, upcoming: view.upcoming, generatedFor: today };
   if (view.flagged && view.flagged.length) response.flagged = view.flagged;
   // A device's session start (CLAUDE.md § Session start) needs its undated items too, not just what's due.
   if (args.device) {
     const shown = new Set([...view.pastDue, ...view.today, ...view.upcoming].map(t => t.id));
-    response.undated = rolled.filter(deviceFilter(args)).filter(t => t.type === 'backlog' && !shown.has(t.id));
+    response.undated = awake.filter(deviceFilter(args)).filter(t => t.type === 'backlog' && !shown.has(t.id));
   }
 
   output(args.json, response, v => {
@@ -201,7 +204,7 @@ function main() {
       default:
         process.stderr.write(
           'Usage: todo-cli.js <add|list|complete|today> [...args] [--json]\n' +
-          '  add --project P --type recurring|scheduled|backlog --name N [--due YYYY-MM-DD] [--next-due YYYY-MM-DD] [--frequency "..."] [--time "8:00pm"] [--device mac|adaone|adatwo] [--priority High|Medium|Low] [--notes "..."] [--skippable true|false] [--end-date YYYY-MM-DD] [--added YYYY-MM-DD]\n' +
+          '  add --project P --type recurring|scheduled|backlog --name N [--due YYYY-MM-DD] [--next-due YYYY-MM-DD] [--frequency "..."] [--time "8:00pm"] [--device mac|adaone|adatwo] [--waits-for TASK_ID] [--release-business-days N] [--priority High|Medium|Low] [--notes "..."] [--skippable true|false] [--end-date YYYY-MM-DD] [--added YYYY-MM-DD]\n' +
           '  list [--project P] [--type T]\n' +
           '  complete <id>\n' +
           '  today\n'

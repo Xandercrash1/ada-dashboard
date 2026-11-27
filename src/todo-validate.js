@@ -65,11 +65,27 @@ function normalizeTask(raw, existing) {
   const device = deviceRaw === null || deviceRaw === undefined || deviceRaw === '' ? null : String(deviceRaw).trim().toLowerCase();
   if (device !== null && !DEVICES.includes(device)) errors.push(`device must be one of ${DEVICES.join(', ')} (or empty)`);
 
+  // Waits for (Alex, 2026-11-26): this task can't be done until another task is checked off (src/waits-for.js).
+  // releaseBusinessDays sits on the task being waited on: when it's checked off, waiters come back that many weekdays later.
+  const waitsRaw = pick('waitsFor', null);
+  const waitsFor = waitsRaw === null || waitsRaw === undefined || waitsRaw === '' ? null : String(waitsRaw).trim();
+  if (waitsFor !== null && !/^task-[A-Za-z0-9-]{1,60}$/.test(waitsFor)) errors.push('waitsFor must be a task id (like "task-123abc") or empty');
+  else if (waitsFor !== null && existing && existing.id === waitsFor) errors.push('a task cannot wait for itself');
+  const relRaw = pick('releaseBusinessDays', null);
+  let releaseBusinessDays = null;
+  if (relRaw !== null && relRaw !== undefined && relRaw !== '') {
+    const n = typeof relRaw === 'string' && /^\d+$/.test(relRaw.trim()) ? Number(relRaw) : relRaw;
+    if (!Number.isInteger(n) || n < 0 || n > 60) errors.push('releaseBusinessDays must be a whole number from 0 to 60 (or empty)');
+    else releaseBusinessDays = n;
+  }
+
   const task = {
     type,
     name,
     project,
     device,
+    waitsFor,
+    releaseBusinessDays,
     priority: typeof priority === 'string' && priority ? priority : 'Low',
     notes,
     tags,

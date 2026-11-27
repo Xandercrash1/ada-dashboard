@@ -4458,7 +4458,7 @@ app.get('/api/todo', (req, res) => {
     const today = todoEngine.todayString();
     // Roll-forward is shown here but saved by the automation worker (automationTick), so a read never writes.
     const rolledTasks = todoEngine.rollForward(todoStore.readTasks(), today).tasks;
-    const view = todoEngine.buildView(rolledTasks.filter(t => taskVisibleTo(req, t)).map(taskView), today);
+    const view = todoEngine.buildView(todoEngine.withoutWaiting(rolledTasks).filter(t => taskVisibleTo(req, t)).map(taskView), today);
     const response = {
       pastDue: view.pastDue,
       today: view.today,
