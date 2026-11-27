@@ -61,6 +61,10 @@ const PREVIEW_TTL_MS = 15 * 60 * 1000;
 const MAX_PREVIEWS = 5;
 const MAX_ROWS = 20000;
 const KINDS = ['checking', 'savings', 'credit card', 'cash', 'other'];
+const SUBSCRIPTION_CARD_SEED_CENTS = 3000;   // Alex, 2026-11-26 22:22: the subscription card's autopay "is at $30"
+// The store's fixed marker (Opus re-review SF1). Built from parts so the literal never appears in source code: agent
+// tool output that contains it came from the money store and is refused (server.js executeLocalTool).
+const STORE_MARKER = ['ada', 'money', 'v1'].join('-');
 const CYCLES = ['monthly', 'yearly', 'weekly', 'months'];
 
 // ---------------------------------------------------------------------------
@@ -124,11 +128,13 @@ const BUILTIN_PROFILES = [
 // Tokens the digit-run mask must not eat: valid dates (2026-11-26, 11/26/2026, 11.26.26, 3/7/26) and money amounts
 // (1,234.56 or 123456.78), each standing alone (no digit or separator glued on either side, so a card number written
 // like a date, 2026-11-26-1234-5678, is still masked). Times (12:30) need no guard: ':' is not a separator.
-const LONE = (re) => new RegExp(`(?<![\\d.\\/-])(?:${re})(?![\\d.\\/-])`, 'g');
+const LONE = (re) => new RegExp(`(?<![\\d.\\/\\-\u2013\u2014])(?:${re})(?![\\d.\\/\\-\u2013\u2014])`, 'g');
 const DATE_TOKEN_RE = LONE('(\\d{4})([-\\/.])(\\d{1,2})\\2(\\d{1,2})|(\\d{1,2})([-\\/.])(\\d{1,2})\\6(\\d{4}|\\d{2})');
 const AMOUNT_TOKEN_RE = LONE('\\d{1,3}(?:,\\d{3})+\\.\\d{2}|\\d{1,7}\\.\\d{2}');
-// 8+ digits with up to 3 separator characters (spaces, dots, slashes, dashes) between any two of them.
-const DIGIT_RUN_RE = /\d(?:[\s.\/-]{0,3}\d){7,}/g;
+// 8+ digits with up to 3 separator characters (spaces, dots, slashes, dashes, en/em dashes) between any two of them.
+// A date-shaped token (NN-NN-NNNN, NNNN-NN-NN…) is kept only when it is a real date (month 1–12, day 1–31); any other
+// date-shaped 8-digit string is masked like a number.
+const DIGIT_RUN_RE = /\d(?:[\s.\/\-\u2013\u2014]{0,3}\d){7,}/g;   // en and em dashes count as separators too
 const validMD = (m, d) => +m >= 1 && +m <= 12 && +d >= 1 && +d <= 31;
 const tag = (i) => '\u0000' + i.toString(26).split('').map(c => String.fromCharCode(97 + parseInt(c, 26))).join('') + '\u0000';
 
@@ -458,24 +464,28 @@ function variableBudget(store, v, month, now) {
  * month. If the payment doesn't cover the first month's interest: never. Without an APR: balance ÷ payment,
  * "ignoring interest". Rough on purpose: no new charges, no fees, no rate changes.
  */
+const PAYOFF_CAP_MONTHS = 1200;   // 100 years
 function payoffEstimate(balanceCents, paymentCents, apr, fromMonth) {
   if (!(balanceCents > 0)) return null;
   const withInterest = apr != null && apr > 0;
-  if (!(paymentCents > 0)) return { never: true, withInterest, monthlyInterestCents: withInterest ? Math.round(balanceCents * apr / 1200) : 0, reason: 'nothing is paying it down' };
+  const aprLabel = apr === 0 ? '0% APR' : withInterest ? `at ${apr}% APR, monthly compounding` : 'ignoring interest';
+  if (!(paymentCents > 0)) return { never: true, withInterest, monthlyInterestCents: withInterest ? Math.round(balanceCents * apr / 1200) : 0, reason: 'nothing is paying it down', label: aprLabel };
   if (!withInterest) {
     const months = Math.ceil(balanceCents / paymentCents);
-    return { never: false, withInterest: false, months, interestCents: null, payoffMonth: addMonths(fromMonth, months), label: 'ignoring interest' };
+    if (months > PAYOFF_CAP_MONTHS) return { never: true, withInterest: false, reason: 'over 100 years at this rate', label: aprLabel };
+    return { never: false, withInterest: false, months, interestCents: apr === 0 ? 0 : null, payoffMonth: addMonths(fromMonth, months), label: aprLabel };
   }
   const r = apr / 1200;
   const firstInterest = Math.round(balanceCents * r);
-  if (paymentCents <= firstInterest) return { never: true, withInterest: true, monthlyInterestCents: firstInterest, reason: 'the payment does not cover the monthly interest' };
+  if (paymentCents <= firstInterest) return { never: true, withInterest: true, monthlyInterestCents: firstInterest, reason: 'the payment does not cover the monthly interest', label: aprLabel };
   let bal = balanceCents, months = 0, interest = 0;
-  while (bal > 0 && months < 1200) {
+  while (bal > 0 && months < PAYOFF_CAP_MONTHS) {
     const i = Math.round(bal * r);
     interest += i; bal += i; months++;
     bal -= Math.min(bal, paymentCents);
   }
-  return { never: false, withInterest: true, months, interestCents: interest, payoffMonth: addMonths(fromMonth, months), label: `at ${apr}% APR, monthly compounding` };
+  if (bal > 0) return { never: true, withInterest: true, monthlyInterestCents: firstInterest, reason: 'over 100 years at this rate', label: aprLabel };
+  return { never: false, withInterest: true, months, interestCents: interest, payoffMonth: addMonths(fromMonth, months), label: aprLabel };
 }
 
 /**
@@ -548,12 +558,20 @@ function monthPlan(store, month, subs, now, subscriptionTarget) {
   // Card checks.
   const cardChecks = store.accounts.filter(a => a.kind === 'credit card').map(a => {
     const on = charges.filter(c => c.paidWith === a.id);
-    const chargesCents = sum(on);
+    // Expenses on the card: the average of the full tracked months (up to 3, before this month and the current one,
+    // starting on/after the card was added); with none yet, this month so far (minor 1 of the re-review).
+    const current = localMonth(now), since = a.createdAt ? nyDate(new Date(a.createdAt)) : '0000-00-00';
+    const full = [1, 2, 3].map(i => addMonths(month, -i)).filter(ym => ym < current && `${ym}-01` >= since);
+    const spentIn = (ym) => store.transactions.filter(t => t.accountId === a.id && monthOf(t.date) === ym && isSpend(t)).reduce((x, t) => x - t.cents, 0);
+    const expenseBasis = full.length ? { basis: 'avg', months: full.length, cents: Math.round(full.reduce((x, ym) => x + spentIn(ym), 0) / full.length) }
+      : { basis: 'so far', months: 0, cents: sum(on.filter(c => c.kind === 'expense')) };
+    const chargesCents = sum(on.filter(c => c.kind !== 'expense')) + expenseBasis.cents;
     const isSub = !!a.isSubscriptionCard;
     const paydownReserved = isSub ? Math.round(S.MIN_PAYMENT * 100) : 0;
     const bufferCents = isSub ? Math.round(S.BUFFER * 100) : 0;
     const base = { accountId: a.id, name: a.name, last4: a.last4 || null, dueDay: a.dueDay || null, isSubscriptionCard: isSub, autopayCents: a.autopayCents == null ? null : a.autopayCents,
-      chargesCents, recurringChargesCents: sum(on.filter(c => c.kind !== 'expense')), expenseChargesCents: sum(on.filter(c => c.kind === 'expense')),
+      chargesCents, recurringChargesCents: sum(on.filter(c => c.kind !== 'expense')), expenseChargesCents: expenseBasis.cents, expenseBasis: expenseBasis.basis, expenseMonths: expenseBasis.months,
+      expensesThisMonthCents: sum(on.filter(c => c.kind === 'expense')), balanceAsOf: a.balanceAsOf || null,
       paydownReservedCents: paydownReserved, bufferCents, balanceCents: a.balanceCents == null ? null : a.balanceCents, apr: a.apr == null ? null : a.apr };
     if (isSub) {
       const t = subscriptionTarget ? subscriptionTarget(subs) : null;
@@ -587,7 +605,7 @@ const fmtUsd = (c) => '$' + (c / 100).toLocaleString('en-US', { minimumFractionD
 
 /** autopayFromTaskName("Set the subscription card's autopay to $1,234.56") -> 123456 cents, or null. */
 function autopayFromTaskName(name) {
-  const m = /autopay to \$([0-9][0-9,]*(?:\.[0-9]{1,2})?)\b/i.exec(String(name || ''));
+  const m = /autopay to \$([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?![0-9.,])/i.exec(String(name || ''));
   if (!m) return null;
   const c = parseAmount(m[1]);
   return c !== null && c >= 0 ? c : null;
@@ -605,7 +623,7 @@ function autopayRule(dataDir) {
     if (!task || task.autoKind !== 'subcard-autopay') return undefined;
     const cents = autopayFromTaskName(task.name);
     if (cents === null) throw new Error('money-autopay: no amount in the task name');   // retried, then dead-lettered with a ticket
-    create({ dataDir }).setSubscriptionAutopay(cents, 'set when the Subscriptions autopay task was checked off');
+    create({ dataDir }).setSubscriptionAutopay(cents, 'set when the Subscriptions autopay task was checked off', { maxWaitMs: 1000 });   // never holds the todo lock long
     return undefined;
   };
 }
@@ -616,20 +634,17 @@ function autopayRule(dataDir) {
 
 /**
  * moneyToolGuard(toolName, args, { moneyDirs, base }) -> an error string, or null when the call may go ahead.
- * Used by server.js executeLocalTool for EVERY role. read_file / list_directory / write_file are refused when the
- * target, with symlinks resolved (for a path that doesn't exist yet: its nearest existing parent), is a money data
- * directory or inside one. run_bash is refused when the command mentions "money" at all (any case): a coarse wall,
- * the file tools are the precise one.
+ * read_file / write_file (args.filePath) and list_directory (args.dirPath, default '.') — the same argument each
+ * executor uses — are refused when the target, symlinks resolved (for a path that doesn't exist yet: its nearest
+ * existing parent), is a money data directory or inside one. Shell commands are not filtered by words any more:
+ * guardToolExecutor() checks their OUTPUT for the store marker instead (Opus re-review SF1).
  */
 function moneyToolGuard(toolName, args, { moneyDirs, base = '/home/ubuntu' }) {
   const a = args || {};
-  if (toolName === 'run_bash') {
-    return /money/i.test(String(a.command || '')) ? 'Permission Denied: the Money data is private to Alex, and agent shell commands that mention "money" are refused.' : null;
-  }
-  if (!['read_file', 'list_directory', 'write_file'].includes(toolName)) return null;
-  const raw = a.filePath || a.dirPath || a.path || '.';
+  const arg = { read_file: a.filePath, write_file: a.filePath, list_directory: a.dirPath || '.' };
+  if (!(toolName in arg)) return null;
   const real = (p) => {
-    let cur = path.resolve(base, String(p)), rest = [];
+    let cur = path.resolve(base, String(p == null ? '' : p)), rest = [];
     for (;;) {
       try { return path.join(fs.realpathSync(cur), ...rest); } catch (e) {
         const parent = path.dirname(cur);
@@ -638,12 +653,47 @@ function moneyToolGuard(toolName, args, { moneyDirs, base = '/home/ubuntu' }) {
       }
     }
   };
-  const target = real(raw);
+  const target = real(arg[toolName]);
   const walls = [];
   for (const d of moneyDirs) { walls.push(path.resolve(d)); walls.push(real(d)); }
   const hit = walls.some(w => target === w || target.startsWith(w + path.sep));
   return hit ? 'Permission Denied: the Money data (data/money) is private to Alex and closed to agent tools.' : null;
 }
+
+// The marker, or a JSON key only the store writes (a partial read such as `grep -o` can miss the marker). The keys are
+// written quoted only in data: the source code uses them unquoted. JSON-escaped output (\") is matched too.
+const STORE_KEYS_RE = /\\?"(cents|autopayCents|balanceCents|estimateCents|categorySource|isSubscriptionCard|trackingSince)\\?"\s*:/;
+const looksLikeStore = (text) => text.includes(STORE_MARKER) || STORE_KEYS_RE.test(text);
+const WEB_TOOLS = new Set(['search_web', 'web_fetch', 'fetch_url', 'browse']);
+const MARKER_REFUSAL = 'Permission Denied: this output came from the Money data (data/money), which is private to Alex. It was withheld.';
+/**
+ * guardToolExecutor(rawExecute, { moneyDirs }) -> execute(toolName, args, role, sessionId, turn) for server.js.
+ *   1. moneyToolGuard on the arguments (file tools).
+ *   2. Taint (SF1b): once a turn has used a web tool, run_bash and an auto-run schedule_prompt (runAt set) are
+ *      refused for the rest of that turn, so text from the web can't drive the shell or plant a later run.
+ *      `turn` is one object per model turn ({} made by the caller); without one, nothing is remembered.
+ *   3. Output check (SF1a): run_bash and read_file results that contain the store marker are withheld.
+ */
+function guardToolExecutor(rawExecute, { moneyDirs }) {
+  return async function execute(toolName, args, role, sessionId, turn) {
+    const t = turn || {};
+    const block = moneyToolGuard(toolName, args, { moneyDirs });
+    if (block) return { error: block };
+    if (t.webTainted && toolName === 'run_bash') return { error: 'Refused: this turn already used a web tool, so shell commands are off until the next turn (text from the web must not drive the shell).' };
+    if (t.webTainted && toolName === 'schedule_prompt' && args && args.runAt) return { error: 'Refused: this turn already used a web tool, so prompts can only be queued for manual approval (leave out runAt).' };
+    if (WEB_TOOLS.has(toolName)) t.webTainted = true;   // set before the call: a failed search still counts
+    const result = await rawExecute(toolName, args, role, sessionId);
+    if ((toolName === 'run_bash' || toolName === 'read_file') && looksLikeStore(JSON.stringify(result || ''))) return { error: MARKER_REFUSAL };
+    return result;
+  };
+}
+
+/**
+ * Settings for every Claude Code CLI launch from the dashboard (SF2): deny reading, searching, editing and writing
+ * either checkout's data/money. '//' = an absolute path in permission-rule syntax (as in ~/ops/loop/nightly-loop.py).
+ */
+const CLAUDE_DENY_SETTINGS = JSON.stringify({ permissions: { deny: ['/home/ubuntu/dashboard/data/money/**', '/home/ubuntu/dashboard-staging/data/money/**']
+  .flatMap(p => ['Read', 'Edit', 'Write'].map(tool => `${tool}(/${p})`)) } });
 
 // ---------------------------------------------------------------------------
 // Access guard
@@ -694,15 +744,27 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
     fs.chmodSync(dir, 0o700);
   }
   function fresh() {
-    return { version: 1, accounts: [], transactions: [], profiles: [], recurring: [], variable: [],
+    return { store: STORE_MARKER, version: 1, accounts: [], transactions: [], profiles: [], recurring: [], variable: [],
       rules: STARTER_RULES.map(([priority, pattern, category], i) => ({ id: `starter-${i + 1}`, priority, pattern, category, source: 'starter' })) };
   }
   function read() {
     let raw;
     try { raw = fs.readFileSync(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') return fresh(); throw e; }
     const s = JSON.parse(raw);   // a corrupt file throws: never overwrite it with an empty store
-    for (const k of ['accounts', 'transactions', 'profiles', 'rules', 'recurring', 'variable']) if (!Array.isArray(s[k])) s[k] = [];
+    for (const k of ['accounts', 'transactions', 'profiles', 'rules', 'recurring', 'variable']) {
+      if (!Array.isArray(s[k])) s[k] = [];
+      for (const r of s[k]) if (r && typeof r === 'object') delete r._;   // the per-record marker lives on disk only
+    }
     return s;
+  }
+  /** onDisk(store): the marker first, and on every record, so even a partial read of the file carries it (SF1). */
+  function onDisk(store) {
+    const out = { store: STORE_MARKER };
+    for (const [k, v] of Object.entries(store)) {
+      if (k === 'store') continue;
+      out[k] = Array.isArray(v) ? v.map(r => (r && typeof r === 'object' && !Array.isArray(r) ? { _: STORE_MARKER, ...r } : r)) : v;
+    }
+    return out;
   }
   /**
    * write(store): tmp file (0600) -> fsync -> the current file is copied to money.json.bak (0600) -> rename over.
@@ -714,7 +776,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
     let fd = null;
     try {
       fd = fs.openSync(tmp, 'wx', 0o600);
-      fs.writeSync(fd, JSON.stringify(store));
+      fs.writeSync(fd, JSON.stringify(onDisk(store)));
       fs.fsyncSync(fd);
       fs.closeSync(fd); fd = null;
       fs.chmodSync(tmp, 0o600);
@@ -734,26 +796,34 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
   }
   /**
    * withLock(fn): cross-process lock shared by the server and src/money-cli.js (Opus review M3/M4).
-   * The lock file holds a random token; release unlinks it only while it still holds OUR token. A lock older than
-   * 10 s is stale: it is taken over by renaming it aside (only one contender's rename can win), then retried.
+   * The lock file holds "<pid>:<random token>"; release unlinks it only while it still holds OUR token. A lock is
+   * stale only when its process is gone (process.kill(pid, 0) says ESRCH); an unreadable one, when older than 10 s.
+   * A stale lock is taken over by renaming it aside (only one contender's rename can win), then retried.
    * Waits are short (10 ms) and bounded by maxWaitMs: 200 ms in the server, 3 s for the CLI. Past that: EBUSY.
    */
   function withLock(fn, { maxWaitMs = lockWaitMs } = {}) {
     ensureDir();
-    const token = crypto.randomBytes(12).toString('hex');
+    const token = `${process.pid}:${crypto.randomBytes(12).toString('hex')}`;
     const deadline = Date.now() + maxWaitMs;
+    const holderGone = () => {
+      let content = '';
+      try { content = fs.readFileSync(lockFile, 'utf8'); } catch (e) { return false; }
+      const pid = parseInt(content.split(':')[0], 10);
+      if (!Number.isInteger(pid) || pid <= 0) return Date.now() - fs.statSync(lockFile).mtimeMs > 10000;   // unreadable: age only
+      try { process.kill(pid, 0); return false; } catch (e) { return e.code === 'ESRCH'; }                  // EPERM = alive
+    };
     for (;;) {
       let fd = null;
       try { fd = fs.openSync(lockFile, 'wx', 0o600); } catch (e) { if (e.code !== 'EEXIST') throw e; }
       if (fd !== null) { try { fs.writeSync(fd, token); } finally { fs.closeSync(fd); } break; }
       try {
-        if (Date.now() - fs.statSync(lockFile).mtimeMs > 10000) {
-          const aside = `${lockFile}.stale-${token}`;
+        if (holderGone()) {
+          const aside = `${lockFile}.stale-${crypto.randomBytes(6).toString('hex')}`;
           fs.renameSync(lockFile, aside);   // atomic: if two processes race, only one rename finds the file
           try { fs.unlinkSync(aside); } catch (e) { /* gone */ }
           continue;
         }
-      } catch (e) { continue; }   // vanished between open and stat: try again at once
+      } catch (e) { continue; }   // vanished meanwhile: try again at once
       if (Date.now() >= deadline) { const err = new Error('money store is busy'); err.code = 'EBUSY'; throw err; }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
@@ -808,7 +878,11 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
     if (b.autopay !== undefined && b.autopay !== null && b.autopay !== '' && existing && existing.isSubscriptionCard) errors.push("the subscription card's autopay follows its Subscriptions task and can't be typed in");
     else if (!(existing && existing.isSubscriptionCard) && (b.autopay !== undefined || !partial)) v.autopayCents = optCents(b.autopay, errors, 'autopay');
     if (b.dueDay !== undefined || !partial) v.dueDay = optDay(b.dueDay, errors, 'due day');
-    if (b.balance !== undefined || !partial) v.balanceCents = optCents(b.balance, errors, 'balance');   // optional, typed by Alex
+    if (b.balance !== undefined || !partial) {
+      v.balanceCents = optCents(b.balance, errors, 'balance');   // optional, typed by Alex
+      const changed = !existing || existing.balanceCents !== v.balanceCents;
+      if (changed) v.balanceAsOf = v.balanceCents == null ? null : nyDate(clock());   // the day the balance was entered
+    }
     if (b.apr !== undefined || !partial) {
       if (b.apr === null || b.apr === '' || b.apr === undefined) v.apr = null;
       else { const n = typeof b.apr === 'number' ? b.apr : Number(String(b.apr).replace('%', '').trim());
@@ -818,13 +892,13 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
   }
   /**
    * ensureSubscriptionCard(store) -> true if it had to add the card. Its stored autopay is the ACTUAL payment; at
-   * first load it is assumed set to the current target (subscriptions.js computeTotal). After that it changes only
+   * first load it is $30, what Alex said it is set to (2026-11-26 22:22); the page shows the live target beside it. After that it changes only
    * when Alex checks off "Set the subscription card's autopay to $T" (rule money-autopay, setSubscriptionAutopay).
    */
   function ensureSubscriptionCard(store) {
     if (store.accounts.some(a => a.isSubscriptionCard)) return false;
-    store.accounts.unshift({ id: newId('acct'), name: 'The subscription card', kind: 'credit card', last4: null, autopayCents: subscriptionAutopay().cents,
-      autopaySetAt: clock().toISOString(), autopayFrom: 'seeded from the Subscriptions target', dueDay: null, isSubscriptionCard: true, createdAt: clock().toISOString() });
+    store.accounts.unshift({ id: newId('acct'), name: 'The subscription card', kind: 'credit card', last4: null, autopayCents: SUBSCRIPTION_CARD_SEED_CENTS,
+      autopaySetAt: clock().toISOString(), autopayFrom: 'seeded: Alex said the autopay is at $30 (2026-11-26)', dueDay: null, isSubscriptionCard: true, createdAt: clock().toISOString() });
     return true;
   }
   /** readSeeded(): the store, with the subscription card added (and saved) on first load. */
@@ -834,7 +908,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
     return withLock(() => { const t = read(); if (ensureSubscriptionCard(t)) write(t); return t; });
   }
   /** setSubscriptionAutopay(cents, note): record the subscription card's actual autopay. Safe to run twice. Takes the money lock. */
-  function setSubscriptionAutopay(cents, note) {
+  function setSubscriptionAutopay(cents, note, { maxWaitMs = 3000 } = {}) {
     if (!Number.isSafeInteger(cents) || cents < 0 || cents > MAX_CENTS) throw new Error('bad autopay amount');
     return withLock(() => {
       const s = read();
@@ -844,7 +918,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
       card.autopayCents = cents; card.autopaySetAt = clock().toISOString(); card.autopayFrom = String(note || '').slice(0, 120);
       write(s);
       return { changed: true, cents };
-    }, { maxWaitMs: 3000 });
+    }, { maxWaitMs });
   }
 
   // --- Recurring bills ---
@@ -1176,7 +1250,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
       const b = req.body || {};
       const pattern = typeof b.pattern === 'string' ? b.pattern.trim() : '';
       if (!pattern || pattern.length > 200) return res.status(400).json({ error: 'pattern: 1–200 characters' });
-      if (maskDigits(pattern) !== pattern) return res.status(400).json({ error: 'A pattern cannot hold a long number (8+ digits): no account or card numbers in rules.' });
+      if (maskDigits(pattern) !== pattern || pattern.replace(/\D/g, '').length >= 8) return res.status(400).json({ error: 'A pattern cannot hold a long number (8+ digits): no account or card numbers in rules.' });
       try { new RegExp(pattern, 'i'); } catch (e) { return res.status(400).json({ error: 'That pattern is not a valid regular expression.' }); }
       if (!CATEGORY_IDS.has(b.category)) return res.status(400).json({ error: 'unknown category' });
       const priority = Number.isInteger(b.priority) ? b.priority : 500;
@@ -1208,6 +1282,6 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWait
   return { mount, read, readSeeded, write, withLock, setSubscriptionAutopay, bak, lockFile, prunePreviews, file, dir, previews, addBill, updateBill, setVariable, plan, subscriptionAutopay, ensureSubscriptionCard, validateAccount, startImport, mapImport, commitImport, addManual, setCategory, listTransactions, exportCsv };
 }
 
-module.exports = { create, gate, isAlexSession, moneyToolGuard, autopayRule, autopayFromTaskName, maskDigits, parseCsv, parseAmount, parseDate, cleanDescription, merchantOf, fingerprint, compileRules,
+module.exports = { create, gate, isAlexSession, moneyToolGuard, guardToolExecutor, STORE_MARKER, SUBSCRIPTION_CARD_SEED_CENTS, CLAUDE_DENY_SETTINGS, autopayRule, autopayFromTaskName, maskDigits, parseCsv, parseAmount, parseDate, cleanDescription, merchantOf, fingerprint, compileRules,
   categorize, escapeCsvCell, detectProfile, resolveProfile, splitHeader, monthlyEquivalent, variableBudget, monthPlan, payoffEstimate, toCents, nyDate, localMonth, MAX_CENTS, KINDS, CYCLES, validateMapping, normalizeRows, summarize, monthTotals, addMonths,
   TAXONOMY, CATEGORIES, STARTER_RULES, BUILTIN_PROFILES };

@@ -419,21 +419,22 @@ test('Eastern dates (M7): 9pm Eastern on Nov 30 is still November', () => {
   assert.equal(money.localMonth(new Date('2026-12-01T06:00:00Z')), '2026-12');
 });
 
-test('subscription card: seeded with the target as its actual autopay; never typed in; target shown beside the actual', () => {
+test('subscription card: seeded at $30 actual autopay (Alex); never typed in; live target shown beside the actual', () => {
   const { m } = budgetSetup();
   const s = m.readSeeded(); m.readSeeded();
   const cards = m.read().accounts.filter(a => a.isSubscriptionCard);
   assert.equal(cards.length, 1);
-  assert.deepEqual([cards[0].name, cards[0].kind, cards[0].autopayCents], ['The subscription card', 'credit card', TARGET]);
+  assert.deepEqual([cards[0].name, cards[0].kind, cards[0].autopayCents], ['The subscription card', 'credit card', 3000]);
+  assert.equal(money.SUBSCRIPTION_CARD_SEED_CENTS, 3000);
   assert.equal(s.accounts[0].id, cards[0].id);
   assert.equal(TARGET, 1549 + 1000 + 3000);
   assert.ok(m.validateAccount({ autopay: 50 }, true, cards[0]).errors);
   assert.ok(m.validateAccount({ kind: 'checking' }, true, cards[0]).errors);
-  assert.deepEqual(m.validateAccount({ name: 'Renamed', last4: '4321', balance: '800', apr: '24.99' }, true, cards[0]).value, { name: 'Renamed', last4: '4321', balanceCents: 80000, apr: 24.99 });
+  assert.deepEqual(m.validateAccount({ name: 'Renamed', last4: '4321', balance: '800', apr: '24.99' }, true, cards[0]).value, { name: 'Renamed', last4: '4321', balanceCents: 80000, balanceAsOf: '2026-11-26', apr: 24.99 });
   // The Subscriptions list grows: the target moves, the actual autopay doesn't until the task is checked off.
   fs.writeFileSync(path.join(path.dirname(m.dir), 'subscriptions.json'), JSON.stringify(SUBS.concat([{ name: 'New', price: 20, cycle: 'monthly', onCard: true }])));
   const check = m.plan('2026-11').cardChecks.find(c => c.isSubscriptionCard);
-  assert.deepEqual([check.autopayCents, check.targetCents, check.targetGapCents], [TARGET, TARGET + 2000, 2000]);
+  assert.deepEqual([check.autopayCents, check.targetCents, check.targetGapCents], [3000, TARGET + 2000, TARGET + 2000 - 3000]);
 });
 
 test('task rule money-autopay: checking off the autopay task sets the actual autopay; safe twice; ignores other tasks', () => {
@@ -441,7 +442,7 @@ test('task rule money-autopay: checking off the autopay task sets the actual aut
   m.readSeeded();
   const rule = money.autopayRule(dir);
   assert.equal(rule({ autoKind: 'something-else', name: 'Set the subscription card\'s autopay to $1.00' }), undefined);
-  assert.equal(m.read().accounts[0].autopayCents, TARGET);
+  assert.equal(m.read().accounts[0].autopayCents, 3000);
   rule({ autoKind: 'subcard-autopay', name: "Set the subscription card's autopay to $1,075.49" });
   assert.equal(m.read().accounts[0].autopayCents, 107549);
   const before = fs.readFileSync(m.file, 'utf8');
@@ -484,8 +485,9 @@ test('spending vs cash out; per-card checks; subscription card keeps $30 paydown
   const { m } = budgetSetup();
   const s = m.readSeeded();
   const subId = s.accounts[0].id;
-  s.accounts.push({ id: 'visa', name: 'Visa', kind: 'credit card', autopayCents: 10000 }, { id: 'amex', name: 'Amex', kind: 'credit card', autopayCents: 5000 },
-    { id: 'chk', name: 'Checking', kind: 'checking' }, { id: 'cash', name: 'Wallet', kind: 'cash' }, { id: 'nopay', name: 'No autopay card', kind: 'credit card', autopayCents: null });
+  const c = NOV26.toISOString();   // added today: no full tracked month yet, so card expenses are "so far"
+  s.accounts.push({ id: 'visa', name: 'Visa', kind: 'credit card', autopayCents: 10000, createdAt: c }, { id: 'amex', name: 'Amex', kind: 'credit card', autopayCents: 5000, createdAt: c },
+    { id: 'chk', name: 'Checking', kind: 'checking' }, { id: 'cash', name: 'Wallet', kind: 'cash' }, { id: 'nopay', name: 'No autopay card', kind: 'credit card', autopayCents: null, createdAt: c });
   m.write(s);
   m.addBill({ name: 'Rent', amount: 1000, category: 'housing/rent', paidWith: 'chk' });
   m.addBill({ name: 'Phone', amount: 60, category: 'utilities/phone', paidWith: 'visa' });
@@ -501,25 +503,26 @@ test('spending vs cash out; per-card checks; subscription card keeps $30 paydown
   assert.equal(p.spending.soFarCents, subsSpend + 106500 + 11500);
   // Cash out: card payments (actual autopays) + non-card payers; card charges are not cash out.
   const by = Object.fromEntries(p.cashOut.byPayer.map(x => [x.name, x.cents]));
-  assert.equal(by['The subscription card'], TARGET);
+  assert.equal(by['The subscription card'], 3000);
   assert.equal(by.Visa, 10000);
   assert.equal(by.Amex, 5000);
   assert.equal(by.Checking, 100000);
   assert.equal(by.Wallet, 2000);
   assert.equal(by['No payer set'], 1500 + 1199);   // lunch + Spotify (not on the card, payer unknown)
-  assert.equal(p.cashOut.cents, TARGET + 10000 + 5000 + 100000 + 2000 + 2699);
+  assert.equal(p.cashOut.cents, 3000 + 10000 + 5000 + 100000 + 2000 + 2699);
   const chk = Object.fromEntries(p.cardChecks.map(c => [c.name, c]));
   assert.deepEqual([chk.Visa.chargesCents, chk.Visa.status, chk.Visa.diffCents], [6000, 'over', 4000]);
   assert.match(chk.Visa.message, /pays \$40\.00 more: paying it down/);
   assert.deepEqual([chk.Amex.chargesCents, chk.Amex.status, chk.Amex.diffCents], [8000, 'short', -3000]);
   assert.match(chk.Amex.message, /short by \$30\.00 a month: balance building up/);
+  assert.deepEqual([chk.Amex.expenseBasis, chk.Amex.expenseChargesCents], ['so far', 8000]);
   assert.equal(chk['No autopay card'].status, 'no-autopay');
   // Subscription card: charges 1549 + 1000 (yearly/12) + 500 (Cloud) vs autopay − $30 paydown.
   const sc = chk['The subscription card'];
   assert.equal(sc.chargesCents, 1549 + 1000 + 500);
   assert.equal(sc.paydownReservedCents, PAYDOWN);
   assert.equal(sc.bufferCents, BUFFER);
-  assert.equal(sc.diffCents, TARGET - PAYDOWN - 3049);
+  assert.equal(sc.diffCents, 3000 - PAYDOWN - 3049);
   assert.equal(sc.status, 'short');   // the yearly item and Cloud aren't in the autopay formula
   // Category view counts subscriptions under their category.
   assert.equal(p.byCategory.find(c => c.category === 'utilities').subscriptionsCents, subsSpend);
@@ -669,28 +672,149 @@ test('rules (S4): a pattern holding an 8+ digit run is refused', async () => {
   } finally { srv.close(); }
 });
 
-test('agent tool guard (S1): file tools refused inside data/money (symlinks resolved), shell commands naming money refused', () => {
+test('agent tool guard (S1): file tools refused inside data/money (symlinks resolved), on the argument each executor uses', () => {
   const root = freshDir();
   const data = path.join(root, 'checkout', 'data'), moneyDir = path.join(data, 'money');
   fs.mkdirSync(moneyDir, { recursive: true });
   fs.writeFileSync(path.join(moneyDir, 'money.json'), '{}');
   fs.symlinkSync(moneyDir, path.join(root, 'innocent-link'));
   const g = (tool, args) => money.moneyToolGuard(tool, args, { moneyDirs: [moneyDir], base: root });
-  for (const tool of ['read_file', 'list_directory', 'write_file']) {
-    for (const p of ['checkout/data/money/money.json', 'checkout/data/money', 'checkout/data/../data/money/x', 'innocent-link/money.json', 'innocent-link', path.join(moneyDir, 'new', 'file.json')]) {
-      assert.ok(g(tool, { filePath: p, dirPath: p }), `${tool} ${p}`);
-    }
-    assert.equal(g(tool, { filePath: 'checkout/data/other.json', dirPath: 'checkout/data' }), null);
+  for (const p of ['checkout/data/money/money.json', 'checkout/data/money', 'checkout/data/../data/money/x', 'innocent-link/money.json', 'innocent-link', path.join(moneyDir, 'new', 'file.json')]) {
+    assert.ok(g('read_file', { filePath: p }), `read ${p}`);
+    assert.ok(g('write_file', { filePath: p }), `write ${p}`);
+    assert.ok(g('list_directory', { dirPath: p }), `list ${p}`);
   }
-  assert.ok(g('run_bash', { command: 'cat ~/dashboard/data/Money/money.json' }));
-  assert.ok(g('run_bash', { command: 'ls MONEY' }));
-  assert.equal(g('run_bash', { command: 'ls -la ~/dashboard/data' }), null);
-  assert.equal(g('search_web', { query: 'money' }), null);
-  // server.js wires it in before any role check, for both checkouts.
+  // list_directory is judged on dirPath (what the executor lists), not on a decoy filePath.
+  assert.ok(g('list_directory', { filePath: 'checkout/data', dirPath: 'checkout/data/money' }));
+  assert.equal(g('list_directory', { filePath: 'checkout/data/money', dirPath: 'checkout/data' }), null);
+  assert.equal(g('read_file', { filePath: 'checkout/data/other.json' }), null);
+  assert.equal(g('run_bash', { command: 'node --test src/money.test.js' }), null);   // the word filter is gone (SF1)
+});
+
+test('agent tool wall (SF1a): run_bash / read_file output holding the store marker is withheld (cat, grep, partial reads)', async () => {
+  const { execSync } = require('child_process');
+  const { m } = budgetSetup();
+  m.readSeeded();
+  m.addBill({ name: 'Secret rent', amount: 1234.56, category: 'housing/rent' });
+  m.addManual({ date: '2026-11-03', amount: 77.7, expense: true, description: 'Secret groceries', category: 'food/groceries' });
+  // The marker is on disk (top level and on every record) and never in the source code as a literal.
+  const disk = fs.readFileSync(m.file, 'utf8');
+  assert.ok(disk.startsWith(`{"store":"${money.STORE_MARKER}"`));
+  assert.ok(disk.split(money.STORE_MARKER).length > 4);
+  assert.ok(!fs.readFileSync(path.join(__dirname, 'money.js'), 'utf8').includes(money.STORE_MARKER));
+  assert.ok(!('_' in m.read().transactions[0]) && !('store' in m.read().accounts[0]));
+  // A raw executor that really runs the command / reads the file, like server.js's.
+  const raw = async (tool, args) => {
+    if (tool === 'run_bash') { try { return { stdout: execSync(args.command, { encoding: 'utf8', shell: '/bin/bash' }) }; } catch (e) { return { stderr: String(e.stderr || e.message) }; } }
+    if (tool === 'read_file') return { content: fs.readFileSync(args.filePath, 'utf8').slice(0, 8000) };
+    return { ok: true };
+  };
+  const exec = money.guardToolExecutor(raw, { moneyDirs: ['/nonexistent-wall'] });   // the path wall can't see this temp copy: the marker must catch it
+  const copy = path.join(freshDir(), 'innocent.txt');
+  fs.copyFileSync(m.file, copy);
+  for (const command of [`cat ${copy}`, `grep -r Secret ${path.dirname(copy)}`, `tail -c 300 ${copy}`, `head -c 400 ${copy} | base64 -d 2>/dev/null; head -c 400 ${copy}`, `grep -o '"name":"Secret rent[^}]*' ${copy}`]) {
+    const r = await exec('run_bash', { command }, 'debugger', 's1', {});
+    assert.ok(r.error && /withheld/.test(r.error), command + ' -> ' + JSON.stringify(r).slice(0, 120));
+    assert.ok(!JSON.stringify(r).includes('Secret'));
+  }
+  const rf = await exec('read_file', { filePath: copy }, 'debugger', 's1', {});
+  assert.ok(rf.error && !JSON.stringify(rf).includes('Secret'));
+  assert.deepEqual(await exec('run_bash', { command: 'echo hello' }, 'debugger', 's1', {}), { stdout: 'hello\n' });
+});
+
+test('agent tool wall (SF1b): after a web search, run_bash and auto-run schedule_prompt are refused for the rest of the turn', async () => {
+  const calls = [];
+  const exec = money.guardToolExecutor(async (tool) => { calls.push(tool); return { ok: true }; }, { moneyDirs: ['/nonexistent-wall'] });
+  const turn = {};
+  assert.deepEqual(await exec('run_bash', { command: 'ls' }, 'debugger', 's', turn), { ok: true });
+  assert.deepEqual(await exec('schedule_prompt', { prompt: 'x', runAt: '2026-12-01T00:00:00Z' }, 'debugger', 's', turn), { ok: true });
+  await exec('search_web', { query: 'anything' }, 'debugger', 's', turn);
+  assert.match((await exec('run_bash', { command: 'ls' }, 'debugger', 's', turn)).error, /web tool/);
+  assert.match((await exec('schedule_prompt', { prompt: 'x', runAt: '2026-12-01T00:00:00Z' }, 'debugger', 's', turn)).error, /manual approval/);
+  assert.deepEqual(await exec('schedule_prompt', { prompt: 'x' }, 'debugger', 's', turn), { ok: true });   // held for approval: fine
+  assert.deepEqual(await exec('read_file', { filePath: '/etc/hostname' }, 'debugger', 's', turn), { ok: true });
+  // A new turn starts clean.
+  assert.deepEqual(await exec('run_bash', { command: 'ls' }, 'debugger', 's', {}), { ok: true });
+  assert.deepEqual(calls.filter(c => c === 'run_bash').length, 2);
+});
+
+test('server.js wiring: every tool call goes through the wall with a per-turn object; Claude CLI gets the deny settings; dead-letter titles carry no task name', () => {
   const src = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
-  const i = src.indexOf('function executeLocalTool(');
-  assert.ok(i > 0 && src.indexOf('moneyToolGuard(toolName, args', i) > i && src.indexOf('moneyToolGuard(toolName, args', i) < src.indexOf("if (role === 'query')", i));
+  assert.match(src, /const executeLocalTool = require\('\.\/money'\)\.guardToolExecutor\(executeLocalToolRaw, \{ moneyDirs: MONEY_DATA_DIRS \}\)/);
   assert.match(src, /MONEY_DATA_DIRS = .*dashboard\/data\/money.*dashboard-staging\/data\/money/);
+  const calls = src.match(/await executeLocalTool\([^)]*\)/g);
+  assert.ok(calls.length >= 2 && calls.every(c => c.endsWith('toolTurn)')), calls.join('\n'));
+  assert.equal((src.match(/executeLocalToolRaw/g) || []).length, 2);   // defined once, wrapped once: nothing calls it directly
+  const ba = src.slice(src.indexOf('async function runClaudeHeavyTurn'), src.indexOf("if (session.role === 'query')", src.indexOf('async function runClaudeHeavyTurn')));
+  assert.match(ba, /args\.push\('--settings', require\('\.\/money'\)\.CLAUDE_DENY_SETTINGS\)/);
+  const deny = JSON.parse(money.CLAUDE_DENY_SETTINGS).permissions.deny;
+  for (const t of ['Read', 'Edit', 'Write']) for (const d of ['dashboard', 'dashboard-staging']) assert.ok(deny.includes(`${t}(//home/ubuntu/${d}/data/money/**)`));
+  assert.match(src, /title: `Task automation stuck: \$\{job\.rule\} \(\$\{\(job\.task && job\.task\.id\) \|\| job\.key\}\)`/);
+});
+
+test('re-review minors: en/em dashes, invalid date-shaped numbers, rule digit count, task-name amount, payoff cap and 0% APR, balanceAsOf', async () => {
+  assert.equal(money.maskDigits('4111–1111–1111–1111'), '••1111');
+  assert.equal(money.maskDigits('4111 — 1111 — 1111 — 2222'), '••2222');
+  assert.equal(money.maskDigits('12-34-5678'), '••5678');      // month 12, day 34: not a date
+  assert.equal(money.maskDigits('13-01-2026'), '••2026');      // month 13: not a date
+  assert.equal(money.maskDigits('12-31-2026'), '12-31-2026');
+  assert.equal(money.autopayFromTaskName("Set the subscription card's autopay to $85.00"), 8500);
+  assert.equal(money.autopayFromTaskName("Set the subscription card's autopay to $85.001"), null);
+  assert.equal(money.autopayFromTaskName("Set the subscription card's autopay to $85.00,1"), null);
+  const never = money.payoffEstimate(100000000, 1, null, '2026-11');
+  assert.deepEqual([never.never, never.reason], [true, 'over 100 years at this rate']);
+  const slow = money.payoffEstimate(100000, 100, 1, '2026-11');   // $1,000 at 1% paying $1: about 179 years
+  assert.deepEqual([slow.never, slow.reason], [true, 'over 100 years at this rate']);
+  const zero = money.payoffEstimate(100000, 3000, 0, '2026-11');
+  assert.deepEqual([zero.months, zero.label, zero.interestCents], [34, '0% APR', 0]);
+  const { m, setNow } = budgetSetup();
+  const card = m.readSeeded().accounts[0];
+  const v1 = m.validateAccount({ balance: '500' }, true, card).value;
+  assert.deepEqual([v1.balanceCents, v1.balanceAsOf], [50000, '2026-11-26']);
+  setNow(new Date('2026-12-02T17:00:00Z'));
+  assert.ok(!('balanceAsOf' in m.validateAccount({ balance: '500' }, true, { ...card, balanceCents: 50000 }).value));   // unchanged: date kept
+  assert.equal(m.validateAccount({ balance: '450' }, true, { ...card, balanceCents: 50000 }).value.balanceAsOf, '2026-12-02');
+  const { srv, port } = await startApp(freshDir());
+  try {
+    const H = { ...REMOTE, Cookie: await login(port, 'alex', 'pw-alex') };
+    assert.equal((await req(port, 'POST', '/api/money/rules', { headers: H, body: { pattern: '4111x1111x1111', category: 'other' } })).status, 400);   // 12 digits once separators are stripped
+    assert.equal((await req(port, 'POST', '/api/money/rules', { headers: H, body: { pattern: 'store\\s*12', category: 'other' } })).status, 201);
+  } finally { srv.close(); }
+});
+
+test('card checks (minor 1): card expenses use the average of full tracked months; "so far" only without one', () => {
+  const { m } = budgetSetup(new Date('2027-01-15T17:00:00Z'));
+  const s = m.readSeeded();
+  s.accounts.push({ id: 'visa', name: 'Visa', kind: 'credit card', autopayCents: 20000, createdAt: '2026-10-20T15:00:00Z' });
+  m.write(s);
+  const e = (date, amount) => m.addManual({ date, amount, expense: true, description: 'Shop ' + date, category: 'shopping', paidWith: 'visa', force: true });
+  e('2026-10-25', 999); e('2026-11-10', 100); e('2026-12-10', 300); e('2027-01-05', 50);
+  const v = m.plan('2027-01').cardChecks.find(c => c.name === 'Visa');
+  // Full tracked months before January: November and December (October started before the card was added).
+  assert.deepEqual([v.expenseBasis, v.expenseMonths, v.expenseChargesCents, v.expensesThisMonthCents], ['avg', 2, 20000, 5000]);
+  assert.equal(v.status, 'covers');
+  const fresh = budgetSetup(new Date('2026-11-26T17:00:00Z'));
+  const s2 = fresh.m.readSeeded(); s2.accounts.push({ id: 'visa', name: 'Visa', kind: 'credit card', autopayCents: 100, createdAt: NOV26.toISOString() }); fresh.m.write(s2);
+  fresh.m.addManual({ date: '2026-11-26', amount: 40, expense: true, description: 'x', category: 'shopping', paidWith: 'visa' });
+  const v2 = fresh.m.plan('2026-11').cardChecks.find(c => c.name === 'Visa');
+  assert.deepEqual([v2.expenseBasis, v2.expenseChargesCents], ['so far', 4000]);
+});
+
+test('lock (minor 4): stale only when the holder pid is gone; a live holder is waited for even when old; rule waits at most 1 s', () => {
+  const { spawnSync } = require('child_process');
+  const { m, dir } = budgetSetup();
+  m.readSeeded();
+  const deadPid = spawnSync(process.execPath, ['-e', '0']).pid;
+  fs.writeFileSync(m.lockFile, `${deadPid}:abc`);   // fresh, but its process is gone: taken over at once
+  assert.equal(m.withLock(() => 'ran'), 'ran');
+  fs.writeFileSync(m.lockFile, `${process.pid}:someone`);   // alive (this process), and old: NOT stale
+  const old = new Date(Date.now() - 60000); fs.utimesSync(m.lockFile, old, old);
+  assert.throws(() => m.withLock(() => 1), (e) => e.code === 'EBUSY');
+  const t0 = Date.now();
+  assert.throws(() => money.autopayRule(dir)({ autoKind: 'subcard-autopay', name: "Set the subscription card's autopay to $40.00" }), (e) => e.code === 'EBUSY');
+  const waited = Date.now() - t0;
+  assert.ok(waited >= 900 && waited < 1600, `rule waited ${waited} ms`);
+  fs.unlinkSync(m.lockFile);
 });
 
 test('CLI: add-expense, add-bill (paid-with), list; one JSON line; errors exit 1 and say nothing else', () => {
@@ -731,7 +855,7 @@ test('HTTP: subscription card actual vs target, not deletable, no typed autopay;
     const H = { ...REMOTE, Cookie: await login(port, 'alex', 'pw-alex') };
     const meta = JSON.parse((await req(port, 'GET', '/api/money/meta', { headers: H })).body);
     const card = meta.accounts.find(a => a.isSubscriptionCard);
-    assert.deepEqual([card.autopayCents, card.targetCents], [TARGET, TARGET]);
+    assert.deepEqual([card.autopayCents, card.targetCents], [3000, TARGET]);
     assert.equal((await req(port, 'DELETE', `/api/money/accounts/${card.id}`, { headers: H })).status, 409);
     assert.equal((await req(port, 'PATCH', `/api/money/accounts/${card.id}`, { headers: H, body: { autopay: 99 } })).status, 400);
     assert.equal((await req(port, 'PATCH', `/api/money/accounts/${card.id}`, { headers: H, body: { balance: 1200, apr: 22.5 } })).status, 200);

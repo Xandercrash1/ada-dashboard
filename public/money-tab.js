@@ -171,16 +171,16 @@
     const tone = { short: 'border-rose-500/40 bg-rose-500/10', covers: '', over: '', 'no-autopay': 'border-amber-500/40 bg-amber-500/10' };
     const payoffText = (o) => {
       if (!o) return '';
-      if (o.never) return `<div class="text-rose-500">Never pays off at this rate${o.monthlyInterestCents ? `: interest is ${esc(usd(o.monthlyInterestCents))} a month` : ''}.</div>`;
-      return `<div>Rough payoff: ${o.months} months (${esc(monthLabel(o.payoffMonth))})${o.withInterest ? `, about ${esc(usd(o.interestCents))} interest, ${esc(o.label)}` : ', ignoring interest'}.</div>`;
+      if (o.never) return `<div class="text-rose-500">Never pays off at this rate (${esc(o.reason)})${o.monthlyInterestCents ? `: interest is ${esc(usd(o.monthlyInterestCents))} a month` : ''}.</div>`;
+      return `<div>Rough payoff: ${esc(o.months)} months (${esc(monthLabel(o.payoffMonth))})${o.withInterest ? `, about ${esc(usd(o.interestCents))} interest` : ''}, ${esc(o.label)}.</div>`;
     };
     const checks = p.cardChecks.map((c) => `<div class="${card} ${tone[c.status] || ''} text-sm space-y-1">
       <div class="flex flex-wrap justify-between gap-2"><span class="font-semibold">${esc(c.name)}${c.last4 ? ' ••' + esc(c.last4) : ''}</span>
         <span>${c.autopayCents == null ? 'no autopay set' : 'autopay ' + esc(usd(c.autopayCents))}${c.dueDay ? ' · due day ' + esc(c.dueDay) : ''}</span></div>
       ${c.isSubscriptionCard ? `<div class="${muted}">Linked to the Subscriptions page: target ${esc(usd(c.targetCents))}, set ${esc(usd(c.autopayCents))}${c.targetGapCents ? ` <span class="text-amber-600">(gap ${esc(usd(c.targetGapCents))})</span>` : ''}. Updates when you check off its autopay task.</div>` : ''}
-      <div>Charges ${esc(usd(c.chargesCents))}/mo (bills and subscriptions ${esc(usd(c.recurringChargesCents))}, expenses this month ${esc(usd(c.expenseChargesCents))})${c.isSubscriptionCard ? ` · ${esc(usd(c.paydownReservedCents))} paying down the old balance · ${esc(usd(c.bufferCents))} buffer` : ''}</div>
+      <div>Charges ${esc(usd(c.chargesCents))}/mo (bills and subscriptions ${esc(usd(c.recurringChargesCents))}, expenses ${esc(usd(c.expenseChargesCents))} ${c.expenseBasis === 'avg' ? 'avg of ' + esc(c.expenseMonths) + ' mo' : 'so far this month'})${c.isSubscriptionCard ? ` · ${esc(usd(c.paydownReservedCents))} paying down the old balance · ${esc(usd(c.bufferCents))} buffer` : ''}</div>
       <div class="font-medium ${c.status === 'short' ? 'text-rose-600 dark:text-rose-400' : c.status === 'no-autopay' ? 'text-amber-600' : 'text-emerald-600 dark:text-emerald-400'}">${esc(c.message)}</div>
-      ${c.balanceCents ? `<div class="${muted}">Balance ${esc(usd(c.balanceCents))}${c.apr != null ? ' at ' + esc(c.apr) + '% APR' : ''}</div>${payoffText(c.payoff)}` : ''}</div>`).join('');
+      ${c.balanceCents ? `<div class="${muted}">Balance ${esc(usd(c.balanceCents))}${c.balanceAsOf ? ' as of ' + esc(c.balanceAsOf) : ''}${c.apr != null ? ' at ' + esc(c.apr) + '% APR' : ''}</div>${payoffText(c.payoff)}` : ''}</div>`).join('');
     const payers = co.byPayer.map((x) => `<tr class="${tr}"><td class="py-1.5 pr-3">${esc(x.name)}${x.unset ? ` <span class="${muted}">(set a payer)</span>` : ''}</td>
       <td class="py-1.5 pr-3 ${muted}">${x.kind === 'credit card' ? (x.autopayMissing ? 'card payment not set' : 'card payment') : 'paid directly'}</td><td class="py-1.5 text-right">${esc(usd(x.cents))}</td></tr>`).join('');
     const cats = p.byCategory.map((c) => `<tr class="${tr}"><td class="py-2 pr-3">${esc(c.category)}</td><td class="py-2 pr-3 text-right">${c.billsCents + c.subscriptionsCents ? esc(usd(c.billsCents + c.subscriptionsCents)) : ''}</td>
@@ -247,7 +247,7 @@
     const m = S.meta, e = S.edit && S.edit.kind === 'card' ? S.edit.item : null;
     const rows = m.accounts.map((a) => `<tr class="${tr} align-top"><td class="py-2 pr-3"><div class="font-medium">${esc(a.name)}${a.last4 ? ' ••' + esc(a.last4) : ''}</div><div class="${muted}">${esc(a.kind)}</div></td>
       <td class="py-2 pr-3 whitespace-nowrap">${a.isSubscriptionCard ? `set ${esc(usd(a.autopayCents))} · target ${esc(usd(a.targetCents))} <span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-indigo-500/15 text-indigo-500">linked: Subscriptions</span>` : a.autopayCents == null ? `<span class="${muted}">no autopay set</span>` : esc(usd(a.autopayCents))}</td>
-      <td class="py-2 pr-3">${a.dueDay ? 'due day ' + esc(a.dueDay) : ''}${a.balanceCents != null ? `<div class="${muted}">balance ${esc(usd(a.balanceCents))}${a.apr != null ? ' · ' + esc(a.apr) + '% APR' : ''}</div>` : ''}</td>
+      <td class="py-2 pr-3">${a.dueDay ? 'due day ' + esc(a.dueDay) : ''}${a.balanceCents != null ? `<div class="${muted}">balance ${esc(usd(a.balanceCents))}${a.balanceAsOf ? ' (' + esc(a.balanceAsOf) + ')' : ''}${a.apr != null ? ' · ' + esc(a.apr) + '% APR' : ''}</div>` : ''}</td>
       <td class="py-2 whitespace-nowrap"><button type="button" class="text-xs hover:underline mr-2" data-act="editcard" data-id="${esc(a.id)}">Edit</button>${a.isSubscriptionCard ? '' : `<button type="button" class="text-xs text-rose-500 hover:underline" data-act="delacct" data-id="${esc(a.id)}">Delete</button>`}</td></tr>`).join('');
     const f = e || { name: '', kind: 'credit card', last4: '', autopayCents: null, dueDay: '' };
     const sub = !!(e && e.isSubscriptionCard);
