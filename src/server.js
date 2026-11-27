@@ -4657,6 +4657,23 @@ app.post('/api/todo/tasks/:id/complete', (req, res) => {
   }
 });
 
+// Home "Oldest overdue task" card (Alex only, 2026-11-27; src/overdue-review.js). Admin wall via authorizeRole (non-admins
+// never get past it) plus a second check here: only alex, or the loopback "system" admin that stands in for him.
+const overdueReview = require('./overdue-review').create({ dataDir: DATA_DIR, store: todoStore });
+const isAlexReq = (req) => !!req.user && (req.user.username === 'alex' || req.user.username === 'system');
+app.get('/api/todo/overdue-review', (req, res) => {
+  if (!isAdminReq(req) || !isAlexReq(req)) return res.status(403).json({ error: 'Not available for your account.' });
+  try {
+    const r = overdueReview.review(todoStore.readTasks());
+    res.json({ task: r.task ? taskView(r.task) : null, handled: r.handled, showFrom: r.showFrom, daysOverdue: r.daysOverdue || 0, dueDate: r.dueDate || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/todo/overdue-review/handled', (req, res) => {
+  if (!isAdminReq(req) || !isAlexReq(req)) return res.status(403).json({ error: 'Not available for your account.' });
+  try { overdueReview.markHandled(todoEngine.todayString()); res.json({ success: true, handledDate: todoEngine.todayString() }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/todo/completed', (req, res) => {
   try {
     const items = todoStore.readCompleted().filter(t => taskVisibleTo(req, t)).sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));

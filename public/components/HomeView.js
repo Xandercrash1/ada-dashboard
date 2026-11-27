@@ -91,6 +91,11 @@ class HomeView extends HTMLElement {
         <p class="h-sum" data-r="psum"></p>
         <ul class="h-rows" data-r="prows"></ul>
       </section>
+      <section aria-labelledby="h-od" data-r="od" hidden><h2 id="h-od">Oldest overdue task</h2>
+        <p class="h-sum" data-r="odname"></p>
+        <p class="h-note" data-r="odmeta"></p>
+        <div class="h-actions" data-r="odacts"></div>
+      </section>
       <section aria-labelledby="h-kitchen" data-r="kitchen" hidden><h2 id="h-kitchen">Kitchen</h2>
         <p class="h-sum" data-r="ksum"></p>
         <ul class="h-rows" data-r="krows"></ul>
@@ -165,6 +170,7 @@ class HomeView extends HTMLElement {
     this.loadEvents();   // the server returns only events shared with this account
     if (this.isAdmin) this.loadAdmin();
     if (this.isAdmin) this.loadProposals();
+    if (this.isAdmin && this.me.username === 'alex') this.loadOverdue();
   }
 
   // Self-improvement loop (Alex, 2026-11-25): ideas the nightly loop proposed, each Approve / Decline / Later.
@@ -195,6 +201,42 @@ class HomeView extends HTMLElement {
       box.append(name, why, acts); li.append(box);
       return li;
     }));
+  }
+
+  // Oldest overdue task (Alex only, 2026-11-27): shown from 08:00 Eastern until he defers or deletes it that day.
+  // The server picks the task and remembers the day it was handled (src/overdue-review.js).
+  async loadOverdue() {
+    let d = null;
+    try { d = await getJson('/api/todo/overdue-review'); } catch (e) { /* no card */ }
+    const t = d && d.task;
+    this.r.od.hidden = !t;
+    if (!t) return;
+    const n = d.daysOverdue;
+    this.r.odname.textContent = t.name;
+    this.r.odmeta.textContent = `${t.project || 'No project'} \u00b7 ${n} ${n === 1 ? 'day' : 'days'} overdue \u00b7 due ${d.dueDate}`;
+    const defer = el('button', 'go', 'Defer'), del = el('button', '', 'Delete');
+    defer.type = 'button'; del.type = 'button';
+    const handled = async () => { try { await fetch('/api/todo/overdue-review/handled', { method: 'POST' }); } catch (e) { /* the card returns on reload */ } this.r.od.hidden = true; };
+    defer.onclick = () => {
+      if (typeof window.openEditTodoModal !== 'function') return;
+      // Saving this task in the editor handles it; closing the editor without saving leaves the card.
+      const onSaved = (ev) => { if (ev.detail && ev.detail.id === t.id) { window.removeEventListener('ada-todo-saved', onSaved); handled(); } };
+      window.removeEventListener('ada-todo-saved', this._odSaved);
+      this._odSaved = onSaved;
+      window.addEventListener('ada-todo-saved', onSaved);
+      window.openEditTodoModal(t.id, t);
+    };
+    del.onclick = async () => {
+      const rep = t.type === 'recurring' ? ' This deletes the whole repeating task, not just this time.' : '';
+      if (!await window.adaConfirm({ title: 'Delete task', message: `Delete \u201c${t.name}\u201d? This can't be undone.${rep}`, confirmLabel: 'Delete', danger: true })) return;
+      del.disabled = defer.disabled = true;
+      let ok = false;
+      try { ok = (await fetch(`/api/todo/tasks/${encodeURIComponent(t.id)}`, { method: 'DELETE' })).ok; } catch (e) { /* below */ }
+      if (!ok) { del.disabled = defer.disabled = false; if (window.showToast) window.showToast('That didn\u2019t delete. Try again.', 'error'); return; }
+      await handled();
+      if (window.showToast) window.showToast(`Deleted \u201c${t.name}\u201d`, 'success');
+    };
+    this.r.odacts.replaceChildren(defer, del);
   }
 
   // Kitchen (2026-11-24): two cards from the shared 303 kitchen, each shown only when it has something:

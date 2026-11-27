@@ -2284,9 +2284,11 @@
       todoEditingId = null;
     }
 
-    function openEditTodoModal(id) {
+    // fallback: a task object from the caller (Home's overdue card) for when the Tasks lists haven't been loaded.
+    function openEditTodoModal(id, fallback) {
       const t = todoAllTasks.find(x => x.id === id) ||
-        (todoView && [...(todoView.pastDue || []), ...(todoView.today || []), ...(todoView.upcoming || [])].find(x => x.id === id));
+        (todoView && [...(todoView.pastDue || []), ...(todoView.today || []), ...(todoView.upcoming || [])].find(x => x.id === id)) ||
+        (fallback && fallback.id === id ? fallback : null);
       if (!t) { alert('Task not found — try refreshing.'); return; }
 
       todoEditingId = id;
@@ -2384,10 +2386,13 @@
         return;
       }
 
+      // Home's overdue card listens for this: saving the task in the editor counts as handling it.
+      try { window.dispatchEvent(new CustomEvent('ada-todo-saved', { detail: { id: todoEditingId, created: !todoEditingId } })); } catch (e) { /* no listener matters */ }
       closeAddTodoModal();
       await loadTodoManage();
       await loadTodoDaily();
     }
+    window.openEditTodoModal = openEditTodoModal;
 
     // --- 1.5 MEDIA UPLOADER & STORAGE ---
     function switchServerTab(tab) {
