@@ -65,6 +65,10 @@ const invites = require('./invites').create({
   pageFile: path.join(__dirname, '../public/invite.html'),
 });
 invites.mountPublic(app, { getClientIp });
+// Money page (Plan — Money on the VPS): Alex's own browser session only. This gate runs requireAuth itself and turns
+// every refusal (signed out, loopback "system", other admins, 303, guests) into 404, so it must sit BEFORE requireAuth.
+const moneyApi = require('./money').create({ dataDir: path.join(__dirname, '../data') });
+app.use(['/api/money', '/money'], require('./money').gate(requireAuth));
 app.use(requireAuth);                 // everything below requires a session
 app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1790201502191), defined below
 require('./grimoire-proxy').mountGrimoirePreview(app, { isAdminReq: (req) => isAdminReq(req) });   // /grimoire-next/ preview (2026-11-10)
@@ -72,6 +76,7 @@ require('./grimoire-proxy').mountGrimoirePreview(app, { isAdminReq: (req) => isA
 app.get('/nutrition', (req, res) => (req.user && req.user.role === 'guest') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
 // Direct link to Subscriptions (admin only; the app itself keeps non-admins on Home). The API enforces admin on its own routes.
 app.get('/subscriptions', (req, res) => (req.user && req.user.role !== 'admin') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
+app.get('/money', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));   // only alex gets here (money gate above)
 app.get('/kitchen', (req, res) => (req.user && req.user.role === 'guest') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
 app.use(express.static(path.join(__dirname, '../public')));
 const MEDIA_DIR = path.join(__dirname, '../data/media');
@@ -1274,6 +1279,7 @@ const kitchenHousehold = {
 require('./kitchen').create({ dataDir: DATA_DIR, limits: aiLimits, household: kitchenHousehold }).mount(app, { ownerName });   // Kitchen tab: inventory, meal planner, assistant (prototype, 2026-11-24)
 errorReport.mount(app);   // POST /api/client-error: browser errors for the nightly loop (public/error-report.js)
 subscriptions.mount(app, { isAdminReq, completeScheduled: completeTaskLocked });   // Subscriptions page: admin only, checked on each route (no non-admin allowlist line on purpose)
+moneyApi.mount(app);   // Money page API: alex session only (gate before requireAuth + a second check in money.js); non-admins never reach authorizeRole's allowlist
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./backups-status').create().mount(app, { isAdminReq });   // Server tab > Health & Stats: read-only Backups card (filesystem only, no restic)
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
@@ -2247,7 +2253,14 @@ const AGENT_TOOLS_DECLARATION = [
   }
 ];
 
-function executeLocalTool(toolName, args, role, sessionId) {
+// Both checkouts' money folders (live and staging), whichever this process is.
+const MONEY_DATA_DIRS = [...new Set([path.join(__dirname, '../data/money'), '/home/ubuntu/dashboard/data/money', '/home/ubuntu/dashboard-staging/data/money'])];
+// Every tool call goes through the money wall first (src/money.js guardToolExecutor), for every role and engine that
+// uses this executor: file tools can't reach data/money, run_bash/read_file output holding the money store's marker is
+// withheld, and after a web search a turn can't run shell commands or plant an auto-run prompt (Opus re-reviews S1, SF1).
+// Callers pass one `turn` object per model turn.
+const executeLocalTool = require('./money').guardToolExecutor(executeLocalToolRaw, { moneyDirs: MONEY_DATA_DIRS });
+function executeLocalToolRaw(toolName, args, role, sessionId) {
   return new Promise((resolve) => {
     if (role === 'query') {
       if (toolName === 'write_file') {
@@ -3114,6 +3127,7 @@ async function runOllamaOpenAITurn(session, promptText, systemInstruction, model
 
   const MAX_TOOL_TURNS = 120;
   let turns = 0;
+  const toolTurn = {};   // one per model turn: remembers a web search (money.js guardToolExecutor taint)
   let hitGuard = false;
   let finalResponseText = '';
 
@@ -3185,7 +3199,7 @@ async function runOllamaOpenAITurn(session, promptText, systemInstruction, model
       let args = {};
       try { args = JSON.parse(functionCall.arguments); } catch (e) { /* ignore parse error */ }
       
-      const toolResult = await executeLocalTool(functionCall.name, args || {}, session.role, session.id);
+      const toolResult = await executeLocalTool(functionCall.name, args || {}, session.role, session.id, toolTurn);
       toolExecutions.push({ name: functionCall.name, args, result: toolResult });
       if (ctrl && typeof ctrl.onTool === 'function') ctrl.onTool({ name: functionCall.name, args, result: toolResult });
       
@@ -3217,6 +3231,8 @@ async function runClaudeHeavyTurn(session, promptText, systemInstruction, modelI
       effectivePrompt = `[Previous Conversation Context]\n${historyContext}\n\n[New Request]\n${promptText}`;
     }
     const args = ['-p', effectivePrompt, '--output-format', 'json', '--append-system-prompt', systemInstruction];
+    // Every role: Claude Code may not Read/Edit/Write either checkout's data/money (src/money.js CLAUDE_DENY_SETTINGS, SF2).
+    args.push('--settings', require('./money').CLAUDE_DENY_SETTINGS);
     if (resumeId) args.push('--resume', resumeId);
     // apiModel is null/undefined for claude-heavy — CLI default, unchanged from prior behavior.
     if (apiModel) args.push('--model', apiModel);
@@ -3676,6 +3692,7 @@ EDIT, DON'T REBUILD: when asked to change something, re-read the file and change
     // done. Hitting the guard is an anomaly and is reported as one, never silently.
     const MAX_TOOL_TURNS = 120;
     let turns = 0;
+    const toolTurn = {};   // one per model turn: remembers a web search (money.js guardToolExecutor taint)
     let hitGuard = false;
     const recentCalls = [];
     while (candidate && candidate.content && candidate.content.parts) {
@@ -3701,7 +3718,7 @@ EDIT, DON'T REBUILD: when asked to change something, re-read the file and change
       const interim = candidate.content.parts.filter(pp => pp.text).map(pp => pp.text).join(' ').trim();
       if (interim && ctrl && typeof ctrl.onProgress === 'function') ctrl.onProgress(interim);
 
-      const toolResult = await executeLocalTool(functionCall.name, functionCall.args || {}, session.role, session.id);
+      const toolResult = await executeLocalTool(functionCall.name, functionCall.args || {}, session.role, session.id, toolTurn);
       toolExecutions.push({ name: functionCall.name, args: functionCall.args, result: toolResult });
       if (ctrl && typeof ctrl.onTool === 'function') {
         ctrl.onTool({ name: functionCall.name, args: functionCall.args, result: toolResult });
@@ -4576,7 +4593,7 @@ app.delete('/api/todo/tasks/:id', (req, res) => {
 const automation = require('./task-automation').create({
   store: todoStore, engine: todoEngine, sharing,
   onDeadLetter: (job, why) => {
-    const r = tickets.create({ type: 'bug', title: `Task automation stuck: ${job.rule} (${(job.task && job.task.name) || job.key})`, dedupeKey: `automation-dead:${job.key}`,
+    const r = tickets.create({ type: 'bug', title: `Task automation stuck: ${job.rule} (${(job.task && job.task.id) || job.key})`, dedupeKey: `automation-dead:${job.key}`,
       body: `The automation job ${job.key} gave up after ${job.attempts} tries: ${why}\nIt is in data/automation-dead.json; nothing was undone.` });
     if (r.error) throw new Error(r.error);
   },

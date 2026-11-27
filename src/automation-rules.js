@@ -30,5 +30,8 @@ automation.register('waits-for', { onComplete: require('./waits-for').rule });
 // Pages (VPS PM, 2026-11-27): a page with removeWhenDone: [taskId, ...] moves itself to Trash Pending when all those
 // tasks are done (src/page-cleanup.js). Safe to run twice (the registry entry is gone after the first run).
 automation.register('page-cleanup', { onComplete: require('./page-cleanup').rule({ dataDir: require('./todo-store').DATA_DIR, pendingDir: require('./trash-pending').defaultDirs().pendingDir }) });
+// Money (VPS PM, 2026-11-26): checking off "Set the subscription card's autopay to $T" records T as the subscription
+// card's actual autopay on the Money page (src/money.js autopayRule). Safe to run twice (same amount = no change).
+automation.register('money-autopay', { onComplete: require('./money').autopayRule(require('./todo-store').DATA_DIR) });
 
 module.exports = automation;

@@ -254,5 +254,5 @@ function mount(app, { isAdminReq, completeScheduled }) {
   });
 }
 
-module.exports = { SUBS_FILE, AUTO_KIND, SETTINGS, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, applyOnCard, markOnCard, onTaskCompleted,
+module.exports = { SUBS_FILE, AUTO_KIND, SETTINGS, BUFFER, MIN_PAYMENT, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, applyOnCard, markOnCard, onTaskCompleted,
   computeTotals, validateNew, switchDueDate, planCreate, createSubscription, mount };
