@@ -27,4 +27,8 @@ automation.register('device-reach', { onComplete: require('./device-reach').rule
 // Safe to run twice (the second run finds no task still waiting on it).
 automation.register('waits-for', { onComplete: require('./waits-for').rule });
 
+// Pages (VPS PM, 2026-11-27): a page with removeWhenDone: [taskId, ...] moves itself to Trash Pending when all those
+// tasks are done (src/page-cleanup.js). Safe to run twice (the registry entry is gone after the first run).
+automation.register('page-cleanup', { onComplete: require('./page-cleanup').rule({ dataDir: require('./todo-store').DATA_DIR, pendingDir: require('./trash-pending').defaultDirs().pendingDir }) });
+
 module.exports = automation;

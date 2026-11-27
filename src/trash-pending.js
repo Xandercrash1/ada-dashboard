@@ -167,4 +167,4 @@ function create({ pendingDir, heldDir } = defaultDirs()) {
   return { list, clear, restore, deleteNow, mount };
 }
 
-module.exports = { create, HOLD_DAYS };
+module.exports = { create, defaultDirs, HOLD_DAYS };

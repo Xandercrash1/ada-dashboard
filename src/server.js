@@ -1849,6 +1849,13 @@ app.patch('/api/pages/:id', (req, res) => {
     else if (PROJECT_SLUG_RE.test(req.body.project || '')) pg.project = req.body.project;
     else return res.status(400).json({ error: 'project: lowercase slug' });
   }
+  // Pages that remove themselves (2026-11-27): removeWhenDone lists the task ids whose completion retires the page.
+  // Admin-only; null clears it. See src/page-cleanup.js.
+  if ('removeWhenDone' in req.body) {
+    if (!isAdminReq(req)) return res.status(403).json({ error: 'Only an admin can set removeWhenDone' });
+    if (req.body.removeWhenDone === null) delete pg.removeWhenDone;
+    else { const v = require('./page-cleanup').validateIds(req.body.removeWhenDone); if (v.error) return res.status(400).json({ error: v.error }); pg.removeWhenDone = v.ids; }
+  }
   writePagesRegistry(pages);
   res.json(pageView(pg));
 });

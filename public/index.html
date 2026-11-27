@@ -6164,7 +6164,9 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       const onHome = currentCanvasPage === 'home';
       const home = document.getElementById('home-view');
       home.classList.toggle('hidden', !onHome);
-      ['home-glance-banner', 'canvas-header'].forEach(id => document.getElementById(id).classList.toggle('hidden', onHome));
+      document.getElementById('canvas-header').classList.toggle('hidden', onHome);
+      // The greeting banner belongs to the legacy home; a custom page shows it only when its doc sets showGlance: true.
+      document.getElementById('home-glance-banner').classList.toggle('hidden', onHome || !(homepageDoc && homepageDoc.showGlance === true));
       if (!onHome) return false;
       document.getElementById('home-widgets').classList.add('hidden');
       // The component is a module, so it can arrive after the first draw.
@@ -6305,6 +6307,50 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       grid.querySelectorAll('.widget-measurer').forEach(w => window.widgetResizeObserver.observe(w));
       
       syncHomeStatMirrors();
+      syncTaskButtons(grid);
+    }
+
+    // Task buttons in page html (2026-11-27): <button data-task-done="TASK_ID">Purchased</button>. Hidden unless that task
+    // exists, is visible to this user (the list only holds those) and is still open. Click -> confirm -> POST complete.
+    async function syncTaskButtons(root) {
+      const els = [...root.querySelectorAll('[data-task-done]')];
+      if (!els.length) return;
+      els.forEach(el => { el.hidden = true; el.style.display = 'none'; });
+      let open = null;
+      try { const r = await fetch('/api/todo/tasks'); if (r.ok) open = new Set((await r.json()).map(t => t.id)); } catch (e) {}
+      if (!open) return;
+      els.forEach(el => {
+        const id = el.getAttribute('data-task-done');
+        if (!open.has(id)) return;
+        el.hidden = false; el.style.display = '';
+        if (el.dataset.taskBound) return;
+        el.dataset.taskBound = '1';
+        el.addEventListener('click', async (e) => {
+          e.preventDefault(); e.stopPropagation();
+          if (el.dataset.busy) return;
+          const label = (el.textContent || '').trim() || 'this';
+          if (!await adaConfirm({ title: 'Check off task', message: `Mark "${label}" as done?`, confirmLabel: 'Yes, done' })) return;
+          el.dataset.busy = '1';
+          try {
+            const r = await fetch(`/api/todo/tasks/${encodeURIComponent(id)}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+            const done = document.createElement('span');
+            done.textContent = 'Done ✓'; done.className = el.className; done.style.cssText = 'opacity:.75;cursor:default';
+            el.replaceWith(done);
+            if (typeof showAppToast === 'function') showAppToast('Task checked off', 'success');
+            // The page may have just removed itself (removeWhenDone): refresh the page list.
+            setTimeout(async () => {
+              try {
+                await loadCustomPages();
+                if (currentCanvasPage !== 'home' && !customPages.some(pg => pg.id === currentCanvasPage)) { showAppToast('This page removed itself: all its tasks are done', 'info'); switchTab('home'); }
+              } catch (_) {}
+            }, 800);
+          } catch (err) {
+            delete el.dataset.busy;
+            if (typeof showAppToast === 'function') showAppToast(`Could not check it off: ${err.message}`, 'error');
+          }
+        });
+      });
     }
 
     // Widgets can embed <span data-home-stat="todo|jobs|cpu|cpu_5m|cpu_15m|cpu_cores|bugs|ram|ram_percent|ram_total|disk_used|disk_percent|disk_free|uptime"></span> to
