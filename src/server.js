@@ -65,6 +65,10 @@ const invites = require('./invites').create({
   pageFile: path.join(__dirname, '../public/invite.html'),
 });
 invites.mountPublic(app, { getClientIp });
+// Money page (Plan — Money on the VPS): Alex's own browser session only. This gate runs requireAuth itself and turns
+// every refusal (signed out, loopback "system", other admins, 303, guests) into 404, so it must sit BEFORE requireAuth.
+const moneyApi = require('./money').create({ dataDir: path.join(__dirname, '../data') });
+app.use(['/api/money', '/money'], require('./money').gate(requireAuth));
 app.use(requireAuth);                 // everything below requires a session
 app.use((req, res, next) => authorizeRole(req, res, next));   // role wall (fb-1790201502191), defined below
 require('./grimoire-proxy').mountGrimoirePreview(app, { isAdminReq: (req) => isAdminReq(req) });   // /grimoire-next/ preview (2026-11-10)
@@ -72,6 +76,7 @@ require('./grimoire-proxy').mountGrimoirePreview(app, { isAdminReq: (req) => isA
 app.get('/nutrition', (req, res) => (req.user && req.user.role === 'guest') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
 // Direct link to Subscriptions (admin only; the app itself keeps non-admins on Home). The API enforces admin on its own routes.
 app.get('/subscriptions', (req, res) => (req.user && req.user.role !== 'admin') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
+app.get('/money', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));   // only alex gets here (money gate above)
 app.get('/kitchen', (req, res) => (req.user && req.user.role === 'guest') ? res.redirect('/') : res.sendFile(path.join(__dirname, '../public/index.html')));
 app.use(express.static(path.join(__dirname, '../public')));
 const MEDIA_DIR = path.join(__dirname, '../data/media');
@@ -1274,6 +1279,7 @@ const kitchenHousehold = {
 require('./kitchen').create({ dataDir: DATA_DIR, limits: aiLimits, household: kitchenHousehold }).mount(app, { ownerName });   // Kitchen tab: inventory, meal planner, assistant (prototype, 2026-11-24)
 errorReport.mount(app);   // POST /api/client-error: browser errors for the nightly loop (public/error-report.js)
 subscriptions.mount(app, { isAdminReq, completeScheduled: completeTaskLocked });   // Subscriptions page: admin only, checked on each route (no non-admin allowlist line on purpose)
+moneyApi.mount(app);   // Money page API: alex session only (gate before requireAuth + a second check in money.js); non-admins never reach authorizeRole's allowlist
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
 require('./backups-status').create().mount(app, { isAdminReq });   // Server tab > Health & Stats: read-only Backups card (filesystem only, no restic)
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
