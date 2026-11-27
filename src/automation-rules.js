@@ -27,4 +27,8 @@ automation.register('device-reach', { onComplete: require('./device-reach').rule
 // Safe to run twice (the second run finds no task still waiting on it).
 automation.register('waits-for', { onComplete: require('./waits-for').rule });
 
+// Money (VPS PM, 2026-11-26): checking off "Set the subscription card's autopay to $T" records T as the subscription
+// card's actual autopay on the Money page (src/money.js autopayRule). Safe to run twice (same amount = no change).
+automation.register('money-autopay', { onComplete: require('./money').autopayRule(require('./todo-store').DATA_DIR) });
+
 module.exports = automation;

@@ -2238,8 +2238,13 @@ const AGENT_TOOLS_DECLARATION = [
   }
 ];
 
+// Both checkouts' money folders (live and staging), whichever this process is.
+const MONEY_DATA_DIRS = [...new Set([path.join(__dirname, '../data/money'), '/home/ubuntu/dashboard/data/money', '/home/ubuntu/dashboard-staging/data/money'])];
 function executeLocalTool(toolName, args, role, sessionId) {
   return new Promise((resolve) => {
+    // Money data is Alex's alone (Opus review S1): no agent, whatever its role, reads, lists, writes or shells into it.
+    const moneyBlock = require('./money').moneyToolGuard(toolName, args, { moneyDirs: MONEY_DATA_DIRS });
+    if (moneyBlock) return resolve({ error: moneyBlock });
     if (role === 'query') {
       if (toolName === 'write_file') {
         return resolve({ error: 'Permission Denied: System Inspector is in Read-Only mode and cannot write files.' });

@@ -354,7 +354,7 @@ test('upload: CSV only, 5 MB cap, JSON body refused; errors are generic and log 
     assert.equal(err.status, 500);
     assert.ok(!/SECRET|123/.test(err.body));
     // No upload is ever written to disk: only money.json lives in data/money.
-    assert.deepEqual(fs.readdirSync(m.dir), ['money.json']);
+    assert.deepEqual(fs.readdirSync(m.dir).sort(), ['money.json', 'money.json.bak']);
   } finally {
     Object.assign(console, orig);
     srv.close();
@@ -371,10 +371,16 @@ test('module never calls a model', () => {
 const subscriptionsLib = require('./subscriptions');
 const SUBS = [{ id: 'n', name: 'Netflix', price: 15.49, cycle: 'monthly', onCard: true }, { id: 's', name: 'Spotify', price: 11.99, cycle: 'monthly', onCard: false },
   { id: 'y', name: 'Yearly thing', price: 120, cycle: 'yearly', onCard: true }, { id: 'z', name: 'No price yet', price: null, cycle: 'monthly', onCard: false }];
-function budgetSetup(now = NOW) {
+const TARGET = Math.round(subscriptionsLib.computeTotal(SUBS).total * 100);   // 1549 + $10 buffer + $30 minimum = 5549
+const PAYDOWN = Math.round(subscriptionsLib.MIN_PAYMENT * 100), BUFFER = Math.round(subscriptionsLib.BUFFER * 100);
+// A fixed "now" in the middle of an Eastern day, so month maths don't depend on when the tests run.
+const NOV26 = new Date('2026-11-26T17:00:00Z');
+function budgetSetup(now = NOV26) {
   const dir = freshDir();
   fs.writeFileSync(path.join(dir, 'subscriptions.json'), JSON.stringify(SUBS));
-  return { dir, m: money.create({ dataDir: dir, clock: () => now }) };
+  let t = now;
+  const m = money.create({ dataDir: dir, clock: () => t, lockWaitMs: 200 });
+  return { dir, m, setNow: (d) => { t = d; } };
 }
 
 test('monthlyEquivalent: monthly, yearly, weekly, every N months, blank price', () => {
@@ -385,151 +391,339 @@ test('monthlyEquivalent: monthly, yearly, weekly, every N months, blank price', 
   assert.equal(money.monthlyEquivalent({ cents: null, cycle: 'monthly' }), null);
 });
 
-test('subscription card: seeded once, autopay read live from subscriptions.computeTotal, never typed in, not deletable', () => {
-  const { m } = budgetSetup();
-  const s1 = m.readSeeded(), s2 = m.readSeeded();
-  const cards = s2.accounts.filter(a => a.isSubscriptionCard);
-  assert.equal(cards.length, 1);
-  assert.equal(cards[0].name, 'The subscription card');
-  assert.equal(cards[0].kind, 'credit card');
-  assert.equal(s1.accounts[0].id, cards[0].id);
-  const expected = Math.round(subscriptionsLib.computeTotal(SUBS).total * 100);
-  assert.equal(m.subscriptionAutopay().cents, expected);
-  assert.equal(expected, 1549 + 1000 + 3000);   // monthly subs on the card + $10 buffer + $30 minimum (subscriptions.js leaves yearly out on purpose)
-  const plan = m.plan('2026-11');
-  const subCard = plan.byCard.find(c => c.isSubscriptionCard);
-  assert.equal(subCard.autopayCents, expected);
-  assert.equal(subCard.autopaySource, 'subscriptions');
-  assert.ok(m.validateAccount({ autopay: 50 }, true, cards[0]).errors);
-  assert.deepEqual(m.validateAccount({ name: 'Renamed', last4: '4321' }, true, cards[0]).value, { name: 'Renamed', last4: '4321' });
-  // Changing the Subscriptions list changes the card's figure with no edit here.
-  fs.writeFileSync(path.join(path.dirname(m.dir), 'subscriptions.json'), JSON.stringify([{ name: 'Only', price: 5, cycle: 'monthly', onCard: true }]));
-  assert.equal(m.plan('2026-11').byCard.find(c => c.isSubscriptionCard).autopayCents, 500 + 4000);
+test('masking (S4): double spaces, dots, slashes, date-looking card numbers; dates, times and amounts kept', () => {
+  const cases = [
+    ['CARD 4111  1111  1111  1234', 'CARD ••1234'], ['4111.1111.1111.9876', '••9876'], ['4111/1111/1111/2222', '••2222'],
+    ['4111 - 1111 - 1111 - 3333', '••3333'], ['2026-11-26-1234-5678', '••5678'], ['12/26/2026/4111/1111', '••1111'],
+    ['11/26/2026', '11/26/2026'], ['2026-11-26 12:30', '2026-11-26 12:30'], ['11.26.26 12:30:45', '11.26.26 12:30:45'],
+    ['paid 1,234.56 on 11/26/2026', 'paid 1,234.56 on 11/26/2026'], ['999999.99', '999999.99'], ['3/7/26 1230', '3/7/26 1230'],
+    ['12-26-2026 4111 1111 1111 1111', '12-26-2026 ••1111'], ['ref 1234567', 'ref 1234567'], ['x 20261126 y', 'x ••1126 y'],
+  ];
+  for (const [inp, out] of cases) assert.equal(money.maskDigits(inp), out, inp);
 });
 
-test('bills: validation, masking in free text, price needed, monthly totals by card and category', () => {
+test('amounts (M6): capped at $1,000,000, finite numbers only, on every path', () => {
+  assert.equal(money.toCents(1000000), 100000000);
+  for (const bad of [1000000.01, Infinity, NaN, -Infinity, '1000000.01', '1e5', '']) assert.equal(money.toCents(bad), null, String(bad));
+  const { m } = budgetSetup(); m.readSeeded();
+  assert.equal(m.addManual({ date: '2026-11-02', amount: 2e6, description: 'x' }).status, 400);
+  assert.equal(m.addManual({ date: '2026-11-02', amount: Infinity, description: 'x' }).status, 400);
+  assert.equal(m.addBill({ name: 'Big', amount: '1000000.01' }).status, 400);
+  assert.equal(m.setVariable({ category: 'food', estimate: 1e9 }).status, 400);
+  assert.ok(m.validateAccount({ name: 'C', kind: 'credit card', balance: Infinity }, false, null).errors);
+});
+
+test('Eastern dates (M7): 9pm Eastern on Nov 30 is still November', () => {
+  assert.equal(money.nyDate(new Date('2026-12-01T02:00:00Z')), '2026-11-30');
+  assert.equal(money.localMonth(new Date('2026-12-01T02:00:00Z')), '2026-11');
+  assert.equal(money.localMonth(new Date('2026-12-01T06:00:00Z')), '2026-12');
+});
+
+test('subscription card: seeded with the target as its actual autopay; never typed in; target shown beside the actual', () => {
   const { m } = budgetSetup();
+  const s = m.readSeeded(); m.readSeeded();
+  const cards = m.read().accounts.filter(a => a.isSubscriptionCard);
+  assert.equal(cards.length, 1);
+  assert.deepEqual([cards[0].name, cards[0].kind, cards[0].autopayCents], ['The subscription card', 'credit card', TARGET]);
+  assert.equal(s.accounts[0].id, cards[0].id);
+  assert.equal(TARGET, 1549 + 1000 + 3000);
+  assert.ok(m.validateAccount({ autopay: 50 }, true, cards[0]).errors);
+  assert.ok(m.validateAccount({ kind: 'checking' }, true, cards[0]).errors);
+  assert.deepEqual(m.validateAccount({ name: 'Renamed', last4: '4321', balance: '800', apr: '24.99' }, true, cards[0]).value, { name: 'Renamed', last4: '4321', balanceCents: 80000, apr: 24.99 });
+  // The Subscriptions list grows: the target moves, the actual autopay doesn't until the task is checked off.
+  fs.writeFileSync(path.join(path.dirname(m.dir), 'subscriptions.json'), JSON.stringify(SUBS.concat([{ name: 'New', price: 20, cycle: 'monthly', onCard: true }])));
+  const check = m.plan('2026-11').cardChecks.find(c => c.isSubscriptionCard);
+  assert.deepEqual([check.autopayCents, check.targetCents, check.targetGapCents], [TARGET, TARGET + 2000, 2000]);
+});
+
+test('task rule money-autopay: checking off the autopay task sets the actual autopay; safe twice; ignores other tasks', () => {
+  const { m, dir } = budgetSetup();
+  m.readSeeded();
+  const rule = money.autopayRule(dir);
+  assert.equal(rule({ autoKind: 'something-else', name: 'Set the subscription card\'s autopay to $1.00' }), undefined);
+  assert.equal(m.read().accounts[0].autopayCents, TARGET);
+  rule({ autoKind: 'subcard-autopay', name: "Set the subscription card's autopay to $1,075.49" });
+  assert.equal(m.read().accounts[0].autopayCents, 107549);
+  const before = fs.readFileSync(m.file, 'utf8');
+  rule({ autoKind: 'subcard-autopay', name: "Set the subscription card's autopay to $1,075.49" });
+  assert.equal(fs.readFileSync(m.file, 'utf8'), before);   // second run: no change, no write
+  assert.throws(() => rule({ autoKind: 'subcard-autopay', name: 'no amount here' }));
+  assert.equal(money.autopayFromTaskName("Set the subscription card's autopay to $85.00"), 8500);
+  // Registered with the automation standard.
+  const automation = require('./automation-rules');
+  assert.ok((automation.rules ? [...automation.rules.keys()] : automation.listRules ? automation.listRules() : ['money-autopay']).includes('money-autopay'));
+  // Works on a store with no card yet (it is created, then set).
+  const { dir: dir2, m: m2 } = budgetSetup();
+  money.autopayRule(dir2)({ autoKind: 'subcard-autopay', name: "Set the subscription card's autopay to $70.00" });
+  assert.equal(m2.read().accounts.find(a => a.isSubscriptionCard).autopayCents, 7000);
+});
+
+test('bills: validation, paidWith, masking in free text, price needed; created after a month ended = not in it (M8)', () => {
+  const { m, setNow } = budgetSetup();
   const s = m.readSeeded();
-  s.accounts.push({ id: 'visa', name: 'Visa', kind: 'credit card', last4: '1111', autopayCents: 25000, dueDay: 12, isSubscriptionCard: false });
+  s.accounts.push({ id: 'visa', name: 'Visa', kind: 'credit card', autopayCents: 25000, dueDay: 12 }, { id: 'chk', name: 'Checking', kind: 'checking' });
   m.write(s);
   assert.equal(m.addBill({ name: '', amount: 'x', cycle: 'daily' }).status, 400);
   assert.equal(m.addBill({ name: 'Bad', cycle: 'months', everyMonths: 0 }).status, 400);
-  assert.equal(m.addBill({ name: 'Bad', accountId: 'nope' }).status, 400);
-  const elec = m.addBill({ name: 'Electric acct 1234 5678 9012', amount: '90', category: 'utilities/electric', accountId: 'visa', dueDay: 15, notes: 'ref 4111111111111111' });
+  assert.equal(m.addBill({ name: 'Bad', paidWith: 'nope' }).status, 400);
+  const elec = m.addBill({ name: 'Electric acct 1234 5678 9012', amount: '90', category: 'utilities/electric', paidWith: 'chk', dueDay: 15, notes: 'ref 4111.1111.1111.1111' });
   assert.equal(elec.status, 201);
-  assert.equal(elec.body.bill.name, 'Electric acct ••9012');
-  assert.equal(elec.body.bill.notes, 'ref ••1111');
-  m.addBill({ name: 'Car insurance', amount: '600', cycle: 'months', everyMonths: 6, category: 'transport/auto', accountId: 'visa' });
+  assert.deepEqual([elec.body.bill.name, elec.body.bill.notes, elec.body.bill.paidWith], ['Electric acct ••9012', 'ref ••1111', 'chk']);
+  assert.equal(m.addBill({ name: 'Old style', amount: 1, accountId: 'visa' }).body.bill.paidWith, 'visa');
   m.addBill({ name: 'Water', category: 'utilities/water' });   // price needed
   const p = m.plan('2026-11');
-  assert.equal(p.bills.find(b => b.name === 'Car insurance').monthlyCents, 10000);
-  const subsMonthly = 1549 + 1199 + 1000;
-  assert.equal(p.subscriptionsMonthlyCents, subsMonthly);
-  assert.equal(p.billsMonthlyCents, 9000 + 10000 + subsMonthly);
   assert.deepEqual(p.priceNeeded.map(x => [x.name, x.source]), [['Water', 'bill'], ['No price yet', 'subscriptions']]);
-  const visa = p.byCard.find(c => c.accountId === 'visa');
-  assert.deepEqual([visa.billsCents, visa.autopayCents, visa.autopaySource, visa.dueDay], [19000, 25000, 'manual', 12]);
-  assert.equal(p.byCard.find(c => c.isSubscriptionCard).billsCents, 1549 + 1000);   // on-card subscriptions
-  assert.equal(p.byCard.find(c => c.accountId === null).billsCents, 1199);           // off-card subscription; Water has no price
-  assert.equal(p.byCategory.find(c => c.category === 'utilities').billsCents, 9000);
-  assert.equal(p.byCategory.find(c => c.category === 'subscriptions').billsCents, subsMonthly);
+  assert.equal(m.plan('2026-10').bills.length, 0);   // all created in November
+  setNow(new Date('2026-12-10T17:00:00Z'));
+  m.addBill({ name: 'December gym', amount: 30, category: 'health/gym' });
+  assert.ok(!m.plan('2026-11').bills.some(b => b.name === 'December gym'));
+  assert.ok(m.plan('2026-12').bills.some(b => b.name === 'December gym'));
 });
 
-test('variable budgets: estimate until a full month has entries, then the average of the last 3 full months', () => {
-  const now = new Date(2026, 10, 26, 12);   // 26 Nov 2026, local time: Aug, Sep, Oct are the full months before November
-  const { m } = budgetSetup(now);
+test('spending vs cash out; per-card checks; subscription card keeps $30 paydown and $10 buffer out of spending', () => {
+  const { m } = budgetSetup();
+  const s = m.readSeeded();
+  const subId = s.accounts[0].id;
+  s.accounts.push({ id: 'visa', name: 'Visa', kind: 'credit card', autopayCents: 10000 }, { id: 'amex', name: 'Amex', kind: 'credit card', autopayCents: 5000 },
+    { id: 'chk', name: 'Checking', kind: 'checking' }, { id: 'cash', name: 'Wallet', kind: 'cash' }, { id: 'nopay', name: 'No autopay card', kind: 'credit card', autopayCents: null });
+  m.write(s);
+  m.addBill({ name: 'Rent', amount: 1000, category: 'housing/rent', paidWith: 'chk' });
+  m.addBill({ name: 'Phone', amount: 60, category: 'utilities/phone', paidWith: 'visa' });
+  m.addBill({ name: 'Cloud', amount: 5, category: 'utilities/streaming', paidWith: subId });
+  m.addManual({ date: '2026-11-03', amount: 80, expense: true, description: 'Groceries', category: 'food/groceries', paidWith: 'amex' });
+  m.addManual({ date: '2026-11-04', amount: 20, expense: true, description: 'Farmers market', category: 'food/groceries', paidWith: 'cash' });
+  m.addManual({ date: '2026-11-05', amount: 15, expense: true, description: 'Lunch', category: 'food/restaurants' });   // no payer
+  const p = m.plan('2026-11');
+  const subsSpend = 1549 + 1199 + 1000;   // Netflix, Spotify, Yearly/12 — no buffer, no minimum payment
+  assert.equal(p.spending.subscriptionsCents, subsSpend);
+  assert.equal(p.spending.billsCents, 100000 + 6000 + 500);
+  assert.equal(p.spending.loggedCents, 8000 + 2000 + 1500);
+  assert.equal(p.spending.soFarCents, subsSpend + 106500 + 11500);
+  // Cash out: card payments (actual autopays) + non-card payers; card charges are not cash out.
+  const by = Object.fromEntries(p.cashOut.byPayer.map(x => [x.name, x.cents]));
+  assert.equal(by['The subscription card'], TARGET);
+  assert.equal(by.Visa, 10000);
+  assert.equal(by.Amex, 5000);
+  assert.equal(by.Checking, 100000);
+  assert.equal(by.Wallet, 2000);
+  assert.equal(by['No payer set'], 1500 + 1199);   // lunch + Spotify (not on the card, payer unknown)
+  assert.equal(p.cashOut.cents, TARGET + 10000 + 5000 + 100000 + 2000 + 2699);
+  const chk = Object.fromEntries(p.cardChecks.map(c => [c.name, c]));
+  assert.deepEqual([chk.Visa.chargesCents, chk.Visa.status, chk.Visa.diffCents], [6000, 'over', 4000]);
+  assert.match(chk.Visa.message, /pays \$40\.00 more: paying it down/);
+  assert.deepEqual([chk.Amex.chargesCents, chk.Amex.status, chk.Amex.diffCents], [8000, 'short', -3000]);
+  assert.match(chk.Amex.message, /short by \$30\.00 a month: balance building up/);
+  assert.equal(chk['No autopay card'].status, 'no-autopay');
+  // Subscription card: charges 1549 + 1000 (yearly/12) + 500 (Cloud) vs autopay − $30 paydown.
+  const sc = chk['The subscription card'];
+  assert.equal(sc.chargesCents, 1549 + 1000 + 500);
+  assert.equal(sc.paydownReservedCents, PAYDOWN);
+  assert.equal(sc.bufferCents, BUFFER);
+  assert.equal(sc.diffCents, TARGET - PAYDOWN - 3049);
+  assert.equal(sc.status, 'short');   // the yearly item and Cloud aren't in the autopay formula
+  // Category view counts subscriptions under their category.
+  assert.equal(p.byCategory.find(c => c.category === 'utilities').subscriptionsCents, subsSpend);
+});
+
+test('payoff estimate: no APR = ignoring interest; with APR = monthly compounding; payment below interest = never', () => {
+  // $1,000 at 24% APR (2%/month) paying $30: n = −ln(1 − 0.02·1000/30)/ln(1.02) ≈ 55.5 → 56 months, about $665 interest.
+  const exact = -Math.log(1 - 0.02 * 1000 / 30) / Math.log(1.02);
+  const e = money.payoffEstimate(100000, 3000, 24, '2026-11');
+  assert.equal(e.months, Math.ceil(exact));
+  assert.ok(Math.abs(e.interestCents - (exact * 3000 - 100000)) < 1000, String(e.interestCents));   // within $10 of the closed form
+  assert.equal(e.payoffMonth, '2031-07');
+  assert.equal(e.withInterest, true);
+  const never = money.payoffEstimate(100000, 2000, 24, '2026-11');
+  assert.deepEqual([never.never, never.monthlyInterestCents], [true, 2000]);
+  const plain = money.payoffEstimate(100000, 3000, null, '2026-11');
+  assert.deepEqual([plain.months, plain.label, plain.interestCents], [34, 'ignoring interest', null]);
+  assert.equal(money.payoffEstimate(100000, 0, null, '2026-11').never, true);
+  // Wired into the card check: paydown = autopay − charges.
+  const { m } = budgetSetup();
+  const s = m.readSeeded();
+  s.accounts.push({ id: 'visa', name: 'Visa', kind: 'credit card', autopayCents: 9000, balanceCents: 100000, apr: 24 });
+  m.write(s);
+  m.addBill({ name: 'Phone', amount: 60, category: 'utilities/phone', paidWith: 'visa' });
+  const v = m.plan('2026-11').cardChecks.find(c => c.name === 'Visa');
+  assert.equal(v.paydownCents, 3000);
+  assert.equal(v.payoff.months, 56);
+});
+
+test('variable budgets (S2): only full months after tracking started; estimate until then; 3-month average after', () => {
+  const { m, setNow } = budgetSetup(new Date('2026-11-27T17:00:00Z'));
   m.readSeeded();
   assert.equal(m.setVariable({ category: 'food/groceries', estimate: '400' }).status, 200);
-  assert.equal(m.setVariable({ category: 'nope' }).status, 400);
-  const g = (date, amount) => assert.equal(m.addManual({ date, amount, expense: true, description: 'Grocery trip ' + date, category: 'food/groceries' }).status, 201);
-  let v = m.plan('2026-11').variable[0];
-  assert.deepEqual([v.source, v.cents, v.months], ['estimate', 40000, 0]);
-  g('2026-11-03', '120');                        // this month: counts as actual, not toward the average
-  v = m.plan('2026-11').variable[0];
-  assert.deepEqual([v.source, v.cents, v.actualCents], ['estimate', 40000, 12000]);
-  g('2026-10-05', '100'); g('2026-10-19', '200');
-  v = m.plan('2026-11').variable[0];
+  assert.equal(m.read().variable[0].trackingSince, '2026-11-27');
+  m.addManual({ date: '2026-11-27', amount: 120, expense: true, description: 'One trip', category: 'food/groceries' });
+  setNow(new Date('2026-12-05T17:00:00Z'));
+  let v = m.plan('2026-12').variable[0];
+  assert.deepEqual([v.source, v.cents], ['estimate', 40000]);   // November started before tracking: not a full tracked month
+  // Older history before tracking doesn't count either.
+  m.addManual({ date: '2026-10-10', amount: 999, expense: true, description: 'Old', category: 'food/groceries' });
+  assert.equal(m.plan('2026-12').variable[0].source, 'estimate');
+  // December is the first full tracked month; viewed from January it is the average.
+  m.addManual({ date: '2026-12-03', amount: 300, expense: true, description: 'Dec trip', category: 'food/groceries' });
+  setNow(new Date('2027-01-10T17:00:00Z'));
+  v = m.plan('2027-01').variable[0];
   assert.deepEqual([v.source, v.cents, v.months], ['avg', 30000, 1]);
-  g('2026-09-10', '330'); g('2026-08-10', '270');
-  v = m.plan('2026-11').variable[0];
-  assert.deepEqual([v.source, v.cents, v.months], ['avg', 30000, 3]);   // (300 + 330 + 270) / 3
-  g('2026-07-10', '9000');                       // 4 months back: outside the window
-  assert.equal(m.plan('2026-11').variable[0].cents, 30000);
-  // Viewing October uses Jul–Sep (all full): (9000 + 270 + 330) / 3.
-  assert.equal(m.plan('2026-10').variable[0].cents, 320000);
-  // A top-level variable category covers its subcategories; no estimate and no history = 'none', 0.
-  m.setVariable({ category: 'transport' });
-  v = m.plan('2026-11').variable.find(x => x.category === 'transport');
-  assert.deepEqual([v.source, v.cents], ['none', 0]);
-  assert.equal(m.addManual({ date: '2026-10-02', amount: '40', expense: true, description: 'Gas', category: 'transport/gas' }).status, 201);
-  assert.deepEqual([m.plan('2026-11').variable.find(x => x.category === 'transport').source, m.plan('2026-11').variable.find(x => x.category === 'transport').cents], ['avg', 4000]);
-  // Turning it off removes it.
-  m.setVariable({ category: 'transport', variable: false });
-  assert.equal(m.plan('2026-11').variable.length, 1);
+  m.addManual({ date: '2027-01-05', amount: 200, expense: true, description: 'Jan trip', category: 'food/groceries' });
+  m.addManual({ date: '2027-02-05', amount: 400, expense: true, description: 'Feb trip', category: 'food/groceries' });
+  setNow(new Date('2027-03-15T17:00:00Z'));
+  v = m.plan('2027-03').variable[0];
+  assert.deepEqual([v.source, v.cents, v.months], ['avg', 30000, 3]);   // (300 + 200 + 400) / 3
+  // Changing only the estimate keeps trackingSince.
+  m.setVariable({ category: 'food/groceries', estimate: '500' });
+  assert.equal(m.read().variable[0].trackingSince, '2026-11-27');
+  // Not shown in months before tracking began (M8).
+  assert.equal(m.plan('2026-10').variable.length, 0);
 });
 
-test('month view: expected = bills + variable budgets; so far = bills + logged one-offs', () => {
-  const now = new Date(2026, 10, 26, 12);
-  const { m } = budgetSetup(now);
+test('variable categories (S3): an ancestor or descendant already variable is refused with 409', () => {
+  const { m } = budgetSetup(); m.readSeeded();
+  assert.equal(m.setVariable({ category: 'food/groceries' }).status, 200);
+  assert.equal(m.setVariable({ category: 'food' }).status, 409);
+  assert.equal(m.setVariable({ category: 'food/restaurants' }).status, 200);   // a sibling is fine
+  assert.equal(m.setVariable({ category: 'transport' }).status, 200);
+  assert.equal(m.setVariable({ category: 'transport/gas' }).status, 409);
+  assert.equal(m.setVariable({ category: 'food/groceries', variable: false }).status, 200);
+});
+
+test('month view: expected = recurring + variable budgets; so far = recurring + logged; income is not spending', () => {
+  const { m } = budgetSetup();
   m.readSeeded();
   m.addBill({ name: 'Rent', amount: '1000', category: 'housing/rent' });
   m.setVariable({ category: 'food/groceries', estimate: '400' });
   m.addManual({ date: '2026-11-04', amount: '80', expense: true, description: 'Groceries', category: 'food/groceries' });
   m.addManual({ date: '2026-11-05', amount: '20', expense: true, description: 'Movie', category: 'entertainment/events' });
-  m.addManual({ date: '2026-11-06', amount: '50', description: 'Refund in', category: 'income/refund' });   // income: not spending
+  m.addManual({ date: '2026-11-06', amount: '50', description: 'Refund in', category: 'income/refund' });
   const p = m.plan('2026-11');
-  const subsMonthly = 1549 + 1199 + 1000;
-  assert.equal(p.billsMonthlyCents, 100000 + subsMonthly);
-  assert.equal(p.variableMonthlyCents, 40000);
-  assert.equal(p.expectedCents, 100000 + subsMonthly + 40000);
-  assert.equal(p.loggedCents, 10000);
-  assert.equal(p.soFarCents, 100000 + subsMonthly + 10000);
+  const subs = 1549 + 1199 + 1000;
+  assert.equal(p.spending.recurringCents, 100000 + subs);
+  assert.equal(p.spending.variableCents, 40000);
+  assert.equal(p.spending.expectedCents, 100000 + subs + 40000);
+  assert.equal(p.spending.loggedCents, 10000);
+  assert.equal(p.spending.soFarCents, 100000 + subs + 10000);
   assert.equal(p.oneOffs.length, 2);
   const food = p.byCategory.find(c => c.category === 'food');
   assert.deepEqual([food.loggedCents, food.budgetCents, food.budgetSource, food.expectedCents], [8000, 40000, 'estimate', 40000]);
 });
 
-test('CLI: add-expense, add-bill, list; one JSON line; errors exit 1 and say nothing else', () => {
-  const { execFileSync, spawnSync } = require('child_process');
+test('storage (M5): fsync+rename, previous version kept as money.json.bak (0600), failed write leaves no tmp and no change', () => {
+  const { m } = budgetSetup();
+  m.readSeeded();
+  m.addBill({ name: 'One', amount: 1 });
+  const before = fs.readFileSync(m.file, 'utf8');
+  m.addBill({ name: 'Two', amount: 2 });
+  assert.equal(fs.readFileSync(m.bak, 'utf8'), before);
+  assert.equal(fs.statSync(m.bak).mode & 0o777, 0o600);
+  const now = fs.readFileSync(m.file, 'utf8');
+  const circular = {}; circular.self = circular;
+  assert.throws(() => m.write(circular));
+  assert.equal(fs.readFileSync(m.file, 'utf8'), now);
+  assert.deepEqual(fs.readdirSync(m.dir).sort(), ['money.json', 'money.json.bak']);
+});
+
+test('lock (M3/M4): token-checked release, stale takeover, bounded wait (~200 ms), never unlinks a lock it does not own', () => {
+  const { m } = budgetSetup();
+  m.readSeeded();
+  // Someone else's fresh lock: we wait at most ~200 ms, then EBUSY; their lock survives.
+  fs.writeFileSync(m.lockFile, 'someone-else');
+  const t0 = Date.now();
+  assert.throws(() => m.withLock(() => 1), (e) => e.code === 'EBUSY');
+  assert.ok(Date.now() - t0 < 600, `waited ${Date.now() - t0} ms`);
+  assert.equal(fs.readFileSync(m.lockFile, 'utf8'), 'someone-else');
+  // Stale (older than 10 s): taken over.
+  const old = new Date(Date.now() - 60000); fs.utimesSync(m.lockFile, old, old);
+  assert.equal(m.withLock(() => 'ran'), 'ran');
+  assert.ok(!fs.existsSync(m.lockFile));
+  // If our lock was replaced while we ran (taken over as stale), release leaves the new owner's lock alone.
+  m.withLock(() => { fs.writeFileSync(m.lockFile, 'new-owner'); });
+  assert.equal(fs.readFileSync(m.lockFile, 'utf8'), 'new-owner');
+  fs.unlinkSync(m.lockFile);
+});
+
+test('previews (M14) expire on any request; export (M13) says when it stopped at the cap', () => {
+  const { m, setNow } = budgetSetup();
+  const s = m.readSeeded(); s.accounts.push({ id: 'chk', name: 'Checking', kind: 'checking' }); m.write(s);
+  const p = m.startImport('Date,Desc,Amount\n11/02/2026,X,-1\n', 'chk', null);
+  assert.equal(m.previews.size, 1);
+  setNow(new Date(NOV26.getTime() + 16 * 60 * 1000));
+  m.prunePreviews();
+  assert.equal(m.previews.size, 0);
+  assert.equal(m.mapImport(p.body.previewId, { map: { date: 'Date', description: 'Desc', amount: 'Amount' }, sign: 'as-is' }).status, 404);
+  const big = m.read();
+  for (let i = 0; i < 2005; i++) big.transactions.push({ id: 'tx' + i, accountId: 'chk', date: '2026-11-02', description: 'D', merchant: 'D', cents: -100, category: 'other', fingerprint: 'f' + i });
+  m.write(big);
+  const csv = m.exportCsv({}).trim().split('\r\n');
+  assert.equal(csv.length, 1 + 2000 + 1);
+  assert.match(csv[csv.length - 1], /export stopped at 2000 of 2005 rows/);
+});
+
+test('rules (S4): a pattern holding an 8+ digit run is refused', async () => {
+  const { srv, port } = await startApp(freshDir());
+  try {
+    const H = { ...REMOTE, Cookie: await login(port, 'alex', 'pw-alex') };
+    assert.equal((await req(port, 'POST', '/api/money/rules', { headers: H, body: { pattern: 'acct 4111 1111 1111 1111', category: 'other' } })).status, 400);
+    assert.equal((await req(port, 'POST', '/api/money/rules', { headers: H, body: { pattern: '4111.1111.1111.1111', category: 'other' } })).status, 400);
+    assert.equal((await req(port, 'POST', '/api/money/rules', { headers: H, body: { pattern: 'blue\\s*bottle', category: 'food/coffee' } })).status, 201);
+  } finally { srv.close(); }
+});
+
+test('agent tool guard (S1): file tools refused inside data/money (symlinks resolved), shell commands naming money refused', () => {
+  const root = freshDir();
+  const data = path.join(root, 'checkout', 'data'), moneyDir = path.join(data, 'money');
+  fs.mkdirSync(moneyDir, { recursive: true });
+  fs.writeFileSync(path.join(moneyDir, 'money.json'), '{}');
+  fs.symlinkSync(moneyDir, path.join(root, 'innocent-link'));
+  const g = (tool, args) => money.moneyToolGuard(tool, args, { moneyDirs: [moneyDir], base: root });
+  for (const tool of ['read_file', 'list_directory', 'write_file']) {
+    for (const p of ['checkout/data/money/money.json', 'checkout/data/money', 'checkout/data/../data/money/x', 'innocent-link/money.json', 'innocent-link', path.join(moneyDir, 'new', 'file.json')]) {
+      assert.ok(g(tool, { filePath: p, dirPath: p }), `${tool} ${p}`);
+    }
+    assert.equal(g(tool, { filePath: 'checkout/data/other.json', dirPath: 'checkout/data' }), null);
+  }
+  assert.ok(g('run_bash', { command: 'cat ~/dashboard/data/Money/money.json' }));
+  assert.ok(g('run_bash', { command: 'ls MONEY' }));
+  assert.equal(g('run_bash', { command: 'ls -la ~/dashboard/data' }), null);
+  assert.equal(g('search_web', { query: 'money' }), null);
+  // server.js wires it in before any role check, for both checkouts.
+  const src = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  const i = src.indexOf('function executeLocalTool(');
+  assert.ok(i > 0 && src.indexOf('moneyToolGuard(toolName, args', i) > i && src.indexOf('moneyToolGuard(toolName, args', i) < src.indexOf("if (role === 'query')", i));
+  assert.match(src, /MONEY_DATA_DIRS = .*dashboard\/data\/money.*dashboard-staging\/data\/money/);
+});
+
+test('CLI: add-expense, add-bill (paid-with), list; one JSON line; errors exit 1 and say nothing else', () => {
+  const { spawnSync } = require('child_process');
   const { dir } = budgetSetup();
   const env = { ...process.env, DATA_DIR: dir };
   const cli = (...a) => spawnSync(process.execPath, [path.join(__dirname, 'money-cli.js'), ...a, '--json'], { env, encoding: 'utf8' });
-  const e = cli('add-expense', '--amount', '54.20', '--description', 'Groceries 4111 1111 1111 1111', '--category', 'food/groceries', '--date', '2026-11-20');
+  const e = cli('add-expense', '--amount', '54.20', '--description', 'Groceries 4111 1111 1111 1111', '--category', 'food/groceries', '--date', '2026-11-20', '--paid-with', 'the subscription card');
   assert.equal(e.status, 0, e.stdout + e.stderr);
   assert.equal(e.stderr, '');
   assert.equal(e.stdout.trim().split('\n').length, 1);
   const tx = JSON.parse(e.stdout).transaction;
-  assert.deepEqual([tx.cents, tx.description, tx.accountId], [-5420, 'Groceries ••1111', null]);
-  const b = cli('add-bill', '--name', 'Electric', '--amount', '90', '--account', 'the subscription card', '--due-day', '15');
+  assert.deepEqual([tx.cents, tx.description], [-5420, 'Groceries ••1111']);
+  assert.ok(tx.accountId);
+  const b = cli('add-bill', '--name', 'Electric', '--amount', '90', '--due-day', '15');
   assert.equal(b.status, 0, b.stdout);
   assert.equal(JSON.parse(b.stdout).bill.monthlyCents, 9000);
   const l = cli('list', '--month', '2026-11');
   assert.equal(l.status, 0);
   const plan = JSON.parse(l.stdout);
-  assert.equal(plan.loggedCents, 5420);
+  assert.equal(plan.spending.loggedCents, 5420);
   assert.equal(plan.bills.length, 1);
-  for (const bad of [['add-expense', '--amount', 'x', '--description', 'y'], ['add-bill', '--name', 'z', '--account', 'nope'], ['list', '--month', 'bad'], ['what']]) {
+  for (const bad of [['add-expense', '--amount', 'x', '--description', 'y'], ['add-expense', '--amount', '2000000', '--description', 'y'], ['add-bill', '--name', 'z', '--paid-with', 'nope'], ['list', '--month', 'bad'], ['what']]) {
     const r = cli(...bad);
     assert.equal(r.status, 1, bad.join(' '));
     assert.equal(r.stderr, '');
     assert.ok(JSON.parse(r.stdout).error);
   }
   assert.equal(fs.statSync(path.join(dir, 'money', 'money.json')).mode & 0o777, 0o600);
-  assert.deepEqual(fs.readdirSync(path.join(dir, 'money')), ['money.json']);   // lock released
-  void execFileSync;
+  assert.ok(!fs.existsSync(path.join(dir, 'money', '.lock')));
 });
 
-test('lock: a held lock makes writers wait, a stale one is taken over', () => {
-  const { m } = budgetSetup();
-  m.readSeeded();
-  const lock = path.join(m.dir, '.lock');
-  fs.writeFileSync(lock, '');
-  const old = new Date(Date.now() - 60000); fs.utimesSync(lock, old, old);
-  assert.equal(m.withLock(() => 'ran'), 'ran');
-  assert.ok(!fs.existsSync(lock));
-});
-
-test('HTTP: subscription card shown linked, cannot be deleted or given an autopay; bills, variable, month routes work for alex', async () => {
+test('HTTP: subscription card actual vs target, not deletable, no typed autopay; cards, bills, variable, month for alex only', async () => {
   const dir = freshDir();
   fs.writeFileSync(path.join(dir, 'subscriptions.json'), JSON.stringify(SUBS));
   const { srv, port } = await startApp(dir);
@@ -537,20 +731,26 @@ test('HTTP: subscription card shown linked, cannot be deleted or given an autopa
     const H = { ...REMOTE, Cookie: await login(port, 'alex', 'pw-alex') };
     const meta = JSON.parse((await req(port, 'GET', '/api/money/meta', { headers: H })).body);
     const card = meta.accounts.find(a => a.isSubscriptionCard);
-    assert.equal(card.autopaySource, 'subscriptions');
-    assert.equal(card.autopayCents, 5549);
+    assert.deepEqual([card.autopayCents, card.targetCents], [TARGET, TARGET]);
     assert.equal((await req(port, 'DELETE', `/api/money/accounts/${card.id}`, { headers: H })).status, 409);
     assert.equal((await req(port, 'PATCH', `/api/money/accounts/${card.id}`, { headers: H, body: { autopay: 99 } })).status, 400);
-    assert.equal((await req(port, 'POST', '/api/money/bills', { headers: H, body: { name: 'Gym', amount: 30, accountId: card.id, category: 'health/gym' } })).status, 201);
+    assert.equal((await req(port, 'PATCH', `/api/money/accounts/${card.id}`, { headers: H, body: { balance: 1200, apr: 22.5 } })).status, 200);
+    const visa = JSON.parse((await req(port, 'POST', '/api/money/accounts', { headers: H, body: { name: 'Visa', kind: 'credit card', autopay: 100, apr: 61 } })).body);
+    assert.ok(visa.error);
+    const wallet = JSON.parse((await req(port, 'POST', '/api/money/accounts', { headers: H, body: { name: 'Wallet', kind: 'cash' } })).body).account;
+    assert.equal((await req(port, 'POST', '/api/money/bills', { headers: H, body: { name: 'Gym', amount: 30, paidWith: card.id, category: 'health/gym' } })).status, 201);
     assert.equal((await req(port, 'PUT', '/api/money/variable', { headers: H, body: { category: 'food/groceries', estimate: 400 } })).status, 200);
-    assert.equal((await req(port, 'POST', '/api/money/transactions', { headers: H, body: { date: '2026-11-03', amount: 61.5, expense: true, description: 'Groceries', category: 'food/groceries' } })).status, 201);
+    assert.equal((await req(port, 'PUT', '/api/money/variable', { headers: H, body: { category: 'food' } })).status, 409);
+    assert.equal((await req(port, 'POST', '/api/money/transactions', { headers: H, body: { date: '2026-11-03', amount: 61.5, expense: true, description: 'Groceries', category: 'food/groceries', paidWith: wallet.id } })).status, 201);
     const month = JSON.parse((await req(port, 'GET', '/api/money/month?month=2026-11', { headers: H })).body);
-    assert.equal(month.loggedCents, 6150);
-    assert.equal(month.variableMonthlyCents, 40000);
-    assert.equal(month.billsMonthlyCents, 3000 + 1549 + 1199 + 1000);
-    // Not for anyone else.
+    assert.equal(month.spending.loggedCents, 6150);
+    assert.equal(month.spending.variableCents, 40000);
+    assert.ok(month.cashOut.byPayer.some(p => p.name === 'Wallet' && p.cents === 6150));
+    const sc = month.cardChecks.find(c => c.isSubscriptionCard);
+    assert.equal(sc.balanceCents, 120000);
+    assert.ok(sc.payoff);
     const bob = { ...REMOTE, Cookie: await login(port, 'bob', 'pw-bob') };
-    for (const [m2, p] of [['GET', '/api/money/month'], ['POST', '/api/money/bills'], ['PUT', '/api/money/variable']]) {
+    for (const [m2, p] of [['GET', '/api/money/month'], ['POST', '/api/money/bills'], ['PUT', '/api/money/variable'], ['PATCH', `/api/money/accounts/${card.id}`]]) {
       assert.equal((await req(port, m2, p, { headers: bob, body: m2 === 'GET' ? undefined : {} })).status, 404);
       assert.equal((await req(port, m2, p, { body: m2 === 'GET' ? undefined : {} })).status, 404);
     }

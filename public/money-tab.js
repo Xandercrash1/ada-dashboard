@@ -158,30 +158,43 @@
   function monthView() {
     const p = S.plan;
     if (!p) return `<div class="${card} text-sm">Loading…</div>`;
-    const totals = `<div class="grid gap-3 sm:grid-cols-2">
-      <div class="${card}"><div class="${muted}">Expected monthly spend</div><div class="text-2xl font-bold">${esc(usd(p.expectedCents))}</div>
-        <div class="mt-1 ${muted}">bills ${esc(usd(p.billsMonthlyCents))} + variable ${esc(usd(p.variableMonthlyCents))}</div></div>
-      <div class="${card}"><div class="${muted}">${esc(monthLabel(p.month))} so far</div><div class="text-2xl font-bold">${esc(usd(p.soFarCents))}</div>
-        <div class="mt-1 ${muted}">bills ${esc(usd(p.billsMonthlyCents))} + logged expenses ${esc(usd(p.loggedCents))}</div></div></div>`;
+    const sp = p.spending, co = p.cashOut;
+    const totals = `<div class="grid gap-3 sm:grid-cols-3">
+      <div class="${card}"><div class="${muted}">Spending, expected per month</div><div class="text-2xl font-bold">${esc(usd(sp.expectedCents))}</div>
+        <div class="mt-1 ${muted}">bills ${esc(usd(sp.billsCents))} + subscriptions ${esc(usd(sp.subscriptionsCents))} + variable ${esc(usd(sp.variableCents))}</div></div>
+      <div class="${card}"><div class="${muted}">Spending, ${esc(monthLabel(p.month))} so far</div><div class="text-2xl font-bold">${esc(usd(sp.soFarCents))}</div>
+        <div class="mt-1 ${muted}">bills and subscriptions ${esc(usd(sp.recurringCents))} + logged ${esc(usd(sp.loggedCents))}</div></div>
+      <div class="${card}"><div class="${muted}">Cash out (leaving the bank)</div><div class="text-2xl font-bold">${esc(usd(co.cents))}</div>
+        <div class="mt-1 ${muted}">card payments + what checking, savings and cash pay directly</div></div></div>`;
     const need = p.priceNeeded.length ? `<div class="${card} border-amber-500/40 bg-amber-500/10 text-sm"><div class="font-semibold">Price needed</div>
       <div class="mt-1">${p.priceNeeded.map((x) => `${esc(x.name)}${x.source === 'subscriptions' ? ' <span class="' + muted + '">(Subscriptions page)</span>' : ''}`).join(' · ')}</div></div>` : '';
-    const cards = p.byCard.map((c) => `<tr class="${tr}"><td class="py-2 pr-3"><div class="font-medium">${esc(c.name)}${c.last4 ? ' ••' + esc(c.last4) : ''}</div>
-        ${c.isSubscriptionCard ? `<div class="${muted}">linked to the Subscriptions page (read-only)</div>` : ''}</td>
-      <td class="py-2 pr-3 text-right whitespace-nowrap">${c.autopayCents == null ? `<span class="${muted}">${c.accountId ? 'not set' : ''}</span>` : esc(usd(c.autopayCents))}${c.isSubscriptionCard ? `<div class="${muted}">live</div>` : ''}</td>
-      <td class="py-2 pr-3 text-right">${c.dueDay ? esc(c.dueDay) : ''}</td>
-      <td class="py-2 pr-3 text-right whitespace-nowrap">${esc(usd(c.billsCents))}</td><td class="py-2 text-right whitespace-nowrap">${esc(usd(c.loggedCents))}</td></tr>`).join('');
-    const cats = p.byCategory.map((c) => `<tr class="${tr}"><td class="py-2 pr-3">${esc(catLabel(c.category))}</td><td class="py-2 pr-3 text-right">${c.billsCents ? esc(usd(c.billsCents)) : ''}</td>
+    const tone = { short: 'border-rose-500/40 bg-rose-500/10', covers: '', over: '', 'no-autopay': 'border-amber-500/40 bg-amber-500/10' };
+    const payoffText = (o) => {
+      if (!o) return '';
+      if (o.never) return `<div class="text-rose-500">Never pays off at this rate${o.monthlyInterestCents ? `: interest is ${esc(usd(o.monthlyInterestCents))} a month` : ''}.</div>`;
+      return `<div>Rough payoff: ${o.months} months (${esc(monthLabel(o.payoffMonth))})${o.withInterest ? `, about ${esc(usd(o.interestCents))} interest, ${esc(o.label)}` : ', ignoring interest'}.</div>`;
+    };
+    const checks = p.cardChecks.map((c) => `<div class="${card} ${tone[c.status] || ''} text-sm space-y-1">
+      <div class="flex flex-wrap justify-between gap-2"><span class="font-semibold">${esc(c.name)}${c.last4 ? ' ••' + esc(c.last4) : ''}</span>
+        <span>${c.autopayCents == null ? 'no autopay set' : 'autopay ' + esc(usd(c.autopayCents))}${c.dueDay ? ' · due day ' + esc(c.dueDay) : ''}</span></div>
+      ${c.isSubscriptionCard ? `<div class="${muted}">Linked to the Subscriptions page: target ${esc(usd(c.targetCents))}, set ${esc(usd(c.autopayCents))}${c.targetGapCents ? ` <span class="text-amber-600">(gap ${esc(usd(c.targetGapCents))})</span>` : ''}. Updates when you check off its autopay task.</div>` : ''}
+      <div>Charges ${esc(usd(c.chargesCents))}/mo (bills and subscriptions ${esc(usd(c.recurringChargesCents))}, expenses this month ${esc(usd(c.expenseChargesCents))})${c.isSubscriptionCard ? ` · ${esc(usd(c.paydownReservedCents))} paying down the old balance · ${esc(usd(c.bufferCents))} buffer` : ''}</div>
+      <div class="font-medium ${c.status === 'short' ? 'text-rose-600 dark:text-rose-400' : c.status === 'no-autopay' ? 'text-amber-600' : 'text-emerald-600 dark:text-emerald-400'}">${esc(c.message)}</div>
+      ${c.balanceCents ? `<div class="${muted}">Balance ${esc(usd(c.balanceCents))}${c.apr != null ? ' at ' + esc(c.apr) + '% APR' : ''}</div>${payoffText(c.payoff)}` : ''}</div>`).join('');
+    const payers = co.byPayer.map((x) => `<tr class="${tr}"><td class="py-1.5 pr-3">${esc(x.name)}${x.unset ? ` <span class="${muted}">(set a payer)</span>` : ''}</td>
+      <td class="py-1.5 pr-3 ${muted}">${x.kind === 'credit card' ? (x.autopayMissing ? 'card payment not set' : 'card payment') : 'paid directly'}</td><td class="py-1.5 text-right">${esc(usd(x.cents))}</td></tr>`).join('');
+    const cats = p.byCategory.map((c) => `<tr class="${tr}"><td class="py-2 pr-3">${esc(c.category)}</td><td class="py-2 pr-3 text-right">${c.billsCents + c.subscriptionsCents ? esc(usd(c.billsCents + c.subscriptionsCents)) : ''}</td>
       <td class="py-2 pr-3 text-right whitespace-nowrap">${c.budgetCents == null ? '' : esc(usd(c.budgetCents)) + `<div class="${muted}">${esc(c.budgetSource === 'avg' ? 'avg' : c.budgetSource === 'estimate' ? 'estimate' : 'no estimate')}</div>`}</td>
       <td class="py-2 pr-3 text-right">${c.loggedCents ? esc(usd(c.loggedCents)) : ''}</td><td class="py-2 text-right font-medium">${esc(usd(c.expectedCents))}</td></tr>`).join('');
     const vars = p.variable.length ? p.variable.map((v) => { const pct = v.cents ? Math.min(100, v.actualCents / v.cents * 100) : 0;
       return `<tr class="${tr}"><td class="py-2 pr-3">${esc(v.category)}</td><td class="py-2 pr-3 w-1/3"><div class="h-2 rounded-full bg-black/10 dark:bg-white/10"><div class="h-2 rounded-full ${v.cents && v.actualCents > v.cents ? 'bg-rose-500' : 'bg-indigo-500'}" style="width:${pct.toFixed(1)}%"></div></div></td>
         <td class="py-2 pr-3 text-right whitespace-nowrap">${esc(usd(v.actualCents))} / ${esc(usd(v.cents))}</td><td class="py-2 ${muted}">${esc(srcLabel(v))}</td></tr>`; }).join('') : `<tr><td class="${muted}">No variable categories yet (Cards & budgets).</td></tr>`;
-    const sc = p.subscriptionCard && p.subscriptionCard.items.length ? `<div class="${muted} mt-2">Subscription card autopay = ${p.subscriptionCard.items.map((i) => esc(i.name) + ' ' + esc(usd(i.cents))).join(' + ')} + buffer + minimum payment (Subscriptions page)</div>` : '';
     const th = (l, r) => `<th class="pb-2 ${r ? 'text-right' : 'text-left'} font-medium">${l}</th>`;
     return `<div class="space-y-4">${totals}${need}
-      <div class="${card} overflow-x-auto"><div class="font-semibold mb-2">By card</div><table class="w-full text-sm"><thead><tr class="${muted}">${th('Card')}${th('Autopay', 1)}${th('Due', 1)}${th('Bills /mo', 1)}${th('Logged', 1)}</tr></thead><tbody>${cards}</tbody></table>${sc}</div>
+      <div class="space-y-2"><div class="font-semibold">Each card: charges vs payment</div>${checks || `<div class="${card} ${muted}">No credit cards yet.</div>`}</div>
+      <div class="${card} overflow-x-auto"><div class="font-semibold mb-2">Cash out by payer</div><table class="w-full text-sm">${payers}</table></div>
       <div class="${card} overflow-x-auto"><div class="font-semibold mb-2">Variable spending this month</div><table class="w-full text-sm">${vars}</table></div>
-      <div class="${card} overflow-x-auto"><div class="font-semibold mb-2">By category</div><table class="w-full text-sm"><thead><tr class="${muted}">${th('Category')}${th('Bills', 1)}${th('Budget', 1)}${th('Logged', 1)}${th('Expected', 1)}</tr></thead><tbody>${cats || `<tr><td class="${muted}">Nothing yet.</td></tr>`}</tbody></table></div>
+      <div class="${card} overflow-x-auto"><div class="font-semibold mb-2">Spending by category</div><table class="w-full text-sm"><thead><tr class="${muted}">${th('Category')}${th('Bills + subs', 1)}${th('Budget', 1)}${th('Logged', 1)}${th('Expected', 1)}</tr></thead><tbody>${cats || `<tr><td class="${muted}">Nothing yet.</td></tr>`}</tbody></table></div>
     </div>`;
   }
 
@@ -201,7 +214,7 @@
         <input id="bill-amt" class="${input}" placeholder="Amount (blank = price needed)" inputmode="decimal" value="${f.cents == null ? '' : esc((f.cents / 100).toFixed(2))}">
         <div class="flex gap-2"><select id="bill-cycle" class="${input} flex-1">${m.cycles.map((c) => `<option value="${esc(c)}" ${f.cycle === c ? 'selected' : ''}>${c === 'months' ? 'every N months' : esc(c)}</option>`).join('')}</select>
         <input id="bill-every" class="${input} w-16" placeholder="N" inputmode="numeric" value="${esc(f.everyMonths || '')}" title="N for every N months"></div>
-        <select id="bill-cat" class="${input}">${catOptions(f.category)}</select><select id="bill-acct" class="${input}">${acctOptions(f.accountId || '', 'Paid from… (optional)')}</select>
+        <select id="bill-cat" class="${input}">${catOptions(f.category)}</select><select id="bill-acct" class="${input}">${acctOptions(f.paidWith || f.accountId || '', 'Paid with… (optional)')}</select>
         <input id="bill-due" class="${input}" placeholder="Due day (optional)" inputmode="numeric" value="${esc(f.dueDay || '')}"></div>
       <input id="bill-notes" class="${input} w-full" placeholder="Notes (optional)" maxlength="500" value="${esc(f.notes || '')}">
       <div class="flex gap-2"><button type="button" class="${primary}" data-act="${e ? 'savebill' : 'addbill'}" ${e ? `data-id="${esc(e.id)}"` : ''}>${e ? 'Save' : 'Add bill'}</button>${e ? `<button type="button" class="${ghost}" data-act="cancel-edit">Cancel</button>` : ''}</div></div>`;
@@ -220,7 +233,7 @@
         <input id="exp-amt" class="${input}" placeholder="Amount spent, e.g. 54.20" inputmode="decimal">
         <input id="exp-desc" class="${input}" placeholder="What was it?" maxlength="200">
         <select id="exp-cat" class="${input}"><option value="">Category: use the rules</option>${catOptions(S.lastExpCat || '')}</select>
-        <select id="exp-acct" class="${input}">${acctOptions(S.lastExpAcct || '', 'Card (optional)')}</select>
+        <select id="exp-acct" class="${input}">${acctOptions(S.lastExpAcct || '', 'Paid with… (optional)')}</select>
         <button type="button" class="${primary}" data-act="addexp">Add</button></div></div>`;
     const rows = p ? p.oneOffs.slice().reverse().map((t) => `<tr class="${tr}"><td class="py-2 pr-3 whitespace-nowrap">${esc(t.date)}</td><td class="py-2 pr-3">${esc(t.description)}</td>
       <td class="py-2 pr-3">${esc(t.category)}</td><td class="py-2 pr-3">${esc(accts.get(t.accountId) || '')}</td><td class="py-2 pr-3 text-right whitespace-nowrap">${esc(usd(-t.cents))}</td>
@@ -233,8 +246,8 @@
   function cardsView() {
     const m = S.meta, e = S.edit && S.edit.kind === 'card' ? S.edit.item : null;
     const rows = m.accounts.map((a) => `<tr class="${tr} align-top"><td class="py-2 pr-3"><div class="font-medium">${esc(a.name)}${a.last4 ? ' ••' + esc(a.last4) : ''}</div><div class="${muted}">${esc(a.kind)}</div></td>
-      <td class="py-2 pr-3 whitespace-nowrap">${a.isSubscriptionCard ? `${esc(usd(a.autopayCents))} <span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-indigo-500/15 text-indigo-500">linked: Subscriptions</span>` : a.autopayCents == null ? `<span class="${muted}">no autopay set</span>` : esc(usd(a.autopayCents))}</td>
-      <td class="py-2 pr-3">${a.dueDay ? 'due day ' + esc(a.dueDay) : ''}</td>
+      <td class="py-2 pr-3 whitespace-nowrap">${a.isSubscriptionCard ? `set ${esc(usd(a.autopayCents))} · target ${esc(usd(a.targetCents))} <span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-indigo-500/15 text-indigo-500">linked: Subscriptions</span>` : a.autopayCents == null ? `<span class="${muted}">no autopay set</span>` : esc(usd(a.autopayCents))}</td>
+      <td class="py-2 pr-3">${a.dueDay ? 'due day ' + esc(a.dueDay) : ''}${a.balanceCents != null ? `<div class="${muted}">balance ${esc(usd(a.balanceCents))}${a.apr != null ? ' · ' + esc(a.apr) + '% APR' : ''}</div>` : ''}</td>
       <td class="py-2 whitespace-nowrap"><button type="button" class="text-xs hover:underline mr-2" data-act="editcard" data-id="${esc(a.id)}">Edit</button>${a.isSubscriptionCard ? '' : `<button type="button" class="text-xs text-rose-500 hover:underline" data-act="delacct" data-id="${esc(a.id)}">Delete</button>`}</td></tr>`).join('');
     const f = e || { name: '', kind: 'credit card', last4: '', autopayCents: null, dueDay: '' };
     const sub = !!(e && e.isSubscriptionCard);
@@ -242,8 +255,10 @@
       <div class="grid gap-2 sm:grid-cols-3"><input id="acct-name" class="${input}" placeholder="Name" maxlength="60" value="${esc(f.name)}">
         <select id="acct-kind" class="${input}" ${sub ? 'disabled' : ''}>${m.kinds.map((k) => `<option value="${esc(k)}" ${f.kind === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
         <input id="acct-last4" class="${input}" placeholder="Last 4 (optional)" maxlength="4" inputmode="numeric" value="${esc(f.last4 || '')}">
-        ${sub ? `<div class="${input} ${muted}">Autopay ${esc(usd(f.autopayCents))}: read from the Subscriptions page</div>` : `<input id="acct-autopay" class="${input}" placeholder="Monthly autopay (optional)" inputmode="decimal" value="${f.autopayCents == null ? '' : esc((f.autopayCents / 100).toFixed(2))}">`}
-        <input id="acct-due" class="${input}" placeholder="Due day (optional)" inputmode="numeric" value="${esc(f.dueDay || '')}"></div>
+        ${sub ? `<div class="${input} ${muted}">Autopay set ${esc(usd(f.autopayCents))} (target ${esc(usd(f.targetCents))}): changes when you check off its Subscriptions task</div>` : `<input id="acct-autopay" class="${input}" placeholder="Monthly autopay (optional)" inputmode="decimal" value="${f.autopayCents == null ? '' : esc((f.autopayCents / 100).toFixed(2))}">`}
+        <input id="acct-due" class="${input}" placeholder="Due day (optional)" inputmode="numeric" value="${esc(f.dueDay || '')}">
+        <input id="acct-balance" class="${input}" placeholder="Balance owed (optional)" inputmode="decimal" value="${f.balanceCents == null ? '' : esc((f.balanceCents / 100).toFixed(2))}">
+        <input id="acct-apr" class="${input}" placeholder="APR % (optional)" inputmode="decimal" value="${f.apr == null ? '' : esc(f.apr)}"></div>
       <div class="flex gap-2"><button type="button" class="${primary}" data-act="${e ? 'savecard' : 'addacct'}" ${e ? `data-id="${esc(e.id)}"` : ''}>${e ? 'Save' : 'Add'}</button>${e ? `<button type="button" class="${ghost}" data-act="cancel-edit">Cancel</button>` : ''}</div></div>`;
     const vars = m.variable.map((v) => `<tr class="${tr}"><td class="py-2 pr-3">${esc(v.category)}</td><td class="py-2 pr-3">${v.estimateCents == null ? `<span class="${muted}">no estimate</span>` : esc(usd(v.estimateCents)) + '/mo'}</td>
       <td class="py-2"><button type="button" class="text-xs text-rose-500 hover:underline" data-act="unvar" data-cat="${esc(v.category)}">Remove</button></td></tr>`).join('');
@@ -319,14 +334,14 @@
     if (act === 'delacct') { if (!confirm('Delete this account?')) return; return run(() => api('/accounts/' + encodeURIComponent(id), { method: 'DELETE' })); }
     if (act === 'delprof') { if (!confirm('Delete this profile?')) return; return run(() => api('/profiles/' + encodeURIComponent(id), { method: 'DELETE' })); }
     if (act === 'delrule') { if (!confirm('Delete this rule?')) return; return run(() => api('/rules/' + encodeURIComponent(id), { method: 'DELETE' })); }
-    const cardBody = () => { const b = { name: val('acct-name'), kind: val('acct-kind'), last4: val('acct-last4') || null, dueDay: val('acct-due') || null };
+    const cardBody = () => { const b = { name: val('acct-name'), kind: val('acct-kind'), last4: val('acct-last4') || null, dueDay: val('acct-due') || null, balance: val('acct-balance') || null, apr: val('acct-apr') || null };
       if (document.getElementById('acct-autopay')) b.autopay = val('acct-autopay') || null; return b; };
     if (act === 'addacct') return run(async () => { await api('/accounts', { method: 'POST', body: cardBody() }); S.msg = 'Card added.'; });
     if (act === 'editcard') { S.edit = { kind: 'card', item: S.meta.accounts.find((a) => a.id === id) }; return render(); }
     if (act === 'savecard') return run(async () => { const b = cardBody(); if (S.edit && S.edit.item.isSubscriptionCard) delete b.kind; await api('/accounts/' + encodeURIComponent(id), { method: 'PATCH', body: b }); S.edit = null; S.msg = 'Card saved.'; });
     if (act === 'cancel-edit') { S.edit = null; return render(); }
     const billBody = () => ({ name: val('bill-name'), amount: val('bill-amt') || null, cycle: val('bill-cycle'), everyMonths: val('bill-cycle') === 'months' ? parseInt(val('bill-every'), 10) : undefined,
-      category: val('bill-cat'), accountId: val('bill-acct') || null, dueDay: val('bill-due') || null, notes: val('bill-notes') });
+      category: val('bill-cat'), paidWith: val('bill-acct') || null, dueDay: val('bill-due') || null, notes: val('bill-notes') });
     if (act === 'addbill') return run(async () => { await api('/bills', { method: 'POST', body: billBody() }); S.msg = 'Bill added.'; });
     if (act === 'editbill') { S.edit = { kind: 'bill', item: S.meta.bills.find((b) => b.id === id) }; return render(); }
     if (act === 'savebill') return run(async () => { await api('/bills/' + encodeURIComponent(id), { method: 'PATCH', body: billBody() }); S.edit = null; S.msg = 'Bill saved.'; });
@@ -335,7 +350,7 @@
     if (act === 'unvar') return run(() => api('/variable', { method: 'PUT', body: { category: t.dataset.cat, variable: false } }));
     if (act === 'addrule') return run(async () => { const p = parseInt(val('rule-pri'), 10); await api('/rules', { method: 'POST', body: { pattern: val('rule-pat'), category: val('rule-cat'), priority: Number.isInteger(p) ? p : undefined } }); S.msg = 'Rule added (applies to new imports).'; });
     if (act === 'addexp') {
-      const body = { accountId: val('exp-acct') || null, date: val('exp-date'), description: val('exp-desc'), amount: val('exp-amt'), expense: true, category: val('exp-cat') || null };
+      const body = { paidWith: val('exp-acct') || null, date: val('exp-date'), description: val('exp-desc'), amount: val('exp-amt'), expense: true, category: val('exp-cat') || null };
       S.lastExpCat = body.category || ''; S.lastExpAcct = body.accountId || '';
       return run(async () => {
         try { await api('/transactions', { method: 'POST', body }); }

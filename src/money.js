@@ -21,28 +21,33 @@
  *     only ever sees those generic strings).
  *   - CSV export: every cell that starts with = + - @ (or tab / CR) gets a leading single quote.
  *   - No model calls of any kind in this module.
+ *   - Amounts and descriptions never go into vault files, tasks, tickets or logs.
+ *   - The dashboard agents' file and shell tools refuse data/money (server.js executeLocalTool + moneyToolGuard below).
  *
  * SCOPE (Alex, 2026-11-26 22:22): statement uploads are ON HOLD. Phase 1 is cards with their autopay, recurring bills,
  * one-off expenses (groceries, gas, eating out are logged one at a time) and variable-category budgets. The CSV import
  * below stays built and tested, but the page keeps it collapsed under "Statement import (coming later)".
  *
  * API (all under /api/money, JSON in and out, amounts in DOLLARS on input and CENTS on output; alex session only):
- *   GET    /meta                         categories, kinds, cycles, accounts (subscription card seeded on first load), bills, variable
- *   GET    /month?month=YYYY-MM          the month view: expectedCents, soFarCents, byCategory, byCard, variable, priceNeeded, oneOffs
- *   POST   /accounts                     { name, kind: checking|savings|credit card|other, last4?: '1234', autopay?: 125.00, dueDay?: 1–31 }
- *   PATCH  /accounts/:id                 same fields, partial. The subscription card refuses `autopay` (read live from subscriptions.js)
+ *   GET    /meta                         categories, kinds, cycles, accounts (subscription card seeded on first load, with targetCents), bills, variable
+ *   GET    /month?month=YYYY-MM          { spending:{expectedCents, soFarCents, …}, cashOut:{cents, byPayer}, cardChecks, byCategory, variable, priceNeeded, oneOffs, bills, subscriptions }
+ *   POST   /accounts                     { name, kind: checking|savings|credit card|cash|other, last4?: '1234', autopay?: 125.00, dueDay?: 1–31,
+ *                                          balance?: 1500.00 (optional, typed by Alex), apr?: 24.99 (percent, 0–60) }
+ *   PATCH  /accounts/:id                 same fields, partial. The subscription card refuses `autopay`: its actual autopay changes only
+ *                                          when its Subscriptions task is checked off (task rule money-autopay)
  *   DELETE /accounts/:id                 refused for the subscription card, or while expenses/bills point at it
  *   POST   /bills                        { name, amount?: 15.49 (blank = "price needed"), cycle?: monthly|yearly|weekly|months,
- *                                          everyMonths?: N (cycle 'months'), category?, accountId?, dueDay?, notes? }
+ *                                          everyMonths?: N (cycle 'months'), category?, paidWith?: <account id>, dueDay?, notes? }
  *   PATCH  /bills/:id · DELETE /bills/:id
- *   PUT    /variable                     { category, variable: true|false, estimate?: 400.00 } (monthly estimate, optional)
- *   POST   /transactions                 one-off: { date: '2026-11-26', amount: 54.20, expense: true, description, category?, accountId? }
+ *   PUT    /variable                     { category, variable: true|false, estimate?: 400.00 } (409 if a parent/child category is already variable)
+ *   POST   /transactions                 one-off: { date: '2026-11-26', amount: 54.20, expense: true, description, category?, paidWith? }
  *                                          (without `expense`, the sign is taken as given: negative = money out). 409 + needsConfirm
  *                                          for an identical entry the same day; resend with force: true.
  *   GET    /transactions?month=&q=&category=&accountId=   · PATCH /transactions/:id { category, always? } · DELETE /transactions/:id
- *   GET    /export.csv?month=            formula-escaped CSV
+ *   GET    /export.csv?month=            formula-escaped CSV (says so in a last row when it stops at 2,000 rows)
  *   Statement import (on hold): POST /import?accountId= (text/csv body, X-Filename: *.csv) · POST /import/:id/map · POST /import/:id/commit
- *   Rules: POST /rules { pattern, category, priority? } · DELETE /rules/:id · DELETE /profiles/:id · GET /summary?month= (statement view)
+ *   Rules: POST /rules { pattern, category, priority? } (no 8+ digit runs) · DELETE /rules/:id · DELETE /profiles/:id · GET /summary?month=
+ *   accountId is accepted wherever paidWith is (older name). Amounts are capped at $1,000,000. 503 = busy saving, retry.
  * Ada on the VPS can also use src/money-cli.js (same store, same validation, same lock): see that file.
  */
 
@@ -55,6 +60,8 @@ const MAX_UPLOAD = '5mb';
 const PREVIEW_TTL_MS = 15 * 60 * 1000;
 const MAX_PREVIEWS = 5;
 const MAX_ROWS = 20000;
+const KINDS = ['checking', 'savings', 'credit card', 'cash', 'other'];
+const CYCLES = ['monthly', 'yearly', 'weekly', 'months'];
 
 // ---------------------------------------------------------------------------
 // Category taxonomy (DOCS.md § Category Taxonomy). Ids are 'food' or 'food/groceries'.
@@ -114,24 +121,44 @@ const BUILTIN_PROFILES = [
 // Pure helpers (exported for tests)
 // ---------------------------------------------------------------------------
 
-// Date-shaped tokens that the digit-run mask must not eat: YYYY-MM-DD and MM-DD-YYYY (dashes count as separators).
-const DATE_TOKEN_RE = /\b(\d{4})-(\d{1,2})-(\d{1,2})\b|\b(\d{1,2})-(\d{1,2})-(\d{4})\b/g;
-const DIGIT_RUN_RE = /\d(?:[ -]?\d){7,}/g;
+// Tokens the digit-run mask must not eat: valid dates (2026-11-26, 11/26/2026, 11.26.26, 3/7/26) and money amounts
+// (1,234.56 or 123456.78), each standing alone (no digit or separator glued on either side, so a card number written
+// like a date, 2026-11-26-1234-5678, is still masked). Times (12:30) need no guard: ':' is not a separator.
+const LONE = (re) => new RegExp(`(?<![\\d.\\/-])(?:${re})(?![\\d.\\/-])`, 'g');
+const DATE_TOKEN_RE = LONE('(\\d{4})([-\\/.])(\\d{1,2})\\2(\\d{1,2})|(\\d{1,2})([-\\/.])(\\d{1,2})\\6(\\d{4}|\\d{2})');
+const AMOUNT_TOKEN_RE = LONE('\\d{1,3}(?:,\\d{3})+\\.\\d{2}|\\d{1,7}\\.\\d{2}');
+// 8+ digits with up to 3 separator characters (spaces, dots, slashes, dashes) between any two of them.
+const DIGIT_RUN_RE = /\d(?:[\s.\/-]{0,3}\d){7,}/g;
 const validMD = (m, d) => +m >= 1 && +m <= 12 && +d >= 1 && +d <= 31;
+const tag = (i) => '\u0000' + i.toString(26).split('').map(c => String.fromCharCode(97 + parseInt(c, 26))).join('') + '\u0000';
 
-/** maskDigits(s): every run of 8+ digits (spaces/dashes allowed between) becomes ••<last 4>. */
+/** maskDigits(s): every run of 8+ digits (up to 3 of space . / - between digits) becomes ••<last 4>. */
 function maskDigits(value) {
   const s = String(value == null ? '' : value);
-  if (!/\d{2}/.test(s.replace(/[ -]/g, ''))) return s;
-  // Protect valid date tokens, mask the rest, then put the dates back.
+  if ((s.match(/\d/g) || []).length < 8) return s;
   const kept = [];
-  const guarded = s.replace(DATE_TOKEN_RE, (m, y1, m1, d1, m2, d2) => {
-    if ((y1 && validMD(m1, d1)) || (y1 === undefined && validMD(m2, d2))) { kept.push(m); return `\u0000${kept.length - 1}\u0000`; }
-    return m;
-  });
-  const masked = guarded.replace(DIGIT_RUN_RE, (run) => '••' + run.replace(/\D/g, '').slice(-4));
-  return masked.replace(/\u0000(\d+)\u0000/g, (m, i) => kept[+i]);
+  const keep = (m) => { kept.push(m); return tag(kept.length - 1); };
+  let g = s.replace(DATE_TOKEN_RE, (m, y1, _s1, m1, d1, m2, _s2, d2) => ((y1 !== undefined ? validMD(m1, d1) : validMD(m2, d2)) ? keep(m) : m));
+  g = g.replace(AMOUNT_TOKEN_RE, keep);
+  const masked = g.replace(DIGIT_RUN_RE, (run) => '••' + run.replace(/\D/g, '').slice(-4));
+  return masked.replace(/\u0000([a-z]+)\u0000/g, (m, t) => kept[parseInt(t.split('').map(c => (c.charCodeAt(0) - 97).toString(26)).join(''), 26)]);
 }
+
+/** Largest amount accepted anywhere: $1,000,000 (Opus review M6). */
+const MAX_CENTS = 100000000;
+/** toCents(v): a finite number of dollars or an amount string -> cents within ±$1,000,000, else null. */
+function toCents(v) {
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v) || Math.abs(v) > MAX_CENTS / 100) return null;
+    return Math.round(v * 100);
+  }
+  return parseAmount(v);
+}
+
+/** Dates in America/New_York (Opus review M7): the VPS clock is UTC, Alex's months are Eastern. */
+const NY_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+const nyDate = (d) => NY_FMT.format(d instanceof Date ? d : new Date(d));
+const localMonth = (d) => nyDate(d).slice(0, 7);
 
 /** parseCsv(text) -> rows (arrays of strings). RFC 4180: quoted fields, "" escapes, commas and newlines inside quotes. */
 function parseCsv(text) {
@@ -171,7 +198,7 @@ function parseAmount(value) {
   s = s.replace(/,/g, '');
   const [whole, frac = ''] = s.split('.');
   const cents = (whole ? parseInt(whole, 10) : 0) * 100 + (frac ? parseInt(frac.padEnd(2, '0'), 10) : 0);
-  if (!Number.isSafeInteger(cents)) return null;
+  if (!Number.isSafeInteger(cents) || cents > MAX_CENTS) return null;
   return neg && cents !== 0 ? -cents : cents;
 }
 
@@ -399,83 +426,223 @@ function monthlyEquivalent(bill) {
   }
 }
 
-/** localMonth(date) -> 'YYYY-MM' in the server's time zone (America/New_York on the VPS), not UTC. */
-const localMonth = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 const isSpend = (t) => t.cents < 0 && !['income', 'transfer'].includes(topOf(t.category));
 const inCategory = (t, cat) => t.category === cat || (!cat.includes('/') && topOf(t.category) === cat);
 
 /**
  * variableBudget(store, v, month, now) -> { category, cents, source:'avg'|'estimate'|'none', months, actualCents }
- * The average of logged spending in the category over the 3 FULL months before `month` (months before the
- * current calendar month only), divided by the number of those months that have entries. Used once at least one
- * full month has entries; otherwise the manual estimate.
+ * The average of logged spending in the category over the 3 months before `month` that are FULL calendar months:
+ * before the current (Eastern) month, and starting on or after the category's trackingSince (Opus review S2).
+ * It divides by the number of those months that have entries, and is used once at least one has; otherwise the
+ * manual estimate.
  */
 function variableBudget(store, v, month, now) {
   const current = localMonth(now);
+  const since = v.trackingSince || '0000-00-00';
   const spent = (ym) => store.transactions.filter(t => monthOf(t.date) === ym && inCategory(t, v.category) && isSpend(t));
   let total = 0, withEntries = 0;
   for (let i = 1; i <= 3; i++) {
     const ym = addMonths(month, -i);
-    if (ym >= current) continue;   // not a full month yet
+    if (ym >= current || `${ym}-01` < since) continue;   // not a full month, or before tracking started
     const txs = spent(ym);
     if (txs.length) { withEntries++; total += txs.reduce((a, t) => a - t.cents, 0); }
   }
   const actualCents = spent(month).reduce((a, t) => a - t.cents, 0);
-  if (withEntries) return { category: v.category, cents: Math.round(total / withEntries), source: 'avg', months: withEntries, actualCents, estimateCents: v.estimateCents };
-  return { category: v.category, cents: v.estimateCents || 0, source: v.estimateCents == null ? 'none' : 'estimate', months: 0, actualCents, estimateCents: v.estimateCents };
+  if (withEntries) return { category: v.category, cents: Math.round(total / withEntries), source: 'avg', months: withEntries, actualCents, estimateCents: v.estimateCents, trackingSince: v.trackingSince || null };
+  return { category: v.category, cents: v.estimateCents || 0, source: v.estimateCents == null ? 'none' : 'estimate', months: 0, actualCents, estimateCents: v.estimateCents, trackingSince: v.trackingSince || null };
 }
 
 /**
- * monthPlan(store, month, subs, now, subscriptionAutopay) -> the month view.
- * expected = recurring bills (monthly equivalent, plus the priced items on the Subscriptions page) + variable budgets.
- * soFar = the same bills (assumed paid) + one-offs logged in the month. All amounts in cents.
+ * payoffEstimate(balanceCents, paymentCents, apr, fromMonth) -> a rough payoff estimate for a card balance.
+ * With an APR: monthly compounding (interest = balance × APR/12 each month, then the payment), simulated month by
+ * month. If the payment doesn't cover the first month's interest: never. Without an APR: balance ÷ payment,
+ * "ignoring interest". Rough on purpose: no new charges, no fees, no rate changes.
  */
-function monthPlan(store, month, subs, now, subscriptionAutopay) {
+function payoffEstimate(balanceCents, paymentCents, apr, fromMonth) {
+  if (!(balanceCents > 0)) return null;
+  const withInterest = apr != null && apr > 0;
+  if (!(paymentCents > 0)) return { never: true, withInterest, monthlyInterestCents: withInterest ? Math.round(balanceCents * apr / 1200) : 0, reason: 'nothing is paying it down' };
+  if (!withInterest) {
+    const months = Math.ceil(balanceCents / paymentCents);
+    return { never: false, withInterest: false, months, interestCents: null, payoffMonth: addMonths(fromMonth, months), label: 'ignoring interest' };
+  }
+  const r = apr / 1200;
+  const firstInterest = Math.round(balanceCents * r);
+  if (paymentCents <= firstInterest) return { never: true, withInterest: true, monthlyInterestCents: firstInterest, reason: 'the payment does not cover the monthly interest' };
+  let bal = balanceCents, months = 0, interest = 0;
+  while (bal > 0 && months < 1200) {
+    const i = Math.round(bal * r);
+    interest += i; bal += i; months++;
+    bal -= Math.min(bal, paymentCents);
+  }
+  return { never: false, withInterest: true, months, interestCents: interest, payoffMonth: addMonths(fromMonth, months), label: `at ${apr}% APR, monthly compounding` };
+}
+
+/**
+ * monthPlan(store, month, subs, now, subscriptionTarget) -> the month view. All amounts in cents.
+ *
+ * SPENDING = what was charged, by category, however it was paid: bills (monthly equivalent), the priced items on the
+ *   Subscriptions page (their own `category` if they carry a valid one, else utilities/streaming), logged expenses.
+ *   expected = bills + subscriptions + variable budgets; soFar = bills + subscriptions + logged expenses.
+ *   The subscription card's $10 buffer and $30 minimum payment are NOT spending.
+ * CASH OUT = money leaving the bank this month: every credit card's actual autopay, plus bills, subscriptions and
+ *   expenses paid with something that is not a credit card. A payer that isn't set counts as cash out (flagged).
+ * CARD CHECKS (credit cards): charges (bills + subscriptions on it + this month's expenses with it) against the
+ *   autopay. The subscription card's autopay first pays subscriptions.js's MIN_PAYMENT toward the old balance, so its
+ *   charges are compared with (autopay − MIN_PAYMENT); its BUFFER is shown as such. Both constants come from
+ *   subscriptions.js. A card with a balance gets a rough payoff estimate at its current paydown (autopay − charges).
+ * Bills count from the month they were created in; variable categories from the month tracking started (M8).
+ */
+function monthPlan(store, month, subs, now, subscriptionTarget) {
+  const S = subscriptionsModule();
+  const accounts = new Map(store.accounts.map(a => [a.id, a]));
   const subCard = store.accounts.find(a => a.isSubscriptionCard) || null;
-  const bills = store.recurring.map(b => ({ ...b, monthlyCents: monthlyEquivalent(b) }));
+  const isCredit = (id) => !!(id && accounts.get(id) && accounts.get(id).kind === 'credit card');
+  const active = (iso) => !iso || localMonth(new Date(iso)) <= month;
+  const bills = store.recurring.filter(b => active(b.createdAt)).map(b => ({ ...b, paidWith: b.accountId || null, monthlyCents: monthlyEquivalent(b) }));
   const subsRows = (Array.isArray(subs) ? subs : []).filter(s => s && s.name).map(s => {
     const cents = s.price != null && Number.isFinite(Number(s.price)) ? Math.round(Number(s.price) * 100) : null;
     return { name: String(s.name), cents, cycle: s.cycle === 'yearly' ? 'yearly' : 'monthly', onCard: !!s.onCard,
+      category: CATEGORY_IDS.has(s.category) ? s.category : 'utilities/streaming', paidWith: s.onCard && subCard ? subCard.id : null,
       monthlyCents: cents == null ? null : (s.cycle === 'yearly' ? Math.round(cents / 12) : cents) };
   });
-  const subsMonthly = subsRows.reduce((a, s) => a + (s.monthlyCents || 0), 0);
-  const billsMonthly = bills.reduce((a, b) => a + (b.monthlyCents || 0), 0) + subsMonthly;
-  const variable = store.variable.map(v => variableBudget(store, v, month, now));
-  const variableMonthly = variable.reduce((a, v) => a + v.cents, 0);
-  const oneOffs = store.transactions.filter(t => monthOf(t.date) === month && isSpend(t)).sort((a, b) => a.date.localeCompare(b.date));
-  const loggedCents = oneOffs.reduce((a, t) => a - t.cents, 0);
+  const variable = store.variable.filter(v => !v.trackingSince || v.trackingSince.slice(0, 7) <= month).map(v => variableBudget(store, v, month, now));
+  const oneOffs = store.transactions.filter(t => monthOf(t.date) === month && isSpend(t)).sort((a, b) => a.date.localeCompare(b.date))
+    .map(({ fingerprint: _f, ...t }) => ({ ...t, paidWith: t.accountId || null }));
+
+  // Every charge, as { category, cents, paidWith, kind }.
+  const charges = [
+    ...bills.filter(b => b.monthlyCents).map(b => ({ category: b.category, cents: b.monthlyCents, paidWith: b.paidWith, kind: 'bill' })),
+    ...subsRows.filter(s => s.monthlyCents).map(s => ({ category: s.category, cents: s.monthlyCents, paidWith: s.paidWith, kind: 'subscription' })),
+    ...oneOffs.map(t => ({ category: t.category, cents: -t.cents, paidWith: t.paidWith, kind: 'expense' })),
+  ];
+  const sum = (xs) => xs.reduce((a, x) => a + x.cents, 0);
+  const recurringCents = sum(charges.filter(c => c.kind !== 'expense'));
+  const loggedCents = sum(charges.filter(c => c.kind === 'expense'));
+  const variableCents = variable.reduce((a, v) => a + v.cents, 0);
 
   const cats = new Map();
-  const cat = (id) => { if (!cats.has(id)) cats.set(id, { category: id, billsCents: 0, loggedCents: 0, budgetCents: null, budgetSource: null }); return cats.get(id); };
-  for (const b of bills) if (b.monthlyCents) cat(topOf(b.category)).billsCents += b.monthlyCents;
-  if (subsMonthly) cat('subscriptions').billsCents += subsMonthly;
-  for (const t of oneOffs) cat(topOf(t.category)).loggedCents -= t.cents;
-  for (const v of variable) { const c = cat(topOf(v.category)); c.budgetCents = (c.budgetCents || 0) + v.cents; c.budgetSource = v.source; }
-  const byCategory = [...cats.values()].map(c => ({ ...c, expectedCents: c.billsCents + (c.budgetCents || 0), soFarCents: c.billsCents + c.loggedCents }))
+  const cat = (id) => { if (!cats.has(id)) cats.set(id, { category: id, billsCents: 0, subscriptionsCents: 0, loggedCents: 0, budgetCents: null, budgetSource: null }); return cats.get(id); };
+  for (const c of charges) { const k = cat(topOf(c.category)); if (c.kind === 'bill') k.billsCents += c.cents; else if (c.kind === 'subscription') k.subscriptionsCents += c.cents; else k.loggedCents += c.cents; }
+  for (const v of variable) { const k = cat(topOf(v.category)); k.budgetCents = (k.budgetCents || 0) + v.cents; k.budgetSource = v.source; }
+  const byCategory = [...cats.values()].map(c => ({ ...c, expectedCents: c.billsCents + c.subscriptionsCents + (c.budgetCents || 0), soFarCents: c.billsCents + c.subscriptionsCents + c.loggedCents }))
     .sort((a, b) => b.expectedCents - a.expectedCents || b.soFarCents - a.soFarCents);
 
-  const sub = subscriptionAutopay ? subscriptionAutopay(subs) : null;
-  const card = (a) => {
-    const id = a ? a.id : null;
-    const own = bills.filter(b => (b.accountId || null) === id);
-    let billsCents = own.reduce((x, b) => x + (b.monthlyCents || 0), 0);
-    if (a && a.isSubscriptionCard) billsCents += subsRows.filter(s => s.onCard).reduce((x, s) => x + (s.monthlyCents || 0), 0);
-    if (!a) billsCents += subsRows.filter(s => !s.onCard || !subCard).reduce((x, s) => x + (s.monthlyCents || 0), 0);
-    const logged = oneOffs.filter(t => (t.accountId || null) === id).reduce((x, t) => x - t.cents, 0);
-    return { accountId: id, name: a ? a.name : 'No card set', kind: a ? a.kind : null, last4: a ? a.last4 : null, dueDay: a ? a.dueDay : null,
-      isSubscriptionCard: !!(a && a.isSubscriptionCard), autopayCents: a ? (a.isSubscriptionCard ? (sub ? sub.cents : null) : a.autopayCents) : null,
-      autopaySource: a && a.isSubscriptionCard ? 'subscriptions' : (a && a.autopayCents != null ? 'manual' : null),
-      billsCents, loggedCents: logged, billCount: own.length };
+  // Cash out, by payer.
+  const payers = new Map();
+  const payer = (id) => {
+    const a = id ? accounts.get(id) : null;
+    const key = a ? a.id : null;
+    if (!payers.has(key)) payers.set(key, { accountId: key, name: a ? a.name : 'No payer set', kind: a ? a.kind : null, autopayCents: 0, billsCents: 0, expensesCents: 0, cents: 0, unset: !a });
+    return payers.get(key);
   };
-  const byCard = store.accounts.map(card);
-  const none = card(null);
-  if (none.billsCents || none.loggedCents || none.billCount) byCard.push(none);
+  for (const a of store.accounts) if (a.kind === 'credit card') { const p = payer(a.id); p.autopayCents = a.autopayCents || 0; p.autopayMissing = a.autopayCents == null; }
+  for (const c of charges) {
+    if (isCredit(c.paidWith)) continue;   // a card charge is not cash out: the card's payment is
+    const p = payer(c.paidWith);
+    if (c.kind === 'expense') p.expensesCents += c.cents; else p.billsCents += c.cents;
+  }
+  const byPayer = [...payers.values()].map(p => ({ ...p, cents: p.autopayCents + p.billsCents + p.expensesCents })).filter(p => p.cents || p.kind === 'credit card');
+  const cashOutCents = byPayer.reduce((a, p) => a + p.cents, 0);
+
+  // Card checks.
+  const cardChecks = store.accounts.filter(a => a.kind === 'credit card').map(a => {
+    const on = charges.filter(c => c.paidWith === a.id);
+    const chargesCents = sum(on);
+    const isSub = !!a.isSubscriptionCard;
+    const paydownReserved = isSub ? Math.round(S.MIN_PAYMENT * 100) : 0;
+    const bufferCents = isSub ? Math.round(S.BUFFER * 100) : 0;
+    const base = { accountId: a.id, name: a.name, last4: a.last4 || null, dueDay: a.dueDay || null, isSubscriptionCard: isSub, autopayCents: a.autopayCents == null ? null : a.autopayCents,
+      chargesCents, recurringChargesCents: sum(on.filter(c => c.kind !== 'expense')), expenseChargesCents: sum(on.filter(c => c.kind === 'expense')),
+      paydownReservedCents: paydownReserved, bufferCents, balanceCents: a.balanceCents == null ? null : a.balanceCents, apr: a.apr == null ? null : a.apr };
+    if (isSub) {
+      const t = subscriptionTarget ? subscriptionTarget(subs) : null;
+      base.targetCents = t ? t.cents : null;
+      base.targetGapCents = t && a.autopayCents != null ? t.cents - a.autopayCents : null;
+      base.autopaySetAt = a.autopaySetAt || null;
+    }
+    if (a.autopayCents == null) return { ...base, status: 'no-autopay', diffCents: null, message: 'no autopay set', payoff: null };
+    const diff = a.autopayCents - paydownReserved - chargesCents;
+    const status = diff < 0 ? 'short' : diff === 0 ? 'covers' : 'over';
+    const message = status === 'short' ? `short by ${fmtUsd(-diff)} a month: balance building up`
+      : isSub ? `covers it; ${fmtUsd(paydownReserved)} paying down the old balance${diff ? `, ${fmtUsd(diff)} buffer/extra` : ''}`
+      : status === 'covers' ? 'covers it' : `pays ${fmtUsd(diff)} more: paying it down`;
+    const paydown = a.autopayCents - chargesCents;   // what actually reduces the balance each month
+    return { ...base, status, diffCents: diff, paydownCents: paydown, message, payoff: a.balanceCents ? payoffEstimate(a.balanceCents, paydown, a.apr, localMonth(now)) : null };
+  });
 
   const priceNeeded = bills.filter(b => b.cents == null).map(b => ({ id: b.id, name: b.name, source: 'bill' }))
     .concat(subsRows.filter(s => s.cents == null).map(s => ({ name: s.name, source: 'subscriptions' })));
-  return { month, expectedCents: billsMonthly + variableMonthly, billsMonthlyCents: billsMonthly, subscriptionsMonthlyCents: subsMonthly, variableMonthlyCents: variableMonthly,
-    loggedCents, soFarCents: billsMonthly + loggedCents, bills, subscriptions: subsRows, variable, oneOffs: oneOffs.map(({ fingerprint: _f, ...t }) => t), byCategory, byCard, priceNeeded,
-    subscriptionCard: subCard ? { accountId: subCard.id, autopayCents: sub ? sub.cents : null, items: sub ? sub.items : [] } : null };
+  return { month,
+    spending: { expectedCents: recurringCents + variableCents, soFarCents: recurringCents + loggedCents, recurringCents, billsCents: sum(charges.filter(c => c.kind === 'bill')),
+      subscriptionsCents: sum(charges.filter(c => c.kind === 'subscription')), variableCents, loggedCents },
+    cashOut: { cents: cashOutCents, byPayer },
+    cardChecks, bills, subscriptions: subsRows, variable, oneOffs, byCategory, priceNeeded };
+}
+const fmtUsd = (c) => '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// ---------------------------------------------------------------------------
+// Task-automation rule `money-autopay` (registered in src/automation-rules.js; docs/TASK-AUTOMATION.md)
+// ---------------------------------------------------------------------------
+
+/** autopayFromTaskName("Set the subscription card's autopay to $1,234.56") -> 123456 cents, or null. */
+function autopayFromTaskName(name) {
+  const m = /autopay to \$([0-9][0-9,]*(?:\.[0-9]{1,2})?)\b/i.exec(String(name || ''));
+  if (!m) return null;
+  const c = parseAmount(m[1]);
+  return c !== null && c >= 0 ? c : null;
+}
+
+/**
+ * autopayRule(dataDir) -> onComplete(task, tasks). When Alex checks off the Subscriptions task
+ * "Set the subscription card's autopay to $T" (autoKind subcard-autopay), the subscription card's ACTUAL autopay
+ * becomes T. Safe to run twice (setting the same amount again changes nothing). It runs under the todo lock and
+ * takes only the money lock inside it; money code never takes the todo lock, so the order can't deadlock.
+ * Returns nothing: it never changes tasks.
+ */
+function autopayRule(dataDir) {
+  return function moneyAutopay(task) {
+    if (!task || task.autoKind !== 'subcard-autopay') return undefined;
+    const cents = autopayFromTaskName(task.name);
+    if (cents === null) throw new Error('money-autopay: no amount in the task name');   // retried, then dead-lettered with a ticket
+    create({ dataDir }).setSubscriptionAutopay(cents, 'set when the Subscriptions autopay task was checked off');
+    return undefined;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Agent tool guard (Opus review S1)
+// ---------------------------------------------------------------------------
+
+/**
+ * moneyToolGuard(toolName, args, { moneyDirs, base }) -> an error string, or null when the call may go ahead.
+ * Used by server.js executeLocalTool for EVERY role. read_file / list_directory / write_file are refused when the
+ * target, with symlinks resolved (for a path that doesn't exist yet: its nearest existing parent), is a money data
+ * directory or inside one. run_bash is refused when the command mentions "money" at all (any case): a coarse wall,
+ * the file tools are the precise one.
+ */
+function moneyToolGuard(toolName, args, { moneyDirs, base = '/home/ubuntu' }) {
+  const a = args || {};
+  if (toolName === 'run_bash') {
+    return /money/i.test(String(a.command || '')) ? 'Permission Denied: the Money data is private to Alex, and agent shell commands that mention "money" are refused.' : null;
+  }
+  if (!['read_file', 'list_directory', 'write_file'].includes(toolName)) return null;
+  const raw = a.filePath || a.dirPath || a.path || '.';
+  const real = (p) => {
+    let cur = path.resolve(base, String(p)), rest = [];
+    for (;;) {
+      try { return path.join(fs.realpathSync(cur), ...rest); } catch (e) {
+        const parent = path.dirname(cur);
+        if (parent === cur) return path.join(cur, ...rest);
+        rest.unshift(path.basename(cur)); cur = parent;
+      }
+    }
+  };
+  const target = real(raw);
+  const walls = [];
+  for (const d of moneyDirs) { walls.push(path.resolve(d)); walls.push(real(d)); }
+  const hit = walls.some(w => target === w || target.startsWith(w + path.sep));
+  return hit ? 'Permission Denied: the Money data (data/money) is private to Alex and closed to agent tools.' : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -514,9 +681,10 @@ function gate(requireAuth) {
 
 const newId = (prefix) => `${prefix}-${crypto.randomBytes(6).toString('hex')}`;
 
-function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
+function create({ dataDir, subscriptionsFile, clock = () => new Date(), lockWaitMs = 200 }) {
   const dir = path.join(dataDir, 'money');
   const file = path.join(dir, 'money.json');
+  const bak = path.join(dir, 'money.json.bak');
   const lockFile = path.join(dir, '.lock');
   const subsFile = subscriptionsFile || path.join(dataDir, 'subscriptions.json');
   const previews = new Map();
@@ -536,30 +704,62 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     for (const k of ['accounts', 'transactions', 'profiles', 'rules', 'recurring', 'variable']) if (!Array.isArray(s[k])) s[k] = [];
     return s;
   }
+  /**
+   * write(store): tmp file (0600) -> fsync -> the current file is copied to money.json.bak (0600) -> rename over.
+   * A failed write removes its tmp file and leaves money.json untouched (Opus review M5).
+   */
   function write(store) {
     ensureDir();
     const tmp = path.join(dir, `.money.json.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
-    fs.writeFileSync(tmp, JSON.stringify(store), { mode: 0o600 });
-    fs.chmodSync(tmp, 0o600);
-    fs.renameSync(tmp, file);
+    let fd = null;
+    try {
+      fd = fs.openSync(tmp, 'wx', 0o600);
+      fs.writeSync(fd, JSON.stringify(store));
+      fs.fsyncSync(fd);
+      fs.closeSync(fd); fd = null;
+      fs.chmodSync(tmp, 0o600);
+      if (fs.existsSync(file)) {
+        const bakTmp = `${bak}.tmp-${process.pid}`;
+        fs.copyFileSync(file, bakTmp);
+        fs.chmodSync(bakTmp, 0o600);
+        fs.renameSync(bakTmp, bak);
+      }
+      fs.renameSync(tmp, file);
+      try { const dfd = fs.openSync(dir, 'r'); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) { /* best effort */ }
+    } catch (err) {
+      if (fd !== null) try { fs.closeSync(fd); } catch (e) { /* closed */ }
+      try { fs.unlinkSync(tmp); } catch (e) { /* never created */ }
+      throw err;
+    }
   }
   /**
-   * withLock(fn): cross-process lock (the server and src/money-cli.js share the file). Create-exclusive lockfile,
-   * bounded wait, a lock older than 10 s is treated as stale. Every write path runs inside it.
+   * withLock(fn): cross-process lock shared by the server and src/money-cli.js (Opus review M3/M4).
+   * The lock file holds a random token; release unlinks it only while it still holds OUR token. A lock older than
+   * 10 s is stale: it is taken over by renaming it aside (only one contender's rename can win), then retried.
+   * Waits are short (10 ms) and bounded by maxWaitMs: 200 ms in the server, 3 s for the CLI. Past that: EBUSY.
    */
-  function withLock(fn) {
+  function withLock(fn, { maxWaitMs = lockWaitMs } = {}) {
     ensureDir();
-    const deadline = Date.now() + 3000;
-    let fd = null;
-    while (fd === null) {
-      try { fd = fs.openSync(lockFile, 'wx', 0o600); } catch (e) {
-        if (e.code !== 'EEXIST') throw e;
-        try { if (Date.now() - fs.statSync(lockFile).mtimeMs > 10000) { fs.unlinkSync(lockFile); continue; } } catch (e2) { continue; }
-        if (Date.now() > deadline) { const err = new Error('money store is busy'); err.code = 'EBUSY'; throw err; }
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-      }
+    const token = crypto.randomBytes(12).toString('hex');
+    const deadline = Date.now() + maxWaitMs;
+    for (;;) {
+      let fd = null;
+      try { fd = fs.openSync(lockFile, 'wx', 0o600); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+      if (fd !== null) { try { fs.writeSync(fd, token); } finally { fs.closeSync(fd); } break; }
+      try {
+        if (Date.now() - fs.statSync(lockFile).mtimeMs > 10000) {
+          const aside = `${lockFile}.stale-${token}`;
+          fs.renameSync(lockFile, aside);   // atomic: if two processes race, only one rename finds the file
+          try { fs.unlinkSync(aside); } catch (e) { /* gone */ }
+          continue;
+        }
+      } catch (e) { continue; }   // vanished between open and stat: try again at once
+      if (Date.now() >= deadline) { const err = new Error('money store is busy'); err.code = 'EBUSY'; throw err; }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
-    try { return fn(); } finally { try { fs.closeSync(fd); fs.unlinkSync(lockFile); } catch (e) { /* already gone */ } }
+    try { return fn(); } finally {
+      try { if (fs.readFileSync(lockFile, 'utf8') === token) fs.unlinkSync(lockFile); } catch (e) { /* not ours any more, or gone */ }
+    }
   }
   function readSubs() {
     try { const v = JSON.parse(fs.readFileSync(subsFile, 'utf8')); return Array.isArray(v) ? v : []; } catch (e) { return []; }
@@ -576,8 +776,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     while (previews.size > MAX_PREVIEWS) previews.delete(previews.keys().next().value);
   }
 
-  // --- Accounts (cards) ---
-  const KINDS = ['checking', 'savings', 'credit card', 'other'];
+  // --- Accounts (cards and bank/cash accounts) ---
   const optDay = (v, errors, label) => {
     if (v === null || v === '' || v === undefined) return null;
     const n = Number(v);
@@ -586,30 +785,46 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
   };
   const optCents = (v, errors, label) => {
     if (v === null || v === '' || v === undefined) return null;
-    const c = typeof v === 'number' ? Math.round(v * 100) : parseAmount(v);
-    if (c === null || !Number.isFinite(c) || c < 0) { errors.push(`${label} must be an amount of 0 or more`); return null; }
+    const c = toCents(v);
+    if (c === null || c < 0) { errors.push(`${label} must be an amount from 0 to 1,000,000`); return null; }
     return c;
   };
+  /** payerOf(b): bills and expenses name who pays as `paidWith` (accountId is the older name, still accepted). */
+  const payerOf = (b) => (b.paidWith !== undefined ? b.paidWith : b.accountId);
   function validateAccount(b, partial, existing) {
     const errors = [], v = {};
     if (!partial || b.name !== undefined) {
       const name = typeof b.name === 'string' ? maskDigits(b.name).trim() : '';
       if (!name || name.length > 60) errors.push('name: 1–60 characters'); else v.name = name;
     }
-    if (!partial || b.kind !== undefined) { if (!KINDS.includes(b.kind)) errors.push('kind must be checking, savings, credit card or other'); else v.kind = b.kind; }
+    if (!partial || b.kind !== undefined) {
+      if (existing && existing.isSubscriptionCard && b.kind !== 'credit card') errors.push('the subscription card is a credit card');
+      else if (!KINDS.includes(b.kind)) errors.push('kind must be checking, savings, credit card, cash or other'); else v.kind = b.kind;
+    }
     if (b.last4 !== undefined) {
       if (b.last4 === null || b.last4 === '') v.last4 = null;
       else if (!/^\d{4}$/.test(String(b.last4))) errors.push('last4 must be exactly 4 digits'); else v.last4 = String(b.last4);
     } else if (!partial) v.last4 = null;
-    if (b.autopay !== undefined && b.autopay !== null && b.autopay !== '' && existing && existing.isSubscriptionCard) errors.push("the subscription card's autopay is read from the Subscriptions page and can't be typed in");
-    else if (b.autopay !== undefined || !partial) v.autopayCents = existing && existing.isSubscriptionCard ? null : optCents(b.autopay, errors, 'autopay');
+    if (b.autopay !== undefined && b.autopay !== null && b.autopay !== '' && existing && existing.isSubscriptionCard) errors.push("the subscription card's autopay follows its Subscriptions task and can't be typed in");
+    else if (!(existing && existing.isSubscriptionCard) && (b.autopay !== undefined || !partial)) v.autopayCents = optCents(b.autopay, errors, 'autopay');
     if (b.dueDay !== undefined || !partial) v.dueDay = optDay(b.dueDay, errors, 'due day');
+    if (b.balance !== undefined || !partial) v.balanceCents = optCents(b.balance, errors, 'balance');   // optional, typed by Alex
+    if (b.apr !== undefined || !partial) {
+      if (b.apr === null || b.apr === '' || b.apr === undefined) v.apr = null;
+      else { const n = typeof b.apr === 'number' ? b.apr : Number(String(b.apr).replace('%', '').trim());
+        if (!Number.isFinite(n) || n < 0 || n > 60) errors.push('APR must be a percent from 0 to 60'); else v.apr = Math.round(n * 100) / 100; }
+    }
     return errors.length ? { errors } : { value: v };
   }
-  /** ensureSubscriptionCard(store) -> true if it had to add the card. */
+  /**
+   * ensureSubscriptionCard(store) -> true if it had to add the card. Its stored autopay is the ACTUAL payment; at
+   * first load it is assumed set to the current target (subscriptions.js computeTotal). After that it changes only
+   * when Alex checks off "Set the subscription card's autopay to $T" (rule money-autopay, setSubscriptionAutopay).
+   */
   function ensureSubscriptionCard(store) {
     if (store.accounts.some(a => a.isSubscriptionCard)) return false;
-    store.accounts.unshift({ id: newId('acct'), name: 'The subscription card', kind: 'credit card', last4: null, autopayCents: null, dueDay: null, isSubscriptionCard: true, createdAt: clock().toISOString() });
+    store.accounts.unshift({ id: newId('acct'), name: 'The subscription card', kind: 'credit card', last4: null, autopayCents: subscriptionAutopay().cents,
+      autopaySetAt: clock().toISOString(), autopayFrom: 'seeded from the Subscriptions target', dueDay: null, isSubscriptionCard: true, createdAt: clock().toISOString() });
     return true;
   }
   /** readSeeded(): the store, with the subscription card added (and saved) on first load. */
@@ -618,9 +833,21 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     if (s.accounts.some(a => a.isSubscriptionCard)) return s;
     return withLock(() => { const t = read(); if (ensureSubscriptionCard(t)) write(t); return t; });
   }
+  /** setSubscriptionAutopay(cents, note): record the subscription card's actual autopay. Safe to run twice. Takes the money lock. */
+  function setSubscriptionAutopay(cents, note) {
+    if (!Number.isSafeInteger(cents) || cents < 0 || cents > MAX_CENTS) throw new Error('bad autopay amount');
+    return withLock(() => {
+      const s = read();
+      ensureSubscriptionCard(s);
+      const card = s.accounts.find(a => a.isSubscriptionCard);
+      if (card.autopayCents === cents) return { changed: false, cents };
+      card.autopayCents = cents; card.autopaySetAt = clock().toISOString(); card.autopayFrom = String(note || '').slice(0, 120);
+      write(s);
+      return { changed: true, cents };
+    }, { maxWaitMs: 3000 });
+  }
 
   // --- Recurring bills ---
-  const CYCLES = ['monthly', 'yearly', 'weekly', 'months'];
   function validateBill(b, partial, store) {
     const errors = [], v = {};
     if (!partial || b.name !== undefined) {
@@ -643,9 +870,10 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
       const c = b.category == null || b.category === '' ? 'other' : b.category;
       if (!CATEGORY_IDS.has(c)) errors.push('unknown category'); else v.category = c;
     }
-    if (!partial || b.accountId !== undefined) {
-      if (b.accountId == null || b.accountId === '') v.accountId = null;
-      else if (!store.accounts.some(a => a.id === b.accountId)) errors.push('unknown card/account'); else v.accountId = b.accountId;
+    const payer = payerOf(b);
+    if (!partial || payer !== undefined) {
+      if (payer == null || payer === '') v.accountId = null;
+      else if (!store.accounts.some(a => a.id === payer)) errors.push('unknown card/account'); else v.accountId = payer;
     }
     if (!partial || b.dueDay !== undefined) v.dueDay = optDay(b.dueDay, errors, 'due day');
     if (!partial || b.notes !== undefined) {
@@ -654,6 +882,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     }
     return errors.length ? { errors } : { value: v };
   }
+  const billOut = (bill) => ({ ...bill, paidWith: bill.accountId || null, monthlyCents: monthlyEquivalent(bill) });
   function addBill(b) {
     const store = read();
     const v = validateBill(b || {}, false, store);
@@ -661,7 +890,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     const bill = { id: newId('bill'), ...v.value, createdAt: clock().toISOString() };
     store.recurring.push(bill);
     write(store);
-    return { status: 201, body: { bill: { ...bill, monthlyCents: monthlyEquivalent(bill) } } };
+    return { status: 201, body: { bill: billOut(bill) } };
   }
   function updateBill(id, b) {
     const store = read();
@@ -671,10 +900,15 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     if (v.errors) return { status: 400, body: { error: v.errors.join('; '), errors: v.errors } };
     Object.assign(bill, v.value);
     write(store);
-    return { status: 200, body: { bill: { ...bill, monthlyCents: monthlyEquivalent(bill) } } };
+    return { status: 200, body: { bill: billOut(bill) } };
   }
 
   // --- Variable categories (groceries, gas, eating out…) ---
+  /**
+   * setVariable({ category, variable, estimate }): mark or unmark a variable category. `trackingSince` (Eastern date)
+   * is set when it is first marked and kept when only the estimate changes; only full months starting on or after it
+   * feed the average (Opus review S2). A category whose ancestor or descendant is already variable is refused (409, S3).
+   */
   function setVariable(b) {
     const category = b && b.category;
     if (!CATEGORY_IDS.has(category)) return { status: 400, body: { error: 'unknown category' } };
@@ -682,8 +916,15 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     const estimateCents = optCents(b.estimate, errors, 'estimate');
     if (errors.length) return { status: 400, body: { error: errors.join('; '), errors } };
     const store = read();
-    store.variable = store.variable.filter(x => x.category !== category);
-    if (b.variable !== false) store.variable.push({ category, estimateCents });
+    const existing = store.variable.find(x => x.category === category);
+    if (b.variable === false) {
+      store.variable = store.variable.filter(x => x.category !== category);
+    } else {
+      const clash = store.variable.find(x => x.category !== category && (x.category.startsWith(category + '/') || category.startsWith(x.category + '/')));
+      if (clash) return { status: 409, body: { error: `${clash.category} is already a variable category; use one or the other, not both.` } };
+      if (existing) existing.estimateCents = estimateCents;
+      else store.variable.push({ category, estimateCents, trackingSince: nyDate(clock()) });
+    }
     write(store);
     return { status: 200, body: { variable: store.variable } };
   }
@@ -765,14 +1006,15 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
   function addManual(b) {
     const store = read();
     const errors = [];
-    if (b.accountId == null || b.accountId === '') b = { ...b, accountId: null };
-    else if (!store.accounts.some(a => a.id === b.accountId)) errors.push('unknown card/account');
+    const payer = payerOf(b);
+    b = { ...b, accountId: payer == null || payer === '' ? null : payer };
+    if (b.accountId !== null && !store.accounts.some(a => a.id === b.accountId)) errors.push('unknown card/account');
     const date = parseDate(b.date);
     if (!date) errors.push('date must look like 2026-11-26 or 11/26/2026');
     const description = typeof b.description === 'string' ? maskDigits(b.description).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
     if (!description) errors.push('description is required');
-    let cents = typeof b.amount === 'number' ? Math.round(b.amount * 100) : parseAmount(b.amount);
-    if (cents === null || !Number.isFinite(cents) || cents === 0) errors.push('amount must be a non-zero number (negative = money out)');
+    let cents = toCents(b.amount);
+    if (cents === null || cents === 0) errors.push('amount must be a non-zero number up to 1,000,000 (negative = money out)');
     else if (b.expense === true) cents = -Math.abs(cents);   // an expense: the amount may be typed as positive
     if (b.category != null && b.category !== '' && !CATEGORY_IDS.has(b.category)) errors.push('unknown category');
     if (errors.length) return { status: 400, body: { error: errors.join('; '), errors } };
@@ -826,13 +1068,14 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
   }
 
   function exportCsv(q) {
-    const { transactions } = listTransactions({ ...q, limit: 2000 });
+    const { transactions, total } = listTransactions({ ...q, limit: 2000 });
     const accounts = new Map(read().accounts.map(a => [a.id, a.name]));
     const lines = [['Date', 'Account', 'Description', 'Merchant', 'Category', 'Out', 'In']];
     for (const t of transactions.slice().reverse()) {
       const v = (Math.abs(t.cents) / 100).toFixed(2);
       lines.push([t.date, accounts.get(t.accountId) || '', t.description, t.merchant, t.category, t.cents < 0 ? v : '', t.cents > 0 ? v : '']);
     }
+    if (total > transactions.length) lines.push([`(export stopped at ${transactions.length} of ${total} rows: export one month at a time)`]);   // M13
     return lines.map(l => l.map(escapeCsvCell).join(',')).join('\r\n') + '\r\n';
   }
 
@@ -840,10 +1083,12 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
   function mount(app) {
     const r = express.Router({ caseSensitive: true, strict: false });
     r.use((req, res, next) => (isAlexSession(req) ? next() : notFound(req, res)));   // second wall behind gate()
-    r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+    r.use((req, res, next) => { prunePreviews(); res.set('Cache-Control', 'no-store'); next(); });   // M14: expired previews go on every request
+    const sweep = setInterval(prunePreviews, 60 * 1000); if (sweep.unref) sweep.unref();                // …and once a minute
     const send = (res, out) => res.status(out.status).json(out.body);
     const safe = (fn) => (req, res) => {
       try { req.method === 'GET' ? fn(req, res) : withLock(() => fn(req, res)); } catch (err) {
+        if (err && err.code === 'EBUSY' && !res.headersSent) return res.status(503).json({ error: 'The Money page is busy saving. Try again in a moment.' });
         console.error('[money] request failed:', err && (err.code || err.name) || 'error');   // never the message: it could quote data
         if (!res.headersSent) res.status(500).json({ error: 'Something went wrong on the Money page.' });
       }
@@ -864,8 +1109,8 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
       const s = readSeeded();
       const sub = subscriptionAutopay();
       res.json({ categories: CATEGORIES, kinds: KINDS, cycles: CYCLES,
-        accounts: s.accounts.map(a => (a.isSubscriptionCard ? { ...a, autopayCents: sub.cents, autopaySource: 'subscriptions' } : a)),
-        bills: s.recurring.map(b => ({ ...b, monthlyCents: monthlyEquivalent(b) })), variable: s.variable, profiles: BUILTIN_PROFILES.concat(s.profiles).map(({ id, name, builtin }) => ({ id, name, builtin: !!builtin })),
+        accounts: s.accounts.map(a => (a.isSubscriptionCard ? { ...a, targetCents: sub.cents } : a)),
+        bills: s.recurring.map(billOut), variable: s.variable, profiles: BUILTIN_PROFILES.concat(s.profiles).map(({ id, name, builtin }) => ({ id, name, builtin: !!builtin })),
         rules: compileRules(s.rules).map(x => x.rule) });
     }));
     r.post('/accounts', safe((req, res) => {
@@ -931,6 +1176,7 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
       const b = req.body || {};
       const pattern = typeof b.pattern === 'string' ? b.pattern.trim() : '';
       if (!pattern || pattern.length > 200) return res.status(400).json({ error: 'pattern: 1–200 characters' });
+      if (maskDigits(pattern) !== pattern) return res.status(400).json({ error: 'A pattern cannot hold a long number (8+ digits): no account or card numbers in rules.' });
       try { new RegExp(pattern, 'i'); } catch (e) { return res.status(400).json({ error: 'That pattern is not a valid regular expression.' }); }
       if (!CATEGORY_IDS.has(b.category)) return res.status(400).json({ error: 'unknown category' });
       const priority = Number.isInteger(b.priority) ? b.priority : 500;
@@ -959,9 +1205,9 @@ function create({ dataDir, subscriptionsFile, clock = () => new Date() }) {
     app.use('/api/money', r);
   }
 
-  return { mount, read, readSeeded, write, withLock, file, dir, previews, addBill, updateBill, setVariable, plan, subscriptionAutopay, ensureSubscriptionCard, validateAccount, startImport, mapImport, commitImport, addManual, setCategory, listTransactions, exportCsv };
+  return { mount, read, readSeeded, write, withLock, setSubscriptionAutopay, bak, lockFile, prunePreviews, file, dir, previews, addBill, updateBill, setVariable, plan, subscriptionAutopay, ensureSubscriptionCard, validateAccount, startImport, mapImport, commitImport, addManual, setCategory, listTransactions, exportCsv };
 }
 
-module.exports = { create, gate, isAlexSession, maskDigits, parseCsv, parseAmount, parseDate, cleanDescription, merchantOf, fingerprint, compileRules,
-  categorize, escapeCsvCell, detectProfile, resolveProfile, splitHeader, monthlyEquivalent, variableBudget, monthPlan, validateMapping, normalizeRows, summarize, monthTotals, addMonths,
+module.exports = { create, gate, isAlexSession, moneyToolGuard, autopayRule, autopayFromTaskName, maskDigits, parseCsv, parseAmount, parseDate, cleanDescription, merchantOf, fingerprint, compileRules,
+  categorize, escapeCsvCell, detectProfile, resolveProfile, splitHeader, monthlyEquivalent, variableBudget, monthPlan, payoffEstimate, toCents, nyDate, localMonth, MAX_CENTS, KINDS, CYCLES, validateMapping, normalizeRows, summarize, monthTotals, addMonths,
   TAXONOMY, CATEGORIES, STARTER_RULES, BUILTIN_PROFILES };
