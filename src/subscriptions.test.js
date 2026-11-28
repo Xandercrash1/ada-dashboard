@@ -230,6 +230,11 @@ check('patch validate: price null ok, notes 500 ok', [subs.validatePatch({ price
       ['Switch Newname to the subscription card', 'Add the price for Newname to the subscriptions list', 'Add the price for other to the subscriptions list']);
     check('rename: nothing on card and no autopay task -> none created', apOf().length, 0);
 
+    // price filled in from blank completes its "Add the price" task (under the new name too)
+    seed([row('x', null, 'monthly', false, 't1')], [sched('t1', 'Switch x to the subscription card'), sched('t9', 'Add the price for x to the subscriptions list')]);
+    res = subs.editSubscription('x', { name: 'Y', price: 4 }, complete);
+    check('price from blank: price task completed, switch task kept', [todoStore.readTasks().map(t => t.id), todoStore.readCompleted().map(c => c.taskId)], [['t1'], ['t9']]);
+
     // route wiring with a fake app: 403 for non-admin, 400 for bad input, 404 for unknown id
     const routes = {};
     subs.mount({ get() {}, post() {}, patch(p, g, h) { routes.patch = (req) => { let out; const res = { status(c) { out = { status: c }; return res; }, json(b) { out.body = b; } }; g(req, res, () => h(req, res)); return out; }; } }, { isAdminReq: r => !!r.admin, completeScheduled: complete });

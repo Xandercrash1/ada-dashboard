@@ -342,6 +342,12 @@ function editSubscription(id, value, completeScheduled) {
     todoStore.writeTasks(r.tasks);
     if (r.completed !== completed) todoStore.writeCompleted(r.completed);
     writeSubscriptions(r.subs);
+    // A blank price filled in: its "Add the price" task is done (completed the normal way, so it's logged).
+    if (subs[idx].price == null && r.row.price != null) {
+      const cur = todoStore.readTasks();
+      const pt = cur.find(t => t.type !== 'recurring' && t.name === `Add the price for ${r.row.name} to the subscriptions list`);
+      if (pt) completeScheduled(cur, pt);
+    }
     if (r.wantsOnCard) markOnCardLocked(id, completeScheduled);   // completes the switch task; its hook updates autopay
     const finalSubs = readSubscriptions();
     const ap = recalcAutopay(finalSubs, todoStore.readTasks(), now, today, `Updated when ${finalSubs[idx].name} was edited on the Subscriptions page.`);
