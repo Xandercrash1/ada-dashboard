@@ -7,6 +7,7 @@
 
 const assert = require('assert');
 const subs = require('./subscriptions');
+const todoEngine = require('./todo-engine');
 
 let passed = 0;
 function check(label, actual, expected) {
@@ -348,6 +349,92 @@ check('patch validate: price null ok, notes 500 ok', [subs.validatePatch({ price
       check('settings route: GET returns saved', rs['get /api/subscriptions/settings']({ admin: true }).body.settings.cap, 5);
       try { fs.unlinkSync(subs.SETTINGS_FILE); } catch (e) { /* none */ }
     }
+
+    // --- phase 4a: still-to-find rows ---
+    check('validateNew: toFind with name only ok; with a price rejected; bad renewsOn rejected', [subs.validateNew({ name: 'Mystery', toFind: true }).value, !!subs.validateNew({ name: 'M', toFind: true, price: 3 }).errors, !!subs.validateNew({ name: 'M', renewsOn: '2026-13-01' }).errors],
+      [{ name: 'Mystery', price: null, cycle: 'monthly', toFind: true }, true, true]);
+    const tf = subs.planCreate([], [], subs.validateNew({ name: 'Mystery', toFind: true }).value, NOW2, '2026-11-24');
+    check('toFind create: flagged row, no switch or price task', [tf.row.toFind, tf.row.switchTaskId, tf.createdTasks.length, tf.tasks.length], [true, null, 0, 0]);
+    seed([], []);
+    res = subs.createSubscription(subs.validateNew({ name: 'Mystery', toFind: true }).value);
+    check('toFind create (store): no tasks written', [todoStore.readTasks().length, subs.readSubscriptions()[0].toFind], [0, true]);
+    check('toFind counts in no totals', [subs.computeTotal([{ ...row('a', 5, 'monthly', true), toFind: true }]).total, subs.computeTotals([{ ...row('a', 5, 'monthly', false), toFind: true }, { ...row('b', 7, 'yearly', false), toFind: true }]).notMovedMonthly, subs.computeTotals([{ ...row('b', 7, 'yearly', false), toFind: true }]).notMovedYearly], [40, 0, 0]);
+    {
+      const money = require('./money');
+      const empty = { transactions: [], accounts: [], recurring: [], variable: [], rules: [] };
+      const sm = money.summarize(empty, '2026-11', [row('a', 10, 'monthly', false), { ...row('b', null, 'monthly', false), toFind: true }]);
+      check('money summarize: toFind row skipped', sm.recurring.items.map(i => i.name), ['a']);
+    }
+    res = subs.markOnCard('mystery', complete);
+    check('toFind: mark on card -> 409, stays off', [res.status, subs.readSubscriptions()[0].onCard], [409, false]);
+    res = subs.editSubscription('mystery', { onCard: true }, complete);
+    check('toFind: PATCH onCard -> 409', res.status, 409);
+    res = subs.editSubscription('mystery', { name: 'Mystery 2' }, complete);
+    check('toFind: rename keeps it a no-task row', [res.status, res.body.row.toFind, todoStore.readTasks().length], [200, true, 0]);
+    res = subs.editSubscription('mystery', { price: 6, cycle: 'monthly' }, complete);
+    check('toFind + price -> normal row with a switch task, no price task', [res.body.row.toFind, todoStore.readTasks().map(t => t.name)], [undefined, ['Switch Mystery 2 to the subscription card']]);
+    check('toFind converted: switch task linked, autopay untouched when nothing on card', [res.body.row.switchTaskId === todoStore.readTasks()[0].id, apOf().length], [true, 0]);
+    seed([{ ...row('m', null, 'monthly', false, null), toFind: true }], []);
+    res = subs.editSubscription('m', { toFind: false }, complete);
+    check('untick toFind without a price -> switch and price tasks', [res.body.row.toFind, todoStore.readTasks().map(t => t.name).sort()], [undefined, ['Add the price for m to the subscriptions list', 'Switch m to the subscription card']]);
+    res = subs.editSubscription('m', { toFind: true }, complete);
+    check('normal row cannot be flipped to still-to-find -> 409', res.status, 409);
+    seed([{ ...row('m', null, 'monthly', false, null), toFind: true }], []);
+    res = subs.editSubscription('m', { toFind: true, price: 4 }, complete);
+    check('toFind true with a price -> 400', res.status, 400);
+    // cancel / restore / delete a toFind row
+    seed([{ ...row('m', null, 'monthly', false, null), toFind: true }], [sched('t5', 'Other')]);
+    res = subs.cancelSubscription('m');
+    res = subs.restoreSubscription('m');
+    check('toFind: cancel then restore keeps it still-to-find, no tasks added', [res.body.row.toFind, todoStore.readTasks().map(t => t.id)], [true, ['t5']]);
+    res = subs.deleteSubscription('m');
+    check('toFind: delete', [res.status, subs.readSubscriptions().length], [200, 0]);
+
+    // --- phase 4b: renewals ---
+    const RN = n => `Renews in 7 days: keep or cancel ${n}?`;
+    const renewTasks = () => todoStore.readTasks().filter(t => t.name.startsWith('Renews in 7 days'));
+    seed([row('x', 50, 'yearly', false, 't1')], [sched('t1', 'Switch x to the subscription card')]);
+    res = subs.editSubscription('x', { renewsOn: '2027-03-15' }, complete);
+    check('renewsOn on a yearly row: one task, due 7 days before, Chores, linked', [renewTasks().length, renewTasks()[0].name, renewTasks()[0].dueDate, renewTasks()[0].project, renewTasks()[0].type, res.body.row.renewTaskId === renewTasks()[0].id, res.body.row.renewsOn], [1, RN('x'), '2027-03-08', 'Chores', 'scheduled', true, '2027-03-15']);
+    check('renew task carries no price', /\$|\d+\.\d\d/.test(renewTasks()[0].name + (renewTasks()[0].notes || '')), false);
+    res = subs.editSubscription('x', { renewsOn: '2027-04-01' }, complete);
+    check('changing renewsOn moves the same task', [renewTasks().length, renewTasks()[0].dueDate], [1, '2027-03-25']);
+    res = subs.editSubscription('x', { price: 60 }, complete);
+    check('unrelated edit leaves the renew task alone', [renewTasks().length, renewTasks()[0].dueDate], [1, '2027-03-25']);
+    res = subs.editSubscription('x', { name: 'Xtra' }, complete);
+    check('rename renames the renew task', renewTasks().map(t => t.name), [RN('Xtra')]);
+    res = subs.editSubscription('x', { renewsOn: '2020-01-01' }, complete);
+    check('renewal date already past -> due today', renewTasks()[0].dueDate, todoEngine.todayString());
+    res = subs.editSubscription('x', { renewsOn: '2027-04-01', cycle: 'monthly' }, complete);
+    check('cycle -> monthly removes the renew task, keeps the date', [renewTasks().length, res.body.row.renewTaskId, res.body.row.renewsOn], [0, undefined, '2027-04-01']);
+    res = subs.editSubscription('x', { cycle: 'yearly' }, complete);
+    check('cycle back to yearly with a date -> task again', renewTasks().length, 1);
+    res = subs.editSubscription('x', { renewsOn: null }, complete);
+    check('clearing renewsOn removes the task', [renewTasks().length, 'renewsOn' in res.body.row, 'renewTaskId' in res.body.row], [0, false, false]);
+    res = subs.editSubscription('x', { renewsOn: '2027-04-01' }, complete);
+    res = subs.cancelSubscription('x');
+    check('cancel removes the renew task (and its link), keeps the date', [renewTasks().length, 'renewTaskId' in res.body.row, res.body.row.renewsOn], [0, false, '2027-04-01']);
+    res = subs.restoreSubscription('x');
+    check('restore brings the renew task back', renewTasks().length, 1);
+    res = subs.deleteSubscription('x');
+    check('delete removes the renew task', renewTasks().length, 0);
+    // completing it does nothing else, and later edits don't resurrect it
+    seed([row('x', 50, 'yearly', false, 't1')], [sched('t1', 'Switch x to the subscription card')]);
+    res = subs.editSubscription('x', { renewsOn: '2027-03-15' }, complete);
+    complete(todoStore.readTasks(), renewTasks()[0]);
+    check('completing the renew task: row unchanged apart from the stale link', [subs.readSubscriptions()[0].renewsOn, subs.readSubscriptions()[0].onCard, todoStore.readTasks().map(t => t.id)], ['2027-03-15', false, ['t1']]);
+    res = subs.editSubscription('x', { price: 61 }, complete);
+    check('after completing, an unrelated edit does not recreate it', renewTasks().length, 0);
+    res = subs.editSubscription('x', { renewsOn: '2028-03-15' }, complete);
+    check('after completing, a new date creates the next one', renewTasks().length, 1);
+    // monthly rows and toFind rows never get one
+    seed([], []);
+    res = subs.createSubscription(subs.validateNew({ name: 'Mo', cycle: 'monthly', renewsOn: '2027-05-05', price: 3 }).value);
+    check('monthly row with renewsOn: no renew task', renewTasks().length, 0);
+    res = subs.createSubscription(subs.validateNew({ name: 'Yr', cycle: 'yearly', renewsOn: '2027-05-05', price: 3 }).value);
+    check('add a yearly row with renewsOn: switch task and renew task', [todoStore.readTasks().map(t => t.name).sort()], [['Renews in 7 days: keep or cancel Yr?', 'Switch Mo to the subscription card', 'Switch Yr to the subscription card']]);
+    check('validatePatch: renewsOn good, null clears, bad rejected, toFind bool', [subs.validatePatch({ renewsOn: '2027-01-02' }).value, subs.validatePatch({ renewsOn: '' }).value, !!subs.validatePatch({ renewsOn: '01/02/2027' }).errors, !!subs.validatePatch({ toFind: 'y' }).errors, subs.validatePatch({ toFind: false }).value],
+      [{ renewsOn: '2027-01-02' }, { renewsOn: null }, true, true, { toFind: false }]);
 
     // unknown id
     seed([row('x', 1, 'monthly', false, 't1')], []);

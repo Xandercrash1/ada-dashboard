@@ -33,7 +33,7 @@ function writeSubscriptions(rows) { todoStore.atomicWriteJson(SUBS_FILE, rows); 
 
 // Monthly subs on the card only; yearly are covered by the buffer on purpose.
 function computeTotal(subs) {
-  const items = subs.filter(s => s.status !== 'cancelled' && s.onCard && s.cycle === 'monthly' && s.price != null && Number.isFinite(Number(s.price)));
+  const items = subs.filter(s => s.status !== 'cancelled' && !s.toFind && s.onCard && s.cycle === 'monthly' && s.price != null && Number.isFinite(Number(s.price)));
   const total = items.reduce((sum, s) => sum + Number(s.price), 0) + BUFFER + MIN_PAYMENT;
   return { items, total: Math.round(total * 100) / 100 };
 }
@@ -204,10 +204,18 @@ const NOTE = 'Subscription consolidation: dashboard → Subscriptions page.';
 
 function computeTotals(subs, settings = getSettings()) {
   const onCardMonthly = r2(computeTotal(subs).items.reduce((a, s) => a + Number(s.price), 0));
-  const off = subs.filter(s => s.status !== 'cancelled' && !s.onCard && hasPrice(s));
+  const off = subs.filter(s => s.status !== 'cancelled' && !s.toFind && !s.onCard && hasPrice(s));
   const notMovedMonthly = r2(off.filter(s => s.cycle === 'monthly').reduce((a, s) => a + Number(s.price), 0));
   const notMovedYearly = r2(off.filter(s => s.cycle === 'yearly').reduce((a, s) => a + Number(s.price), 0));
   return { onCardMonthly, autopay: r2(onCardMonthly + BUFFER + MIN_PAYMENT), notMovedMonthly, notMovedYearly, cap: settings.cap, cardArrival: settings.cardArrival };
+}
+
+/** renewsOn: '' / null / undefined -> null; a real YYYY-MM-DD -> itself; anything else pushes an error. */
+function parseRenewsOn(v, errors) {
+  if (v === undefined || v === null || v === '') return null;
+  if (validDay(v)) return v;
+  errors.push('renewsOn must be a real date, YYYY-MM-DD');
+  return null;
 }
 
 /** validateNew(body) -> { value:{name,price,cycle} } | { errors:[...] } */
@@ -226,13 +234,48 @@ function validateNew(body) {
   }
   const cycle = b.cycle === undefined || b.cycle === null || b.cycle === '' ? 'monthly' : b.cycle;
   if (cycle !== 'monthly' && cycle !== 'yearly') errors.push('cycle must be monthly or yearly');
-  return errors.length ? { errors } : { value: { name, price, cycle } };
+  const value = { name, price, cycle };
+  if (b.toFind !== undefined && b.toFind !== null && typeof b.toFind !== 'boolean') errors.push('toFind must be true or false');
+  else if (b.toFind === true) { if (price !== null) errors.push('a still-to-find row has no price yet'); value.toFind = true; }
+  const rn = parseRenewsOn(b.renewsOn, errors);
+  if (rn) value.renewsOn = rn;
+  return errors.length ? { errors } : { value };
 }
 
 /** Switch-task due date: the later of the card arrival and tomorrow. */
 function switchDueDate(today, arrival = getSettings().cardArrival) {
   const tomorrow = todoEngine.addDays(today, 1);
   return arrival > tomorrow ? arrival : tomorrow;
+}
+
+const renewTaskName = name => `Renews in 7 days: keep or cancel ${name}?`;
+const renewDue = (renewsOn, today) => { const d = todoEngine.addDays(renewsOn, -7); return d < today ? today : d; };
+
+/**
+ * syncRenew(row, tasks, today, nowIso, moved) -> { row, tasks }. Pure.
+ * A yearly, live (not cancelled, not still-to-find) row with renewsOn keeps exactly one open task
+ * "Renews in 7 days: keep or cancel X?" (linked by row.renewTaskId). Otherwise there is none.
+ * `moved` = the date or cycle just changed (or the row was restored): move/recreate the task. Without it
+ * a task that was completed is NOT recreated, and an open one only follows a rename.
+ */
+function syncRenew(row, tasks, today, nowIso, moved) {
+  const wanted = row.status !== 'cancelled' && !row.toFind && row.cycle === 'yearly' && !!row.renewsOn;
+  const idx = row.renewTaskId ? tasks.findIndex(t => t.id === row.renewTaskId) : -1;
+  const r = { ...row };
+  const out = tasks.slice();
+  if (!wanted) {
+    if (idx !== -1) out.splice(idx, 1);
+    delete r.renewTaskId;
+    return { row: r, tasks: out };
+  }
+  const name = renewTaskName(r.name), due = renewDue(r.renewsOn, today);
+  if (idx !== -1) out[idx] = { ...out[idx], name, ...(moved ? { dueDate: due } : {}), updatedAt: nowIso };
+  else if (moved || !r.renewTaskId) {
+    const t = newScheduledTask(name, due, nowIso);
+    r.renewTaskId = t.id;
+    out.push(t);
+  }
+  return { row: r, tasks: out };
 }
 
 function slugify(name) {
@@ -248,14 +291,20 @@ function newScheduledTask(name, dueDate, nowIso) {
 /** planCreate(subs, tasks, value, now, today) -> { subs, tasks, row, createdTasks }. Pure. */
 function planCreate(subs, tasks, value, now, today, settings = getSettings()) {
   const nowIso = now.toISOString();
-  const switchTask = newScheduledTask(`Switch ${value.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
-  const createdTasks = [switchTask];
-  if (value.price === null) {
+  const createdTasks = [];
+  const switchTask = value.toFind ? null : newScheduledTask(`Switch ${value.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
+  if (switchTask) createdTasks.push(switchTask);
+  if (value.price === null && !value.toFind) {
     createdTasks.push(newScheduledTask(`Add the price for ${value.name} to the subscriptions list`, todoEngine.addDays(today, 1), nowIso));
   }
   let id = slugify(value.name), n = 2;
   while (subs.some(s => s.id === id)) id = `${slugify(value.name)}-${n++}`;
-  const row = { id, name: value.name, price: value.price, cycle: value.cycle, onCard: false, onCardAt: null, switchTaskId: switchTask.id };
+  let row = { id, name: value.name, price: value.price, cycle: value.cycle, onCard: false, onCardAt: null, switchTaskId: switchTask ? switchTask.id : null };
+  if (value.toFind) row.toFind = true;
+  if (value.renewsOn) row.renewsOn = value.renewsOn;
+  const rn = syncRenew(row, [], today, nowIso, true);
+  row = rn.row;
+  createdTasks.push(...rn.tasks);
   return { subs: subs.concat([row]), tasks: tasks.concat(createdTasks), row, createdTasks };
 }
 
@@ -290,6 +339,7 @@ function markOnCardLocked(id, completeScheduled) {
       const ap = taskList.find(t => t.autoKind === AUTO_KIND);
       return { status: 200, body: { row: rows.find(s => s.id === id), totals: computeTotals(rows), autopayTaskId: ap ? ap.id : null } };
     };
+    if (subs[idx].toFind) return { status: 409, body: { error: 'Still to find: add its price first' } };
     if (subs[idx].onCard) return finish(subs, tasks);
     const sw = subs[idx].switchTaskId && tasks.find(t => t.id === subs[idx].switchTaskId && t.type !== 'recurring');
     if (sw) {
@@ -341,6 +391,15 @@ function validatePatch(body) {
     if (typeof b.onCard !== 'boolean') errors.push('onCard must be true or false');
     else value.onCard = b.onCard;
   }
+  if (b.toFind !== undefined) {
+    if (typeof b.toFind !== 'boolean') errors.push('toFind must be true or false');
+    else value.toFind = b.toFind;
+  }
+  if (b.renewsOn !== undefined) {
+    const n0 = errors.length;
+    const rn = parseRenewsOn(b.renewsOn, errors);
+    if (errors.length === n0) value.renewsOn = rn;   // null clears it
+  }
   if (!errors.length && !Object.keys(value).length) errors.push('nothing to change');
   return errors.length ? { errors } : { value };
 }
@@ -358,8 +417,19 @@ function planEdit(subs, tasks, completed, idx, value, now, today, settings = get
   let row = { ...old };
   for (const k of ['name', 'price', 'cycle']) if (value[k] !== undefined) row[k] = value[k];
   if (value.notes !== undefined) { if (value.notes) row.notes = value.notes; else delete row.notes; }
+  if (value.renewsOn !== undefined) { if (value.renewsOn) row.renewsOn = value.renewsOn; else delete row.renewsOn; }
   let newTasks = tasks.slice();
   let newCompleted = completed;
+
+  // A still-to-find row turns into a normal one once it gets a price or its box is unticked: it gets the tasks the add route makes.
+  const converting = !!old.toFind && (value.toFind === false || (value.toFind !== true && value.price != null));
+  if (converting) {
+    delete row.toFind;
+    const sw = newScheduledTask(`Switch ${row.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
+    row.switchTaskId = sw.id;
+    newTasks.push(sw);
+    if (row.price == null) newTasks.push(newScheduledTask(priceTaskName(row.name), todoEngine.addDays(today, 1), nowIso));
+  }
 
   if (row.name !== old.name) {
     newTasks = newTasks.map(t => {
@@ -381,6 +451,9 @@ function planEdit(subs, tasks, completed, idx, value, now, today, settings = get
       newTasks.push(t);
     }
   }
+  const renewMoved = converting || (value.renewsOn !== undefined && (value.renewsOn || undefined) !== old.renewsOn) || (value.cycle !== undefined && value.cycle !== old.cycle);
+  const rn = syncRenew(row, newTasks, today, nowIso, renewMoved);
+  row = rn.row; newTasks = rn.tasks;
   return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: newTasks, completed: newCompleted, row, wantsOnCard };
 }
 
@@ -398,6 +471,9 @@ function editSubscription(id, value, completeScheduled) {
     const idx = subs.findIndex(s => s.id === id);
     if (idx === -1) return { status: 404, body: { error: 'Subscription not found' } };
     if (value.onCard === true && subs[idx].status === 'cancelled') return { status: 409, body: { error: 'Restore it first' } };
+    if (value.toFind === true && !subs[idx].toFind) return { status: 409, body: { error: 'Only a row added as still-to-find can be one' } };
+    if (value.toFind === true && value.price != null) return { status: 400, body: { error: 'a still-to-find row has no price yet' } };
+    if (value.onCard === true && subs[idx].toFind && value.toFind !== false && value.price == null) return { status: 409, body: { error: 'Still to find: add its price first' } };
     const now = new Date(), today = todoEngine.todayString();
     const completed = todoStore.readCompleted();
     const r = planEdit(subs, todoStore.readTasks(), completed, idx, value, now, today);
@@ -425,13 +501,14 @@ function editSubscription(id, value, completeScheduled) {
 // ---------------------------------------------------------------------------
 
 const priceTaskName = name => `Add the price for ${name} to the subscriptions list`;
-const isRowOpenTask = (row, t) => (t.type !== 'recurring' && t.id === row.switchTaskId) || t.name === priceTaskName(row.name);
+const isRowOpenTask = (row, t) => (t.type !== 'recurring' && t.id === row.switchTaskId) || t.name === priceTaskName(row.name) || (!!row.renewTaskId && t.id === row.renewTaskId);
 
 /** planCancel(subs, tasks, idx, now) -> { subs, tasks, row, changed }. Pure. Open switch/price tasks are removed, not completed. */
 function planCancel(subs, tasks, idx, now) {
   const old = subs[idx];
   if (old.status === 'cancelled') return { subs, tasks, row: old, changed: false };
   const row = { ...old, status: 'cancelled', cancelledAt: now.toISOString(), onCard: false, onCardAt: null };
+  delete row.renewTaskId;
   return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: tasks.filter(t => !isRowOpenTask(old, t)), row, changed: true };
 }
 
@@ -441,11 +518,16 @@ function planRestore(subs, tasks, idx, now, today, settings = getSettings()) {
   if (old.status !== 'cancelled') return { subs, tasks, row: old, changed: false };
   const nowIso = now.toISOString();
   const { status: _s, cancelledAt: _c, ...rest } = old;
+  if (old.toFind) {   // still to find: no tasks of its own
+    return { subs: subs.map((s, i) => (i === idx ? rest : s)), tasks, row: rest, changed: true };
+  }
   const sw = newScheduledTask(`Switch ${old.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
-  const row = { ...rest, onCard: false, onCardAt: null, switchTaskId: sw.id };
+  let row = { ...rest, onCard: false, onCardAt: null, switchTaskId: sw.id };
   const added = [sw];
   if (old.price == null || !Number.isFinite(Number(old.price))) added.push(newScheduledTask(priceTaskName(old.name), todoEngine.addDays(today, 1), nowIso));
-  return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: tasks.concat(added), row, changed: true };
+  const rn = syncRenew(row, tasks.concat(added), today, nowIso, true);
+  row = rn.row;
+  return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: rn.tasks, row, changed: true };
 }
 
 /** planDelete(subs, tasks, idx) -> { subs, tasks }. Pure. */

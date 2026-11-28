@@ -407,7 +407,7 @@ function summarize(store, month, subs) {
     for (let ym = first > windowStart ? first : windowStart; ym <= month; ym = addMonths(ym, 1)) if (!months.has(ym)) missing.push(ym);
     return { accountId: a.id, name: a.name, missing, empty: false };
   }).filter(c => c.missing.length || c.empty);
-  const recurringItems = (Array.isArray(subs) ? subs : []).filter(s => s && s.name && s.status !== 'cancelled').map(s => {
+  const recurringItems = (Array.isArray(subs) ? subs : []).filter(s => s && s.name && s.status !== 'cancelled' && !s.toFind).map(s => {
     const price = s.price != null && Number.isFinite(Number(s.price)) ? Math.round(Number(s.price) * 100) : null;
     return { name: String(s.name), cents: price, cycle: s.cycle === 'yearly' ? 'yearly' : 'monthly', monthlyCents: price == null ? null : (s.cycle === 'yearly' ? Math.round(price / 12) : price) };
   });
@@ -523,7 +523,7 @@ function monthPlan(store, month, subs, now, subscriptionTarget) {
   const isCredit = (id) => !!(id && accounts.get(id) && accounts.get(id).kind === 'credit card');
   const active = (iso) => !iso || localMonth(new Date(iso)) <= month;
   const bills = store.recurring.filter(b => active(b.createdAt)).map(b => ({ ...b, paidWith: b.accountId || null, monthlyCents: monthlyEquivalent(b) }));
-  const subsRows = (Array.isArray(subs) ? subs : []).filter(s => s && s.name && (s.status !== 'cancelled' || (s.cancelledAt && localMonth(new Date(s.cancelledAt)) > month))).map(s => {   // a cancelled row still counts in months before it was cancelled
+  const subsRows = (Array.isArray(subs) ? subs : []).filter(s => s && s.name && !s.toFind && (s.status !== 'cancelled' || (s.cancelledAt && localMonth(new Date(s.cancelledAt)) > month))).map(s => {   // a cancelled row still counts in months before it was cancelled
     const cents = s.price != null && Number.isFinite(Number(s.price)) ? Math.round(Number(s.price) * 100) : null;
     return { name: String(s.name), cents, cycle: s.cycle === 'yearly' ? 'yearly' : 'monthly', onCard: !!s.onCard,
       category: CATEGORY_IDS.has(s.category) ? s.category : 'utilities/streaming', paidWith: s.onCard && subCard ? subCard.id : null,

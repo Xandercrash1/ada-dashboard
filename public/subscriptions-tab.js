@@ -8,7 +8,7 @@
   const root = () => document.getElementById('subscriptions-root');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (n) => '$' + Number(n || 0).toFixed(2);
-  const S = { data: null, err: '', msg: '', dialog: false, confirm: null, settingsOpen: false, settingsForm: { cardArrival: '', cap: '' }, settingsErr: '', busy: false, editId: null, form: { name: '', price: '', cycle: 'monthly', notes: '', onCard: false }, formErr: '' };
+  const S = { data: null, err: '', msg: '', dialog: false, confirm: null, settingsOpen: false, settingsForm: { cardArrival: '', cap: '' }, settingsErr: '', busy: false, editId: null, form: { name: '', price: '', cycle: 'monthly', notes: '', onCard: false, toFind: false, renewsOn: '' }, formErr: '' };
   const input = 'w-full rounded-xl bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 px-3 py-2.5 text-base';
   const btn = 'min-h-[44px] px-4 rounded-xl text-sm font-semibold';
   const primary = btn + ' bg-indigo-600 text-white hover:bg-indigo-500';
@@ -63,22 +63,27 @@
 
   function table(rows) {
     if (!rows.length) return `<div class="${card} text-sm text-gray-500">No subscriptions yet.</div>`;
-    const ordered = rows.filter((s) => s.status !== 'cancelled').concat(rows.filter((s) => s.status === 'cancelled'));
-    const body = ordered.map((s) => {
+    const live = rows.filter((s) => s.status !== 'cancelled' && !s.toFind), find = rows.filter((s) => s.status !== 'cancelled' && s.toFind), done = rows.filter((s) => s.status === 'cancelled');
+    const sep = (label) => `<tr><td colspan="5" class="pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">${label}</td></tr>`;
+    const one = (s) => {
       const gone = s.status === 'cancelled';
       const notes = s.notes ? `<div class="text-xs font-normal text-gray-500 dark:text-gray-400">${esc(s.notes)}</div>` : '';
-      const pill = gone
+      const renews = s.renewsOn && !gone ? `<div class="text-xs font-normal text-gray-500 dark:text-gray-400">Renews ${esc(dateLabel(s.renewsOn))}</div>` : '';
+      const pill = s.toFind && !gone
+        ? '<span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-amber-500/15 text-amber-600 dark:text-amber-400 whitespace-nowrap">Still to find</span>'
+        : gone
         ? `<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Cancelled ${esc(dateLabel(s.cancelledAt ? new Date(s.cancelledAt).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) : ''))}</span>`
         : s.onCard
         ? '<span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">Yes</span>'
         : `<button type="button" class="text-xs font-semibold rounded-full px-2 py-0.5 bg-rose-500/15 text-rose-500 cursor-pointer hover:bg-rose-500/30 focus:outline-none focus:ring-2 focus:ring-rose-500/50" title="Mark as on the card" data-act="oncard" data-id="${esc(s.id)}">No</button>`;
       return `<tr class="border-t border-black/5 dark:border-white/10 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5${gone ? ' opacity-50' : ''}" data-act="edit" data-id="${esc(s.id)}" title="Edit">
-        <td class="py-2.5 pr-3 font-medium"><span${gone ? ' class="line-through"' : ''}>${esc(s.name)}</span>${notes}</td>
+        <td class="py-2.5 pr-3 font-medium"><span${gone ? ' class="line-through"' : ''}>${esc(s.name)}</span>${notes}${renews}</td>
         <td class="py-2.5 pr-3 whitespace-nowrap">${s.price == null ? '<span class="text-gray-400">&mdash;</span>' : money(s.price)}</td>
         <td class="py-2.5 pr-3 capitalize">${esc(s.cycle)}</td>
         <td class="py-2.5 pr-3">${pill}</td>
         <td class="py-2.5 whitespace-nowrap text-gray-500 dark:text-gray-400">${!gone && s.switchDue ? esc(dateLabel(s.switchDue)) : ''}</td></tr>`;
-    }).join('');
+    };
+    const body = live.map(one).join('') + (find.length ? sep('Still to find') + find.map(one).join('') : '') + (done.length ? sep('Cancelled') + done.map(one).join('') : '');
     return `<div class="${card} overflow-x-auto"><table class="w-full text-sm text-left">
       <thead><tr class="text-xs text-gray-500 dark:text-gray-400"><th class="pb-2 pr-3 font-medium">Subscription</th><th class="pb-2 pr-3 font-medium">Price</th><th class="pb-2 pr-3 font-medium">Cycle</th><th class="pb-2 pr-3 font-medium">On sub card</th><th class="pb-2 font-medium">Switch task due</th></tr></thead>
       <tbody>${body}</tbody></table></div>`;
@@ -93,10 +98,12 @@
       <form data-form="add" class="w-full max-w-md ${card} space-y-3" role="dialog" aria-modal="true" aria-labelledby="subs-add-h">
         <h3 id="subs-add-h" class="text-lg font-bold">${S.editId ? 'Edit subscription' : 'Add subscription'}</h3>
         <label class="block text-sm">Name<input class="${input} mt-1" data-f="name" maxlength="100" required autocomplete="off" value="${esc(f.name)}"></label>
-        <label class="block text-sm">Price (optional)<input class="${input} mt-1" data-f="price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="leave blank if unknown" value="${esc(f.price)}"></label>
+        ${!S.editId || f.wasToFind ? `<label class="flex items-center gap-2 text-sm min-h-[44px]"><input type="checkbox" data-f="toFind" class="h-5 w-5"${f.toFind ? ' checked' : ''}> Still to find (no price yet)</label>` : ''}
+        ${f.toFind && !f.wasToFind ? '' : `<label class="block text-sm">Price (optional)<input class="${input} mt-1" data-f="price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="leave blank if unknown" value="${esc(f.price)}"></label>
         <label class="block text-sm">Cycle<select class="${input} mt-1" data-f="cycle"><option value="monthly"${f.cycle === 'monthly' ? ' selected' : ''}>Monthly</option><option value="yearly"${f.cycle === 'yearly' ? ' selected' : ''}>Yearly</option></select></label>
+        <label class="block text-sm">Next renewal (optional)<input class="${input} mt-1" data-f="renewsOn" type="date" value="${esc(f.renewsOn)}"></label>`}
         <label class="block text-sm">Notes (optional)<textarea class="${input} mt-1" data-f="notes" maxlength="500" rows="2">${esc(f.notes)}</textarea></label>
-        ${S.editId && !gone ? `<label class="flex items-center gap-2 text-sm min-h-[44px]"><input type="checkbox" data-f="onCard" class="h-5 w-5"${f.onCard ? ' checked' : ''}> On the subscription card</label>` : ''}
+        ${S.editId && !gone && !f.toFind ? `<label class="flex items-center gap-2 text-sm min-h-[44px]"><input type="checkbox" data-f="onCard" class="h-5 w-5"${f.onCard ? ' checked' : ''}> On the subscription card</label>` : ''}
         ${S.formErr ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.formErr)}</div>` : ''}
         <div class="flex gap-2 flex-wrap items-center">
           ${S.editId ? `<div class="flex gap-2 mr-auto"><button type="button" class="${ghost}" data-act="${gone ? 'restore' : 'cancel-sub'}"${S.busy ? ' disabled' : ''}>${gone ? 'Restore' : 'Cancel subscription'}</button><button type="button" class="${btn} bg-rose-500/15 text-rose-500 hover:bg-rose-500/30" data-act="delete"${S.busy ? ' disabled' : ''}>Delete</button></div>` : ''}
@@ -120,7 +127,7 @@
     // Keep the dialog's typed text across re-renders (focus is restored below).
     const d = S.data;
     el.innerHTML = `<div class="space-y-4 max-w-4xl">
-      <div class="flex items-center justify-between gap-3 flex-wrap"><h2 class="text-xl font-bold">Subscriptions</h2><button class="${primary}" data-act="add">Add subscription</button></div>
+      <div class="flex items-center justify-between gap-3 flex-wrap"><h2 class="text-xl font-bold">Subscriptions</h2><div class="flex gap-2 flex-wrap"><button class="${ghost}" data-act="add" data-find="1">Add one to find</button><button class="${primary}" data-act="add">Add subscription</button></div></div>
       ${S.err ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.err)}</div>` : ''}
       ${S.msg ? `<div class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl px-3 py-2 text-sm">${S.msg}</div>` : ''}
       ${d ? strip(d.settings) + cards(d.totals) + table(d.rows) : '<div class="text-sm text-gray-500">Loading&hellip;</div>'}
@@ -135,11 +142,11 @@
   function onClick(e) {
     const a = e.target.closest('[data-act]'); if (!a) return;
     const act = a.dataset.act;
-    if (act === 'add') { S.dialog = true; S.editId = null; S.form = { name: '', price: '', cycle: 'monthly', notes: '', onCard: false }; S.formErr = ''; render(); const n = root().querySelector('[data-f="name"]'); if (n) n.focus(); }
+    if (act === 'add') { S.dialog = true; S.editId = null; S.form = { name: '', price: '', cycle: 'monthly', notes: '', onCard: false, toFind: a.dataset.find === '1', renewsOn: '' }; S.formErr = ''; render(); const n = root().querySelector('[data-f="name"]'); if (n) n.focus(); }
     else if (act === 'edit') {
       const row = S.data && S.data.rows.find((r) => r.id === a.dataset.id); if (!row) return;
       S.dialog = true; S.editId = row.id; S.formErr = '';
-      S.form = { name: row.name, price: row.price == null ? '' : String(row.price), cycle: row.cycle, notes: row.notes || '', onCard: !!row.onCard, wasOnCard: !!row.onCard };
+      S.form = { name: row.name, price: row.price == null ? '' : String(row.price), cycle: row.cycle, notes: row.notes || '', onCard: !!row.onCard, wasOnCard: !!row.onCard, toFind: !!row.toFind, wasToFind: !!row.toFind, renewsOn: row.renewsOn || '' };
       render(); const n = root().querySelector('[data-f="name"]'); if (n) n.focus();
     }
     else if (act === 'settings') {
@@ -163,7 +170,8 @@
       const ok = root().querySelector('[data-act="confirm-ok"]'); if (ok) ok.focus();
     }
   }
-  function onInput(e) { const sf = e.target.dataset && e.target.dataset.sf; if (sf) { S.settingsForm[sf] = e.target.value; return; } const f = e.target.dataset && e.target.dataset.f; if (f) S.form[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; }
+  function onInput(e) { const sf = e.target.dataset && e.target.dataset.sf; if (sf) { S.settingsForm[sf] = e.target.value; return; } const f = e.target.dataset && e.target.dataset.f; if (!f) return; S.form[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    if (f === 'toFind') { render(); const c = root().querySelector('[data-f="toFind"]'); if (c) c.focus(); } }
   function onKey(e) {
     if (e.key !== 'Escape') return;
     if (S.confirm) { S.confirm = null; render(); }
@@ -219,17 +227,18 @@
     S.busy = true; S.formErr = '';
     try {
       if (S.editId) {
-        const body = { name: S.form.name, price: S.form.price === '' ? null : S.form.price, cycle: S.form.cycle, notes: S.form.notes };
-        if (S.form.onCard !== S.form.wasOnCard) body.onCard = S.form.onCard;
+        const body = { name: S.form.name, price: S.form.price === '' ? null : S.form.price, cycle: S.form.cycle, notes: S.form.notes, renewsOn: S.form.renewsOn || null };
+        if (S.form.wasToFind) body.toFind = S.form.toFind && S.form.price === '';   // a price (or unticking) turns it into a normal row
+        else if (S.form.onCard !== S.form.wasOnCard) body.onCard = S.form.onCard;
         const r = await api({ method: 'PATCH', path: '/' + encodeURIComponent(S.editId), body });
         S.dialog = false; S.editId = null; S.err = ''; S.busy = false;
         S.msg = `Saved ${esc(r.row.name)}. Autopay is now ${money(r.totals.autopay)}.`;
         await load();
         return;
       }
-      const r = await api({ method: 'POST', body: { name: S.form.name, price: S.form.price === '' ? null : S.form.price, cycle: S.form.cycle } });
+      const r = await api({ method: 'POST', body: S.form.toFind ? { name: S.form.name, toFind: true } : { name: S.form.name, price: S.form.price === '' ? null : S.form.price, cycle: S.form.cycle, renewsOn: S.form.renewsOn || undefined } });
       S.dialog = false;
-      S.msg = `Added ${esc(r.row.name)}. Created task${r.tasks.length > 1 ? 's' : ''}: ` + r.tasks.map((t) => `${esc(t.name)} (due ${esc(dateLabel(t.dueDate))})`).join('; ');
+      S.msg = r.tasks.length ? `Added ${esc(r.row.name)}. Created task${r.tasks.length > 1 ? 's' : ''}: ` + r.tasks.map((t) => `${esc(t.name)} (due ${esc(dateLabel(t.dueDate))})`).join('; ') : `Added ${esc(r.row.name)} to find. No tasks yet.`;
       S.err = '';
       S.busy = false;
       await load();
