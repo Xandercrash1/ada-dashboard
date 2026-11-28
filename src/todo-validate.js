@@ -24,6 +24,16 @@ const VALID_TYPES = ['recurring', 'scheduled', 'backlog'];
  */
 const { DEVICES } = require('./item-devices');
 
+// "mac,adaone" / ["mac","adaone"] / "any" (all of DEVICES) -> sorted, deduped, lowercase list; null if a name is unknown.
+function parseDevices(v) {
+  if (v === null || v === undefined || v === '') return [];
+  if (typeof v === 'string') v = v.split(',');
+  if (!Array.isArray(v)) return null;
+  const list = [...new Set(v.map(x => String(x).trim().toLowerCase()).filter(Boolean))];
+  if (list.includes('any')) return list.length === 1 ? [...DEVICES].sort() : null;
+  return list.every(x => DEVICES.includes(x)) ? list.sort() : null;
+}
+
 function normalizeTask(raw, existing) {
   const errors = [];
   raw = raw || {};
@@ -61,9 +71,21 @@ function normalizeTask(raw, existing) {
 
   // Device (Alex, 2026-11-25): the one device an item needs (blank = the VPS or Alex's phone can do it). Session starts
   // on a device pull only their own items. Matching DEVICE-SETUP.md's Devices table.
-  const deviceRaw = pick('device', null);
-  const device = deviceRaw === null || deviceRaw === undefined || deviceRaw === '' ? null : String(deviceRaw).trim().toLowerCase();
+  // `devices` (2+ computers, the first to start it claims it): then `device` is null. A patch that sets one field replaces
+  // the other, so editing a task's device never leaves a stale list behind.
+  let deviceRaw, devicesRaw;
+  if (raw.devices !== undefined && raw.devices !== null && raw.devices !== '') {
+    devicesRaw = raw.devices; deviceRaw = raw.device;
+    if (deviceRaw !== undefined && deviceRaw !== null && deviceRaw !== '') errors.push('set either device or devices, not both');
+  } else if (raw.device !== undefined || raw.devices !== undefined) { deviceRaw = raw.device; devicesRaw = null; }
+  else { deviceRaw = existing ? existing.device : null; devicesRaw = existing ? existing.devices : null; }
+  let devList = parseDevices(devicesRaw);
+  if (devList === null) { errors.push(`devices must be a list of: ${DEVICES.join(', ')}`); devList = []; }
+  let device = deviceRaw === null || deviceRaw === undefined || deviceRaw === '' ? null : String(deviceRaw).trim().toLowerCase();
   if (device !== null && !DEVICES.includes(device)) errors.push(`device must be one of ${DEVICES.join(', ')} (or empty)`);
+  if (devList.length === 1) { if (device === null) device = devList[0]; devList = []; }
+  const devices = devList.length ? devList : null;
+  if (devices) device = null;
 
   // Waits for (Alex, 2026-11-26): this task can't be done until another task is checked off (src/waits-for.js).
   // releaseBusinessDays sits on the task being waited on: when it's checked off, waiters come back that many weekdays later.
@@ -84,6 +106,7 @@ function normalizeTask(raw, existing) {
     name,
     project,
     device,
+    devices,
     waitsFor,
     releaseBusinessDays,
     priority: typeof priority === 'string' && priority ? priority : 'Low',
@@ -174,4 +197,4 @@ function normalizeTask(raw, existing) {
   return { task };
 }
 
-module.exports = { normalizeTask, VALID_TYPES, DEVICES };
+module.exports = { normalizeTask, parseDevices, VALID_TYPES, DEVICES };

@@ -16,6 +16,7 @@
  *   node todo-cli.js list [--project X] [--type Y] [--json]
  *   node todo-cli.js complete <id> [--json]
  *   node todo-cli.js today [--device adaone|none] [--json]   (list takes --device too)
+ *   node todo-cli.js claim <id> --device X [--json]          (a task listing several computers: the first to claim it keeps it)
  *
  * `--json` on every command for machine-readable output (contract §5 —
  * "the caller is usually an AI agent").
@@ -25,6 +26,7 @@ const engine = require('./todo-engine');
 const store = require('./todo-store');
 const automation = require('./automation-rules').create({ store, engine, sharing: require('./sharing') });   // docs/TASK-AUTOMATION.md
 const { normalizeTask } = require('./todo-validate');
+const { taskDevices } = require('./item-devices');
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -75,7 +77,8 @@ function cmdAdd(args) {
     type: args.type,
     name: args.name,
     project: args.project,
-    device: args.device,
+    // --device mac,adaone or --device any (every computer) lists several; the first to start it claims it (todo-cli.js claim)
+    ...(typeof args.device === 'string' && (args.device.includes(',') || args.device.trim().toLowerCase() === 'any') ? { devices: args.device } : { device: args.device }),
     waitsFor: args['waits-for'],
     releaseBusinessDays: args['release-business-days'],
     priority: args.priority,
@@ -117,9 +120,9 @@ function cmdAdd(args) {
 // --device X: X's items plus those of every device X reaches over SSH (src/device-reach.js); --exact: X's only;
 // --device none: items with no device (the VPS or Alex's phone).
 function deviceFilter(args) {
-  if (args.device === 'none') return (t) => !t.device;
+  if (args.device === 'none') return (t) => !taskDevices(t).length;
   const devs = args.exact ? [args.device] : require('./device-reach').reachable(store.DATA_DIR, args.device);
-  return (t) => devs.includes(t.device);
+  return (t) => taskDevices(t).some(d => devs.includes(d));   // a several-computers task matches if any of them is in reach
 }
 
 function cmdList(args) {
@@ -153,6 +156,32 @@ function cmdComplete(args) {
 
   if (result.error) return fail(args.json, result.error);
   output(args.json, result, r => console.log(r.task ? `Completed "${r.task.name}" — next due ${r.task.nextDue}.` : `Completed "${r.completedEntry.name}".`));
+}
+
+// claim <id> --device X: a task listing several computers goes to the first that starts it. Under the store lock, X
+// must be in its `devices`; the task then needs X alone. Already X's: no change. Another device's, or X not listed: refused.
+function cmdClaim(args) {
+  const id = args._[0], dev = typeof args.device === 'string' ? args.device.trim().toLowerCase() : '';
+  if (!id || !dev) return fail(args.json, 'Usage: todo-cli.js claim <id> --device X');
+  let result;
+  store.withLock(() => {
+    const tasks = store.readTasks();
+    const task = tasks.find(t => t.id === id);
+    if (!task) { result = { error: `No task with id ${id}` }; return; }
+    if (task.device === dev && !(task.devices && task.devices.length)) { result = { task }; return; }   // already ours: no-op
+    if (!(task.devices && task.devices.includes(dev))) {
+      result = { error: task.device ? `"${task.name}" is already claimed by ${task.device}, not ${dev}.` : `"${task.name}" doesn't list ${dev} (${(task.devices || []).join(', ') || 'no computers'}).` };
+      return;
+    }
+    task.device = dev;
+    delete task.devices;
+    task.notes = `${task.notes ? task.notes + '\n' : ''}Claimed by ${dev}, ${new Date().toISOString()}`;
+    task.updatedAt = new Date().toISOString();
+    store.writeTasks(tasks);
+    result = { task };
+  });
+  if (result.error) return fail(args.json, result.error);
+  output(args.json, result.task, t => console.log(`Claimed "${t.name}" (${t.id}) for ${t.device}.`));
 }
 
 function cmdToday(args) {
@@ -200,13 +229,15 @@ function main() {
       case 'add': return cmdAdd(args);
       case 'list': return cmdList(args);
       case 'complete': return cmdComplete(args);
+      case 'claim': return cmdClaim(args);
       case 'today': return cmdToday(args);
       default:
         process.stderr.write(
-          'Usage: todo-cli.js <add|list|complete|today> [...args] [--json]\n' +
-          '  add --project P --type recurring|scheduled|backlog --name N [--due YYYY-MM-DD] [--next-due YYYY-MM-DD] [--frequency "..."] [--time "8:00pm"] [--device mac|adaone|adatwo] [--waits-for TASK_ID] [--release-business-days N] [--priority High|Medium|Low] [--notes "..."] [--skippable true|false] [--end-date YYYY-MM-DD] [--added YYYY-MM-DD]\n' +
+          'Usage: todo-cli.js <add|list|complete|claim|today> [...args] [--json]\n' +
+          '  add --project P --type recurring|scheduled|backlog --name N [--due YYYY-MM-DD] [--next-due YYYY-MM-DD] [--frequency "..."] [--time "8:00pm"] [--device mac|adaone|adatwo|mac,adaone|any] [--waits-for TASK_ID] [--release-business-days N] [--priority High|Medium|Low] [--notes "..."] [--skippable true|false] [--end-date YYYY-MM-DD] [--added YYYY-MM-DD]\n' +
           '  list [--project P] [--type T]\n' +
           '  complete <id>\n' +
+          '  claim <id> --device X   (a task listing several computers goes to the first that claims it)\n' +
           '  today\n'
         );
         process.exitCode = 1;
