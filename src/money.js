@@ -523,7 +523,7 @@ function monthPlan(store, month, subs, now, subscriptionTarget) {
   const isCredit = (id) => !!(id && accounts.get(id) && accounts.get(id).kind === 'credit card');
   const active = (iso) => !iso || localMonth(new Date(iso)) <= month;
   const bills = store.recurring.filter(b => active(b.createdAt)).map(b => ({ ...b, paidWith: b.accountId || null, monthlyCents: monthlyEquivalent(b) }));
-  const subsRows = (Array.isArray(subs) ? subs : []).filter(s => s && s.name && s.status !== 'cancelled').map(s => {
+  const subsRows = (Array.isArray(subs) ? subs : []).filter(s => s && s.name && (s.status !== 'cancelled' || (s.cancelledAt && localMonth(new Date(s.cancelledAt)) > month))).map(s => {   // a cancelled row still counts in months before it was cancelled
     const cents = s.price != null && Number.isFinite(Number(s.price)) ? Math.round(Number(s.price) * 100) : null;
     return { name: String(s.name), cents, cycle: s.cycle === 'yearly' ? 'yearly' : 'monthly', onCard: !!s.onCard,
       category: CATEGORY_IDS.has(s.category) ? s.category : 'utilities/streaming', paidWith: s.onCard && subCard ? subCard.id : null,

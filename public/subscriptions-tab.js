@@ -49,7 +49,7 @@
       const gone = s.status === 'cancelled';
       const notes = s.notes ? `<div class="text-xs font-normal text-gray-500 dark:text-gray-400">${esc(s.notes)}</div>` : '';
       const pill = gone
-        ? `<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Cancelled ${esc(dateLabel((s.cancelledAt || '').slice(0, 10)))}</span>`
+        ? `<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Cancelled ${esc(dateLabel(s.cancelledAt ? new Date(s.cancelledAt).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) : ''))}</span>`
         : s.onCard
         ? '<span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">Yes</span>'
         : `<button type="button" class="text-xs font-semibold rounded-full px-2 py-0.5 bg-rose-500/15 text-rose-500 cursor-pointer hover:bg-rose-500/30 focus:outline-none focus:ring-2 focus:ring-rose-500/50" title="Mark as on the card" data-act="oncard" data-id="${esc(s.id)}">No</button>`;

@@ -914,3 +914,13 @@ test('HTTP: subscription card actual vs target, not deletable, no typed autopay;
     }
   } finally { srv.close(); }
 });
+
+test('month plan: a cancelled subscription counts only in months before it was cancelled', () => {
+  const dir = freshDir();
+  const m = money.create({ dataDir: dir, clock: () => NOW });
+  const subs = [{ id: 'a', name: 'Kept', price: 5, cycle: 'monthly' }, { id: 'c', name: 'Gone', price: 7, cycle: 'monthly', status: 'cancelled', cancelledAt: '2026-11-10T15:00:00Z' }];
+  const names = (month) => JSON.stringify(money.monthPlan(m.read(), month, subs, NOW));
+  assert.ok(names('2026-10').includes('Gone'));
+  assert.ok(!names('2026-11').includes('Gone'));
+  assert.ok(names('2026-11').includes('Kept'));
+});
