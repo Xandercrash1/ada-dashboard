@@ -105,7 +105,7 @@ check('totals: empty', subs.computeTotals([]).autopay, 40);
   const fs = require('fs'), os = require('os'), path = require('path');
   const todoStore = require('./todo-store');
   // DATA_DIR is fixed at ../data, so back up and restore whatever the store files hold.
-  const files = [subs.SUBS_FILE, path.join(todoStore.DATA_DIR, 'todo_tasks.json'), path.join(todoStore.DATA_DIR, 'todo_completed.json')];
+  const files = [subs.SUBS_FILE, subs.SETTINGS_FILE, path.join(todoStore.DATA_DIR, 'todo_tasks.json'), path.join(todoStore.DATA_DIR, 'todo_completed.json')];
   const backup = files.map(f => (fs.existsSync(f) ? fs.readFileSync(f) : null));
   try {
     // Mirror of server.js completeTaskLocked (log first, remove second, then the hook).
@@ -176,7 +176,7 @@ check('patch validate: price null ok, notes 500 ok', [subs.validatePatch({ price
 {
   const fs = require('fs'), path = require('path');
   const todoStore = require('./todo-store');
-  const files = [subs.SUBS_FILE, path.join(todoStore.DATA_DIR, 'todo_tasks.json'), path.join(todoStore.DATA_DIR, 'todo_completed.json')];
+  const files = [subs.SUBS_FILE, subs.SETTINGS_FILE, path.join(todoStore.DATA_DIR, 'todo_tasks.json'), path.join(todoStore.DATA_DIR, 'todo_completed.json')];
   const backup = files.map(f => (fs.existsSync(f) ? fs.readFileSync(f) : null));
   try {
     const complete = (tasks, task) => {
@@ -306,6 +306,48 @@ check('patch validate: price null ok, notes 500 ok', [subs.validatePatch({ price
     seed([row('x', 1, 'monthly', false, 't1')], []);
     check('route cancel: non-admin 403, admin 200', [r2['post /api/subscriptions/:id/cancel']({ params: { id: 'x' } }).status, r2['post /api/subscriptions/:id/cancel']({ admin: true, params: { id: 'x' } }).status], [403, 200]);
     check('route restore 200, delete 200 then 404', [r2['post /api/subscriptions/:id/restore']({ admin: true, params: { id: 'x' } }).status, r2['delete /api/subscriptions/:id']({ admin: true, params: { id: 'x' } }).status, r2['delete /api/subscriptions/:id']({ admin: true, params: { id: 'x' } }).status], [200, 200, 404]);
+
+    // --- phase 3: settings ---
+    try { fs.unlinkSync(subs.SETTINGS_FILE); } catch (e) { /* none */ }
+    check('settings: defaults when the file is missing', subs.getSettings(), { cardArrival: '2026-12-09', cap: 300 });
+    check('settings validate: bad date/cap rejected', [subs.validateSettings({ cardArrival: '2026-02-30' }), subs.validateSettings({ cardArrival: 'tomorrow' }), subs.validateSettings({ cap: 0 }), subs.validateSettings({ cap: 10001 }), subs.validateSettings({ cap: 'x' }), subs.validateSettings({})].map(v => !!v.errors), [true, true, true, true, true, true]);
+    check('settings validate: good values', subs.validateSettings({ cardArrival: '2026-12-20', cap: '250.5' }).value, { cardArrival: '2026-12-20', cap: 250.5 });
+    fs.writeFileSync(subs.SETTINGS_FILE, '{not json');
+    check('settings: garbage file -> defaults', subs.getSettings(), { cardArrival: '2026-12-09', cap: 300 });
+    fs.writeFileSync(subs.SETTINGS_FILE, JSON.stringify({ cardArrival: 'bad', cap: 99999 }));
+    check('settings: invalid saved values ignored', subs.getSettings(), { cardArrival: '2026-12-09', cap: 300 });
+    try { fs.unlinkSync(subs.SETTINGS_FILE); } catch (e) { /* none */ }
+
+    // arrival change moves OPEN switch tasks linked from rows only
+    const mkTask = (id, name, due, created) => ({ ...sched(id, name), dueDate: due, createdAt: created });
+    seed([row('x', 5, 'monthly', false, 't1'), row('y', 5, 'monthly', true, 't2'), row('z', 5, 'monthly', false, 't3')],
+      [mkTask('t1', 'Switch x to the subscription card', '2026-12-09', '2026-11-24T15:00:00.000Z'), mkTask('t3', 'Switch z to the subscription card', '2026-12-09', '2026-12-15T15:00:00.000Z'), mkTask('p1', 'Switch x to the subscription card', '2026-12-09', '2026-11-24T15:00:00.000Z'), mkTask('o1', 'Other task', '2026-12-09', '2026-11-24T15:00:00.000Z')]);
+    res = subs.saveSettings({ cardArrival: '2026-12-30' });
+    const dueOf = id => todoStore.readTasks().find(t => t.id === id).dueDate;
+    check('arrival change: open linked switch tasks moved, unlinked/other untouched', [res.status, res.body.movedTasks, dueOf('t1'), dueOf('t3'), dueOf('p1'), dueOf('o1')], [200, 2, '2026-12-30', '2026-12-30', '2026-12-09', '2026-12-09']);
+    check('arrival change: persisted, getSettings and totals follow', [subs.getSettings().cardArrival, subs.getSettings().cap, res.body.totals.cardArrival], ['2026-12-30', 300, '2026-12-30']);
+    res = subs.saveSettings({ cardArrival: '2026-11-01' });
+    check('arrival in the past: due the day after the task was made (or later)', [dueOf('t1'), dueOf('t3')], ['2026-11-25', '2026-12-16']);
+    res = subs.saveSettings({ cap: 450 });
+    check('cap change only: no tasks moved, persisted next to arrival', [res.body.movedTasks, subs.getSettings()], [0, { cardArrival: '2026-11-01', cap: 450 }]);
+    check('computeTotals uses saved settings', [subs.computeTotals([]).cap, subs.computeTotals([]).cardArrival], [450, '2026-11-01']);
+    check('add route rule follows saved arrival', subs.switchDueDate('2026-11-20'), '2026-11-21');
+    // completed switch tasks aren't in the task list, so nothing to move; a cancelled row's link is ignored
+    seed([{ ...row('c', 5, 'monthly', false, 't1'), status: 'cancelled' }], [mkTask('t1', 'Switch c to the subscription card', '2026-12-09', '2026-11-24T15:00:00.000Z')]);
+    res = subs.saveSettings({ cardArrival: '2027-01-15' });
+    check('arrival change: cancelled row link ignored', [res.body.movedTasks, dueOf('t1')], [0, '2026-12-09']);
+    try { fs.unlinkSync(subs.SETTINGS_FILE); } catch (e) { /* none */ }
+    {
+      const rs = {};
+      const mk2 = (name) => (p, g, h) => { rs[name + ' ' + p] = (req) => { let out = { status: 200 }; const rr = { status(c) { out = { status: c }; return rr; }, json(b) { out.body = b; } }; g(req, rr, () => h(req, rr)); return out; }; };
+      const order = [];
+      subs.mount({ get: (p, ...a) => { order.push('get ' + p); mk2('get')(p, ...a); }, post() {}, delete() {}, patch: (p, ...a) => { order.push('patch ' + p); mk2('patch')(p, ...a); } }, { isAdminReq: q => !!q.admin, completeScheduled: complete });
+      check('settings routes registered before the /:id routes', [order.indexOf('patch /api/subscriptions/settings') < order.indexOf('patch /api/subscriptions/:id'), order.indexOf('get /api/subscriptions/settings') < order.indexOf('get /api/subscriptions')], [true, true]);
+      seed([], []);
+      check('settings route: non-admin 403, bad 400, good 200', [rs['patch /api/subscriptions/settings']({ params: {}, body: { cap: 5 } }).status, rs['patch /api/subscriptions/settings']({ admin: true, body: { cap: 0 } }).status, rs['patch /api/subscriptions/settings']({ admin: true, body: { cap: 5 } }).status], [403, 400, 200]);
+      check('settings route: GET returns saved', rs['get /api/subscriptions/settings']({ admin: true }).body.settings.cap, 5);
+      try { fs.unlinkSync(subs.SETTINGS_FILE); } catch (e) { /* none */ }
+    }
 
     // unknown id
     seed([row('x', 1, 'monthly', false, 't1')], []);

@@ -15,6 +15,7 @@
  * the caller is about to write.
  */
 
+const fs = require('fs');
 const path = require('path');
 const todoStore = require('./todo-store');
 const todoEngine = require('./todo-engine');
@@ -135,13 +136,73 @@ function onTaskCompleted(completedTask, tasks) {
 // ---------------------------------------------------------------------------
 
 // Small settings object. cardArrival = the day the subscription card shows up.
-const SETTINGS = { cardArrival: '2026-12-09', cap: 300 };
+const SETTINGS = { cardArrival: '2026-12-09', cap: 300 };   // the defaults; read the live values through getSettings()
+const SETTINGS_FILE = path.join(todoStore.DATA_DIR, 'subscriptions-settings.json');
+const validDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + 'T12:00:00Z')) && new Date(v + 'T12:00:00Z').toISOString().slice(0, 10) === v;
+
+/** getSettings() -> defaults with any valid saved overrides on top. Never throws; a missing or bad file means the defaults. */
+function getSettings() {
+  let saved = {};
+  try { const v = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) saved = v; } catch (e) { /* defaults */ }
+  const out = { ...SETTINGS };
+  if (validDay(saved.cardArrival)) out.cardArrival = saved.cardArrival;
+  if (typeof saved.cap === 'number' && Number.isFinite(saved.cap) && saved.cap >= 1 && saved.cap <= 10000) out.cap = saved.cap;
+  return out;
+}
+
+/** validateSettings(body) -> { value:{cardArrival?,cap?} } | { errors:[...] } */
+function validateSettings(body) {
+  const b = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const errors = [], value = {};
+  if (b.cardArrival !== undefined) { if (validDay(b.cardArrival)) value.cardArrival = b.cardArrival; else errors.push('cardArrival must be a real date, YYYY-MM-DD'); }
+  if (b.cap !== undefined) {
+    const n = typeof b.cap === 'number' ? b.cap : (typeof b.cap === 'string' && b.cap.trim() !== '' ? Number(b.cap) : NaN);
+    if (!Number.isFinite(n) || n < 1 || n > 10000) errors.push('cap must be a number from 1 to 10000'); else value.cap = r2(n);
+  }
+  if (!errors.length && !Object.keys(value).length) errors.push('nothing to change');
+  return errors.length ? { errors } : { value };
+}
+
+/**
+ * planArrivalMove(subs, tasks, newArrival, today) -> { tasks, moved }. Pure.
+ * Every OPEN switch task linked from a row moves to switchDueDate(the day the task was made, newArrival):
+ * due on arrival, or the day after it was made if later. Done, cancelled and unlinked tasks are left alone.
+ */
+function planArrivalMove(subs, tasks, newArrival, today, nowIso) {
+  const linked = new Set(subs.filter(s => s.status !== 'cancelled' && !s.toFind && s.switchTaskId).map(s => s.switchTaskId));
+  let moved = 0;
+  const out = tasks.map(t => {
+    if (!linked.has(t.id) || t.type === 'recurring') return t;
+    const made = t.createdAt && !Number.isNaN(Date.parse(t.createdAt)) ? todoEngine.todayString(new Date(t.createdAt)) : today;
+    const due = switchDueDate(made, newArrival);
+    if (t.dueDate === due) return t;
+    moved++;
+    return { ...t, dueDate: due, updatedAt: nowIso };
+  });
+  return { tasks: out, moved };
+}
+
+/** Store-backed settings change. One todo-store lock. -> { status, body } */
+function saveSettings(value) {
+  return todoStore.withLock(() => {
+    const old = getSettings();
+    const next = { ...old, ...value };
+    todoStore.atomicWriteJson(SETTINGS_FILE, next);
+    let moved = 0;
+    if (value.cardArrival !== undefined && value.cardArrival !== old.cardArrival) {
+      const r = planArrivalMove(readSubscriptions(), todoStore.readTasks(), next.cardArrival, todoEngine.todayString(), new Date().toISOString());
+      if (r.moved) todoStore.writeTasks(r.tasks);
+      moved = r.moved;
+    }
+    return { status: 200, body: { settings: next, totals: computeTotals(readSubscriptions(), next), movedTasks: moved } };
+  });
+}
 
 const r2 = n => Math.round(n * 100) / 100;
 const hasPrice = s => s.price != null && Number.isFinite(Number(s.price));
 const NOTE = 'Subscription consolidation: dashboard → Subscriptions page.';
 
-function computeTotals(subs, settings = SETTINGS) {
+function computeTotals(subs, settings = getSettings()) {
   const onCardMonthly = r2(computeTotal(subs).items.reduce((a, s) => a + Number(s.price), 0));
   const off = subs.filter(s => s.status !== 'cancelled' && !s.onCard && hasPrice(s));
   const notMovedMonthly = r2(off.filter(s => s.cycle === 'monthly').reduce((a, s) => a + Number(s.price), 0));
@@ -169,7 +230,7 @@ function validateNew(body) {
 }
 
 /** Switch-task due date: the later of the card arrival and tomorrow. */
-function switchDueDate(today, arrival = SETTINGS.cardArrival) {
+function switchDueDate(today, arrival = getSettings().cardArrival) {
   const tomorrow = todoEngine.addDays(today, 1);
   return arrival > tomorrow ? arrival : tomorrow;
 }
@@ -185,7 +246,7 @@ function newScheduledTask(name, dueDate, nowIso) {
 }
 
 /** planCreate(subs, tasks, value, now, today) -> { subs, tasks, row, createdTasks }. Pure. */
-function planCreate(subs, tasks, value, now, today, settings = SETTINGS) {
+function planCreate(subs, tasks, value, now, today, settings = getSettings()) {
   const nowIso = now.toISOString();
   const switchTask = newScheduledTask(`Switch ${value.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
   const createdTasks = [switchTask];
@@ -291,7 +352,7 @@ function validatePatch(body) {
  * (reopening or recreating its switch task). Putting a row ON the card (wantsOnCard) is left to the
  * caller, because it must complete the switch task through the shared completion path.
  */
-function planEdit(subs, tasks, completed, idx, value, now, today, settings = SETTINGS) {
+function planEdit(subs, tasks, completed, idx, value, now, today, settings = getSettings()) {
   const nowIso = now.toISOString();
   const old = subs[idx];
   let row = { ...old };
@@ -375,7 +436,7 @@ function planCancel(subs, tasks, idx, now) {
 }
 
 /** planRestore(subs, tasks, idx, now, today, settings) -> { subs, tasks, row, changed }. Pure. Back off the card, so a switch task (and a price task when price is blank) is created. */
-function planRestore(subs, tasks, idx, now, today, settings = SETTINGS) {
+function planRestore(subs, tasks, idx, now, today, settings = getSettings()) {
   const old = subs[idx];
   if (old.status !== 'cancelled') return { subs, tasks, row: old, changed: false };
   const nowIso = now.toISOString();
@@ -425,11 +486,22 @@ const deleteSubscription = id => changeRow(id, 'delete');
 // Admin-only, checked on the routes themselves (no non-admin allowlist line in server.js).
 function mount(app, { isAdminReq, completeScheduled }) {
   const guard = (req, res, next) => (isAdminReq(req) ? next() : res.status(403).json({ error: 'Not available for your account.' }));
+  app.get('/api/subscriptions/settings', guard, (req, res) => {
+    try { res.json({ settings: getSettings() }); } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+  app.patch('/api/subscriptions/settings', guard, (req, res) => {
+    try {
+      const v = validateSettings(req.body);
+      if (v.errors) return res.status(400).json({ error: v.errors.join('; '), errors: v.errors });
+      const r = saveSettings(v.value);
+      res.status(r.status).json(r.body);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
   app.get('/api/subscriptions', guard, (req, res) => {
     try {
       const rows = readSubscriptions();
       const byId = new Map(todoStore.readTasks().map(t => [t.id, t]));
-      res.json({ rows: rows.map(s => ({ ...s, switchDue: (byId.get(s.switchTaskId) || {}).dueDate || null })), totals: computeTotals(rows), settings: SETTINGS });
+      res.json({ rows: rows.map(s => ({ ...s, switchDue: (byId.get(s.switchTaskId) || {}).dueDate || null })), totals: computeTotals(rows), settings: getSettings() });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
   app.post('/api/subscriptions/:id/on-card', guard, (req, res) => {
@@ -465,5 +537,5 @@ function mount(app, { isAdminReq, completeScheduled }) {
   });
 }
 
-module.exports = { SUBS_FILE, AUTO_KIND, SETTINGS, BUFFER, MIN_PAYMENT, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, applyOnCard, markOnCard, onTaskCompleted,
+module.exports = { SUBS_FILE, SETTINGS_FILE, AUTO_KIND, SETTINGS, getSettings, validateSettings, planArrivalMove, saveSettings, BUFFER, MIN_PAYMENT, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, applyOnCard, markOnCard, onTaskCompleted,
   computeTotals, validateNew, validatePatch, planEdit, recalcAutopay, editSubscription, planCancel, planRestore, planDelete, cancelSubscription, restoreSubscription, deleteSubscription, upsertAutopay, switchDueDate, planCreate, createSubscription, mount };

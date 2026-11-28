@@ -8,7 +8,7 @@
   const root = () => document.getElementById('subscriptions-root');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (n) => '$' + Number(n || 0).toFixed(2);
-  const S = { data: null, err: '', msg: '', dialog: false, confirm: null, busy: false, editId: null, form: { name: '', price: '', cycle: 'monthly', notes: '', onCard: false }, formErr: '' };
+  const S = { data: null, err: '', msg: '', dialog: false, confirm: null, settingsOpen: false, settingsForm: { cardArrival: '', cap: '' }, settingsErr: '', busy: false, editId: null, form: { name: '', price: '', cycle: 'monthly', notes: '', onCard: false }, formErr: '' };
   const input = 'w-full rounded-xl bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 px-3 py-2.5 text-base';
   const btn = 'min-h-[44px] px-4 rounded-xl text-sm font-semibold';
   const primary = btn + ' bg-indigo-600 text-white hover:bg-indigo-500';
@@ -40,6 +40,25 @@
         <div class="text-2xl font-bold">${money(t.notMovedMonthly)}<span class="text-base font-medium text-gray-500 dark:text-gray-400">/mo</span></div>
         <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">+ ${money(t.notMovedYearly)}/yr &middot; card arrives ${esc(dateLabel(t.cardArrival))}</div></div>
     </div>`;
+  }
+
+  function strip(st) {
+    if (!st) return '';
+    return `<div class="${card} flex items-center justify-between gap-3 flex-wrap text-sm"><span>Card arrives <strong>${esc(dateLabel(st.cardArrival))}</strong> &middot; Cap <strong>$${esc(st.cap)}</strong></span><button type="button" class="${ghost}" data-act="settings">Edit</button></div>`;
+  }
+
+  function settingsDialog() {
+    if (!S.settingsOpen) return '';
+    const f = S.settingsForm;
+    return `<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" data-act="backdrop-settings">
+      <form data-form="settings" class="w-full max-w-md ${card} space-y-3" role="dialog" aria-modal="true" aria-labelledby="subs-settings-h">
+        <h3 id="subs-settings-h" class="text-lg font-bold">Card settings</h3>
+        <label class="block text-sm">Card arrival date<input class="${input} mt-1" data-sf="cardArrival" type="date" required value="${esc(f.cardArrival)}"></label>
+        <label class="block text-sm">Cap per month ($)<input class="${input} mt-1" data-sf="cap" type="number" inputmode="decimal" min="1" max="10000" step="0.01" required value="${esc(f.cap)}"></label>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Changing the arrival date moves the due date of every open &ldquo;Switch &hellip; to the subscription card&rdquo; task.</p>
+        ${S.settingsErr ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.settingsErr)}</div>` : ''}
+        <div class="flex gap-2 justify-end"><button type="button" class="${ghost}" data-act="settings-close">Close</button><button type="submit" class="${primary}"${S.busy ? ' disabled' : ''}>Save</button></div>
+      </form></div>`;
   }
 
   function table(rows) {
@@ -104,8 +123,8 @@
       <div class="flex items-center justify-between gap-3 flex-wrap"><h2 class="text-xl font-bold">Subscriptions</h2><button class="${primary}" data-act="add">Add subscription</button></div>
       ${S.err ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.err)}</div>` : ''}
       ${S.msg ? `<div class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl px-3 py-2 text-sm">${S.msg}</div>` : ''}
-      ${d ? cards(d.totals) + table(d.rows) : '<div class="text-sm text-gray-500">Loading&hellip;</div>'}
-    </div>${dialog()}${confirmDialog()}`;
+      ${d ? strip(d.settings) + cards(d.totals) + table(d.rows) : '<div class="text-sm text-gray-500">Loading&hellip;</div>'}
+    </div>${dialog()}${settingsDialog()}${confirmDialog()}`;
   }
 
   async function load() {
@@ -123,6 +142,12 @@
       S.form = { name: row.name, price: row.price == null ? '' : String(row.price), cycle: row.cycle, notes: row.notes || '', onCard: !!row.onCard, wasOnCard: !!row.onCard };
       render(); const n = root().querySelector('[data-f="name"]'); if (n) n.focus();
     }
+    else if (act === 'settings') {
+      const st = S.data && S.data.settings; if (!st) return;
+      S.settingsOpen = true; S.settingsErr = ''; S.settingsForm = { cardArrival: st.cardArrival, cap: String(st.cap) }; render();
+      const n = root().querySelector('[data-sf="cardArrival"]'); if (n) n.focus();
+    }
+    else if (act === 'settings-close' || (act === 'backdrop-settings' && e.target === a)) { S.settingsOpen = false; render(); }
     else if (act === 'cancel' || (act === 'backdrop' && e.target === a)) { S.dialog = false; render(); }
     else if (act === 'oncard') {
       const row = S.data && S.data.rows.find((r) => r.id === a.dataset.id); if (!row) return;
@@ -138,10 +163,11 @@
       const ok = root().querySelector('[data-act="confirm-ok"]'); if (ok) ok.focus();
     }
   }
-  function onInput(e) { const f = e.target.dataset && e.target.dataset.f; if (f) S.form[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; }
+  function onInput(e) { const sf = e.target.dataset && e.target.dataset.sf; if (sf) { S.settingsForm[sf] = e.target.value; return; } const f = e.target.dataset && e.target.dataset.f; if (f) S.form[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; }
   function onKey(e) {
     if (e.key !== 'Escape') return;
     if (S.confirm) { S.confirm = null; render(); }
+    else if (S.settingsOpen) { S.settingsOpen = false; render(); }
     else if (S.dialog) { S.dialog = false; render(); }
   }
   async function doRowAction(kind) {
@@ -173,6 +199,20 @@
     S.busy = false; render();
   }
   async function onSubmit(e) {
+    if (e.target.matches('[data-form="settings"]')) {
+      e.preventDefault();
+      if (S.busy) return;
+      S.busy = true; S.settingsErr = '';
+      try {
+        const r = await api({ method: 'PATCH', path: '/settings', body: { cardArrival: S.settingsForm.cardArrival, cap: S.settingsForm.cap } });
+        S.settingsOpen = false; S.busy = false; S.err = '';
+        S.msg = `Saved. Card arrives ${esc(dateLabel(r.settings.cardArrival))}` + (r.movedTasks ? `; moved ${r.movedTasks} switch task${r.movedTasks > 1 ? 's' : ''}.` : '.');
+        await load();
+        return;
+      } catch (err) { S.settingsErr = err.message; }
+      S.busy = false; render();
+      return;
+    }
     if (!e.target.matches('[data-form="add"]')) return;
     e.preventDefault();
     if (S.busy) return;
