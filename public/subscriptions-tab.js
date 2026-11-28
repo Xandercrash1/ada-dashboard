@@ -44,16 +44,21 @@
 
   function table(rows) {
     if (!rows.length) return `<div class="${card} text-sm text-gray-500">No subscriptions yet.</div>`;
-    const body = rows.map((s) => {
-      const pill = s.onCard
+    const ordered = rows.filter((s) => s.status !== 'cancelled').concat(rows.filter((s) => s.status === 'cancelled'));
+    const body = ordered.map((s) => {
+      const gone = s.status === 'cancelled';
+      const notes = s.notes ? `<div class="text-xs font-normal text-gray-500 dark:text-gray-400">${esc(s.notes)}</div>` : '';
+      const pill = gone
+        ? `<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Cancelled ${esc(dateLabel((s.cancelledAt || '').slice(0, 10)))}</span>`
+        : s.onCard
         ? '<span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">Yes</span>'
         : `<button type="button" class="text-xs font-semibold rounded-full px-2 py-0.5 bg-rose-500/15 text-rose-500 cursor-pointer hover:bg-rose-500/30 focus:outline-none focus:ring-2 focus:ring-rose-500/50" title="Mark as on the card" data-act="oncard" data-id="${esc(s.id)}">No</button>`;
-      return `<tr class="border-t border-black/5 dark:border-white/10 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" data-act="edit" data-id="${esc(s.id)}" title="Edit">
-        <td class="py-2.5 pr-3 font-medium">${esc(s.name)}</td>
+      return `<tr class="border-t border-black/5 dark:border-white/10 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5${gone ? ' opacity-50' : ''}" data-act="edit" data-id="${esc(s.id)}" title="Edit">
+        <td class="py-2.5 pr-3 font-medium"><span${gone ? ' class="line-through"' : ''}>${esc(s.name)}</span>${notes}</td>
         <td class="py-2.5 pr-3 whitespace-nowrap">${s.price == null ? '<span class="text-gray-400">&mdash;</span>' : money(s.price)}</td>
         <td class="py-2.5 pr-3 capitalize">${esc(s.cycle)}</td>
         <td class="py-2.5 pr-3">${pill}</td>
-        <td class="py-2.5 whitespace-nowrap text-gray-500 dark:text-gray-400">${s.switchDue ? esc(dateLabel(s.switchDue)) : ''}</td></tr>`;
+        <td class="py-2.5 whitespace-nowrap text-gray-500 dark:text-gray-400">${!gone && s.switchDue ? esc(dateLabel(s.switchDue)) : ''}</td></tr>`;
     }).join('');
     return `<div class="${card} overflow-x-auto"><table class="w-full text-sm text-left">
       <thead><tr class="text-xs text-gray-500 dark:text-gray-400"><th class="pb-2 pr-3 font-medium">Subscription</th><th class="pb-2 pr-3 font-medium">Price</th><th class="pb-2 pr-3 font-medium">Cycle</th><th class="pb-2 pr-3 font-medium">On sub card</th><th class="pb-2 font-medium">Switch task due</th></tr></thead>
@@ -63,6 +68,8 @@
   function dialog() {
     if (!S.dialog) return '';
     const f = S.form;
+    const cur = S.editId && S.data && S.data.rows.find((r) => r.id === S.editId);
+    const gone = !!(cur && cur.status === 'cancelled');
     return `<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" data-act="backdrop">
       <form data-form="add" class="w-full max-w-md ${card} space-y-3" role="dialog" aria-modal="true" aria-labelledby="subs-add-h">
         <h3 id="subs-add-h" class="text-lg font-bold">${S.editId ? 'Edit subscription' : 'Add subscription'}</h3>
@@ -70,9 +77,11 @@
         <label class="block text-sm">Price (optional)<input class="${input} mt-1" data-f="price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="leave blank if unknown" value="${esc(f.price)}"></label>
         <label class="block text-sm">Cycle<select class="${input} mt-1" data-f="cycle"><option value="monthly"${f.cycle === 'monthly' ? ' selected' : ''}>Monthly</option><option value="yearly"${f.cycle === 'yearly' ? ' selected' : ''}>Yearly</option></select></label>
         <label class="block text-sm">Notes (optional)<textarea class="${input} mt-1" data-f="notes" maxlength="500" rows="2">${esc(f.notes)}</textarea></label>
-        ${S.editId ? `<label class="flex items-center gap-2 text-sm min-h-[44px]"><input type="checkbox" data-f="onCard" class="h-5 w-5"${f.onCard ? ' checked' : ''}> On the subscription card</label>` : ''}
+        ${S.editId && !gone ? `<label class="flex items-center gap-2 text-sm min-h-[44px]"><input type="checkbox" data-f="onCard" class="h-5 w-5"${f.onCard ? ' checked' : ''}> On the subscription card</label>` : ''}
         ${S.formErr ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.formErr)}</div>` : ''}
-        <div class="flex gap-2 justify-end"><button type="button" class="${ghost}" data-act="cancel">Cancel</button><button type="submit" class="${primary}"${S.busy ? ' disabled' : ''}>Save</button></div>
+        <div class="flex gap-2 flex-wrap items-center">
+          ${S.editId ? `<div class="flex gap-2 mr-auto"><button type="button" class="${ghost}" data-act="${gone ? 'restore' : 'cancel-sub'}"${S.busy ? ' disabled' : ''}>${gone ? 'Restore' : 'Cancel subscription'}</button><button type="button" class="${btn} bg-rose-500/15 text-rose-500 hover:bg-rose-500/30" data-act="delete"${S.busy ? ' disabled' : ''}>Delete</button></div>` : ''}
+          <button type="button" class="${ghost}" data-act="cancel">Close</button><button type="submit" class="${primary}"${S.busy ? ' disabled' : ''}>Save</button></div>
       </form></div>`;
   }
 
@@ -80,10 +89,10 @@
     const c = S.confirm; if (!c) return '';
     return `<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" data-act="backdrop-confirm">
       <div class="w-full max-w-md ${card} space-y-3" role="dialog" aria-modal="true" aria-labelledby="subs-confirm-h">
-        <h3 id="subs-confirm-h" class="text-lg font-bold">Mark as on the card</h3>
-        <p class="text-sm">Mark ${esc(c.name)} as on the subscription card? This checks off its switch task and updates the autopay task.</p>
+        <h3 id="subs-confirm-h" class="text-lg font-bold">${c.kind === 'delete' ? 'Delete subscription' : 'Mark as on the card'}</h3>
+        <p class="text-sm">${c.kind === 'delete' ? `Delete ${esc(c.name)}? This removes the row and its tasks. It can't be undone.` : `Mark ${esc(c.name)} as on the subscription card? This checks off its switch task and updates the autopay task.`}</p>
         ${S.confirmErr ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.confirmErr)}</div>` : ''}
-        <div class="flex gap-2 justify-end"><button type="button" class="${ghost}" data-act="confirm-cancel">Cancel</button><button type="button" class="${primary}" data-act="confirm-ok"${S.busy ? ' disabled' : ''}>Confirm</button></div>
+        <div class="flex gap-2 justify-end"><button type="button" class="${ghost}" data-act="confirm-cancel">Cancel</button><button type="button" class="${primary}" data-act="confirm-ok"${S.busy ? ' disabled' : ''}>${c.kind === 'delete' ? 'Delete' : 'Confirm'}</button></div>
       </div></div>`;
   }
 
@@ -121,7 +130,13 @@
       const ok = root().querySelector('[data-act="confirm-ok"]'); if (ok) ok.focus();
     }
     else if (act === 'confirm-cancel' || (act === 'backdrop-confirm' && e.target === a)) { S.confirm = null; render(); }
-    else if (act === 'confirm-ok') doOnCard();
+    else if (act === 'confirm-ok') doConfirmed();
+    else if (act === 'cancel-sub' || act === 'restore') doRowAction(act === 'restore' ? 'restore' : 'cancel');
+    else if (act === 'delete') {
+      const row = S.data && S.data.rows.find((r) => r.id === S.editId); if (!row) return;
+      S.confirm = { id: row.id, name: row.name, kind: 'delete' }; S.confirmErr = ''; render();
+      const ok = root().querySelector('[data-act="confirm-ok"]'); if (ok) ok.focus();
+    }
   }
   function onInput(e) { const f = e.target.dataset && e.target.dataset.f; if (f) S.form[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; }
   function onKey(e) {
@@ -129,14 +144,29 @@
     if (S.confirm) { S.confirm = null; render(); }
     else if (S.dialog) { S.dialog = false; render(); }
   }
-  async function doOnCard() {
+  async function doRowAction(kind) {
+    if (S.busy || !S.editId) return;
+    const row = S.data && S.data.rows.find((r) => r.id === S.editId); if (!row) return;
+    S.busy = true; S.formErr = ''; render();
+    try {
+      const r = await api({ method: 'POST', path: '/' + encodeURIComponent(row.id) + '/' + kind });
+      S.dialog = false; S.editId = null; S.busy = false; S.err = '';
+      S.msg = `${kind === 'cancel' ? 'Cancelled' : 'Restored'} ${esc(row.name)}. Autopay is now ${money(r.totals.autopay)}.`;
+      await load();
+      return;
+    } catch (err) { S.formErr = err.message; }
+    S.busy = false; render();
+  }
+  async function doConfirmed() {
     if (S.busy || !S.confirm) return;
     const c = S.confirm;
     S.busy = true; S.confirmErr = ''; render();
     try {
-      const r = await api({ method: 'POST', path: '/' + encodeURIComponent(c.id) + '/on-card' });
+      const del = c.kind === 'delete';
+      const r = del ? await api({ method: 'DELETE', path: '/' + encodeURIComponent(c.id) }) : await api({ method: 'POST', path: '/' + encodeURIComponent(c.id) + '/on-card' });
       S.confirm = null; S.busy = false; S.err = '';
-      S.msg = `Marked ${esc(c.name)} on the card. Autopay is now ${money(r.totals.autopay)}.`;
+      if (del) { S.dialog = false; S.editId = null; }
+      S.msg = del ? `Deleted ${esc(c.name)}. Autopay is now ${money(r.totals.autopay)}.` : `Marked ${esc(c.name)} on the card. Autopay is now ${money(r.totals.autopay)}.`;
       await load();
       return;
     } catch (err) { S.confirmErr = err.message; }

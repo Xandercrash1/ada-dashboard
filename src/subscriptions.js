@@ -32,7 +32,7 @@ function writeSubscriptions(rows) { todoStore.atomicWriteJson(SUBS_FILE, rows); 
 
 // Monthly subs on the card only; yearly are covered by the buffer on purpose.
 function computeTotal(subs) {
-  const items = subs.filter(s => s.onCard && s.cycle === 'monthly' && s.price != null && Number.isFinite(Number(s.price)));
+  const items = subs.filter(s => s.status !== 'cancelled' && s.onCard && s.cycle === 'monthly' && s.price != null && Number.isFinite(Number(s.price)));
   const total = items.reduce((sum, s) => sum + Number(s.price), 0) + BUFFER + MIN_PAYMENT;
   return { items, total: Math.round(total * 100) / 100 };
 }
@@ -143,7 +143,7 @@ const NOTE = 'Subscription consolidation: dashboard → Subscriptions page.';
 
 function computeTotals(subs, settings = SETTINGS) {
   const onCardMonthly = r2(computeTotal(subs).items.reduce((a, s) => a + Number(s.price), 0));
-  const off = subs.filter(s => !s.onCard && hasPrice(s));
+  const off = subs.filter(s => s.status !== 'cancelled' && !s.onCard && hasPrice(s));
   const notMovedMonthly = r2(off.filter(s => s.cycle === 'monthly').reduce((a, s) => a + Number(s.price), 0));
   const notMovedYearly = r2(off.filter(s => s.cycle === 'yearly').reduce((a, s) => a + Number(s.price), 0));
   return { onCardMonthly, autopay: r2(onCardMonthly + BUFFER + MIN_PAYMENT), notMovedMonthly, notMovedYearly, cap: settings.cap, cardArrival: settings.cardArrival };
@@ -336,6 +336,7 @@ function editSubscription(id, value, completeScheduled) {
     const subs = readSubscriptions();
     const idx = subs.findIndex(s => s.id === id);
     if (idx === -1) return { status: 404, body: { error: 'Subscription not found' } };
+    if (value.onCard === true && subs[idx].status === 'cancelled') return { status: 409, body: { error: 'Restore it first' } };
     const now = new Date(), today = todoEngine.todayString();
     const completed = todoStore.readCompleted();
     const r = planEdit(subs, todoStore.readTasks(), completed, idx, value, now, today);
@@ -358,6 +359,69 @@ function editSubscription(id, value, completeScheduled) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Cancel / restore / delete a row
+// ---------------------------------------------------------------------------
+
+const priceTaskName = name => `Add the price for ${name} to the subscriptions list`;
+const isRowOpenTask = (row, t) => (t.type !== 'recurring' && t.id === row.switchTaskId) || t.name === priceTaskName(row.name);
+
+/** planCancel(subs, tasks, idx, now) -> { subs, tasks, row, changed }. Pure. Open switch/price tasks are removed, not completed. */
+function planCancel(subs, tasks, idx, now) {
+  const old = subs[idx];
+  if (old.status === 'cancelled') return { subs, tasks, row: old, changed: false };
+  const row = { ...old, status: 'cancelled', cancelledAt: now.toISOString(), onCard: false, onCardAt: null };
+  return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: tasks.filter(t => !isRowOpenTask(old, t)), row, changed: true };
+}
+
+/** planRestore(subs, tasks, idx, now, today, settings) -> { subs, tasks, row, changed }. Pure. Back off the card, so a switch task (and a price task when price is blank) is created. */
+function planRestore(subs, tasks, idx, now, today, settings = SETTINGS) {
+  const old = subs[idx];
+  if (old.status !== 'cancelled') return { subs, tasks, row: old, changed: false };
+  const nowIso = now.toISOString();
+  const { status: _s, cancelledAt: _c, ...rest } = old;
+  const sw = newScheduledTask(`Switch ${old.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
+  const row = { ...rest, onCard: false, onCardAt: null, switchTaskId: sw.id };
+  const added = [sw];
+  if (old.price == null || !Number.isFinite(Number(old.price))) added.push(newScheduledTask(priceTaskName(old.name), todoEngine.addDays(today, 1), nowIso));
+  return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: tasks.concat(added), row, changed: true };
+}
+
+/** planDelete(subs, tasks, idx) -> { subs, tasks }. Pure. */
+function planDelete(subs, tasks, idx) {
+  const old = subs[idx];
+  return { subs: subs.filter((_, i) => i !== idx), tasks: tasks.filter(t => !isRowOpenTask(old, t)) };
+}
+
+function finishBody(subs, row) {
+  const ap = todoStore.readTasks().find(t => t.autoKind === AUTO_KIND);
+  return { row, totals: computeTotals(subs), autopayTaskId: ap ? ap.id : null };
+}
+
+/** Store-backed cancel / restore / delete. One todo-store lock each. -> { status, body } */
+function changeRow(id, kind) {
+  return todoStore.withLock(() => {
+    const subs = readSubscriptions();
+    const idx = subs.findIndex(s => s.id === id);
+    if (idx === -1) return { status: 404, body: { error: 'Subscription not found' } };
+    const now = new Date(), today = todoEngine.todayString();
+    const name = subs[idx].name;
+    let r;
+    if (kind === 'cancel') r = planCancel(subs, todoStore.readTasks(), idx, now);
+    else if (kind === 'restore') r = planRestore(subs, todoStore.readTasks(), idx, now, today);
+    else r = planDelete(subs, todoStore.readTasks(), idx);
+    if (r.changed === false) return { status: 200, body: finishBody(subs, subs[idx]) };
+    const line = `Updated when ${name} was ${kind === 'cancel' ? 'cancelled' : kind === 'restore' ? 'restored' : 'deleted'} on the Subscriptions page.`;
+    const ap = recalcAutopay(r.subs, r.tasks, now, today, line);
+    todoStore.writeTasks(ap.tasks);
+    writeSubscriptions(r.subs);
+    return { status: 200, body: finishBody(r.subs, kind === 'delete' ? null : r.row) };
+  });
+}
+const cancelSubscription = id => changeRow(id, 'cancel');
+const restoreSubscription = id => changeRow(id, 'restore');
+const deleteSubscription = id => changeRow(id, 'delete');
+
 // Admin-only, checked on the routes themselves (no non-admin allowlist line in server.js).
 function mount(app, { isAdminReq, completeScheduled }) {
   const guard = (req, res, next) => (isAdminReq(req) ? next() : res.status(403).json({ error: 'Not available for your account.' }));
@@ -373,6 +437,15 @@ function mount(app, { isAdminReq, completeScheduled }) {
       const r = markOnCard(req.params.id, completeScheduled);
       res.status(r.status).json(r.body);
     } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+  app.post('/api/subscriptions/:id/cancel', guard, (req, res) => {
+    try { const r = cancelSubscription(req.params.id); res.status(r.status).json(r.body); } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+  app.post('/api/subscriptions/:id/restore', guard, (req, res) => {
+    try { const r = restoreSubscription(req.params.id); res.status(r.status).json(r.body); } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+  app.delete('/api/subscriptions/:id', guard, (req, res) => {
+    try { const r = deleteSubscription(req.params.id); res.status(r.status).json(r.body); } catch (err) { res.status(500).json({ error: err.message }); }
   });
   app.patch('/api/subscriptions/:id', guard, (req, res) => {
     try {
@@ -393,4 +466,4 @@ function mount(app, { isAdminReq, completeScheduled }) {
 }
 
 module.exports = { SUBS_FILE, AUTO_KIND, SETTINGS, BUFFER, MIN_PAYMENT, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, applyOnCard, markOnCard, onTaskCompleted,
-  computeTotals, validateNew, validatePatch, planEdit, recalcAutopay, editSubscription, upsertAutopay, switchDueDate, planCreate, createSubscription, mount };
+  computeTotals, validateNew, validatePatch, planEdit, recalcAutopay, editSubscription, planCancel, planRestore, planDelete, cancelSubscription, restoreSubscription, deleteSubscription, upsertAutopay, switchDueDate, planCreate, createSubscription, mount };

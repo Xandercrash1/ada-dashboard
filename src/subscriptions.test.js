@@ -237,13 +237,75 @@ check('patch validate: price null ok, notes 500 ok', [subs.validatePatch({ price
 
     // route wiring with a fake app: 403 for non-admin, 400 for bad input, 404 for unknown id
     const routes = {};
-    subs.mount({ get() {}, post() {}, patch(p, g, h) { routes.patch = (req) => { let out; const res = { status(c) { out = { status: c }; return res; }, json(b) { out.body = b; } }; g(req, res, () => h(req, res)); return out; }; } }, { isAdminReq: r => !!r.admin, completeScheduled: complete });
+    subs.mount({ get() {}, post() {}, delete() {}, patch(p, g, h) { routes.patch = (req) => { let out; const res = { status(c) { out = { status: c }; return res; }, json(b) { out.body = b; } }; g(req, res, () => h(req, res)); return out; }; } }, { isAdminReq: r => !!r.admin, completeScheduled: complete });
     seed([row('x', 1, 'monthly', false, 't1')], []);
     check('route: non-admin -> 403', routes.patch({ params: { id: 'x' }, body: { price: 2 } }).status, 403);
     check('route: bad input -> 400', routes.patch({ admin: true, params: { id: 'x' }, body: { price: 'abc' } }).status, 400);
     check('route: empty body -> 400', routes.patch({ admin: true, params: { id: 'x' }, body: {} }).status, 400);
     check('route: unknown id -> 404', routes.patch({ admin: true, params: { id: 'nope' }, body: { price: 2 } }).status, 404);
     check('route: good -> 200', routes.patch({ admin: true, params: { id: 'x' }, body: { price: 2 } }).status, 200);
+
+
+    // --- cancel / restore / delete ---
+    const cancelled = (id, price, cycle, onCard, taskId) => ({ ...row(id, price, cycle, onCard, taskId), status: 'cancelled', cancelledAt: NOW.toISOString() });
+    check('computeTotals ignores cancelled rows', [subs.computeTotals([row('a', 10, 'monthly', true), cancelled('b', 20, 'monthly', true), cancelled('c', 5, 'yearly', false), cancelled('d', 7, 'monthly', false)]).onCardMonthly,
+      subs.computeTotals([cancelled('c', 5, 'yearly', false), cancelled('d', 7, 'monthly', false)]).notMovedMonthly, subs.computeTotals([cancelled('c', 5, 'yearly', false)]).notMovedYearly], [10, 0, 0]);
+    check('computeTotal ignores cancelled rows', subs.computeTotal([row('a', 10, 'monthly', true), cancelled('b', 20, 'monthly', true)]).total, 50);
+
+    seed([row('x', 10, 'monthly', true, 't1'), row('y', 5, 'monthly', false, 't2'), row('z', null, 'monthly', false, 't3')],
+      [sched('t1', 'Switch x to the subscription card'), sched('t2', 'Switch y to the subscription card'), sched('t3', 'Switch z to the subscription card'), sched('t9', 'Add the price for z to the subscriptions list'), autopayTask('old')],
+      [{ id: 'c0', taskId: 'other', name: 'Other' }]);
+    res = subs.cancelSubscription('x');
+    check('cancel: 200, status, date, off card, totals', [res.status, res.body.row.status, typeof res.body.row.cancelledAt, res.body.row.onCard, res.body.totals.onCardMonthly], [200, 'cancelled', 'string', false, 0]);
+    check('cancel: switch task removed (not completed), autopay recalculated', [todoStore.readTasks().some(t => t.id === 't1'), todoStore.readCompleted().map(c => c.taskId), apOf()[0].name], [false, ['other'], "Set the subscription card's autopay to $40.00"]);
+    const snap = JSON.stringify([subs.readSubscriptions(), todoStore.readTasks()]);
+    res = subs.cancelSubscription('x');
+    check('cancel twice: 200 no-op', [res.status, JSON.stringify([subs.readSubscriptions(), todoStore.readTasks()]) === snap], [200, true]);
+    res = subs.cancelSubscription('z');
+    check('cancel: price task and switch task both removed', todoStore.readTasks().map(t => t.id).sort(), ['ap1', 't2']);
+    res = subs.restoreSubscription('z');
+    const nt = todoStore.readTasks().map(t => t.name);
+    check('restore (price null): status removed, switch and price tasks recreated', [res.status, 'status' in res.body.row, 'cancelledAt' in res.body.row, res.body.row.onCard, nt.includes('Switch z to the subscription card'), nt.includes('Add the price for z to the subscriptions list'),
+      todoStore.readTasks().some(t => t.id === res.body.row.switchTaskId)], [200, false, false, false, true, true, true]);
+    res = subs.restoreSubscription('x');
+    nt.length = 0; nt.push(...todoStore.readTasks().map(t => t.name));
+    check('restore (price set): switch task only', [nt.includes('Switch x to the subscription card'), nt.filter(n => n.startsWith('Add the price for x')).length], [true, 0]);
+    res = subs.restoreSubscription('x');
+    check('restore not-cancelled: 200 no-op', res.status, 200);
+    check('cancel/restore unknown id -> 404', [subs.cancelSubscription('nope').status, subs.restoreSubscription('nope').status], [404, 404]);
+
+    // delete
+    seed([row('x', 10, 'monthly', true, 't1'), row('y', 5, 'monthly', true, 't2'), row('z', null, 'monthly', false, 't3')],
+      [sched('t1', 'Switch x to the subscription card'), sched('t2', 'Switch y to the subscription card'), sched('t3', 'Switch z to the subscription card'), sched('t9', 'Add the price for z to the subscriptions list'), autopayTask('old')]);
+    res = subs.deleteSubscription('z');
+    check('delete: row and its tasks gone, others kept', [res.status, subs.readSubscriptions().map(r => r.id), todoStore.readTasks().map(t => t.id)], [200, ['x', 'y'], ['t1', 't2', 'ap1']]);
+    res = subs.deleteSubscription('x');
+    check('delete on-card row: autopay recalculated', [res.status, apOf()[0].name, res.body.totals.onCardMonthly], [200, "Set the subscription card's autopay to $45.00", 5]);
+    check('delete unknown -> 404', subs.deleteSubscription('nope').status, 404);
+
+    // PATCH on a cancelled row
+    seed([cancelled('x', 10, 'monthly', false, 't1')], []);
+    res = subs.editSubscription('x', { onCard: true }, complete);
+    check('patch onCard true on cancelled -> 409 Restore it first', [res.status, res.body.error, subs.readSubscriptions()[0].onCard], [409, 'Restore it first', false]);
+    res = subs.editSubscription('x', { name: 'New', price: 3, cycle: 'yearly', notes: 'n' }, complete);
+    check('patch name/price/cycle/notes on cancelled -> 200, stays cancelled', [res.status, res.body.row.name, res.body.row.price, res.body.row.status], [200, 'New', 3, 'cancelled']);
+
+    // money page ignores cancelled rows
+    {
+      const money = require('./money');
+      const mrows = [row('a', 10, 'monthly', false), cancelled('b', 20, 'monthly', false)];
+      const empty = { transactions: [], accounts: [], recurring: [], variable: [], rules: [] };
+      const sm = money.summarize(empty, '2026-11', mrows);
+      check('money summarize: cancelled row not in recurring', [sm.recurring.items.map(i => i.name), sm.recurring.monthlyCents], [['a'], 1000]);
+    }
+
+    // route wiring for the new routes
+    const r2 = {};
+    const mk = (name) => (p, g, h) => { r2[name + ' ' + p] = (req) => { let out; const rs = { status(c) { out = { status: c }; return rs; }, json(b) { out.body = b; } }; g(req, rs, () => h(req, rs)); return out; }; };
+    subs.mount({ get() {}, post: mk('post'), patch() {}, delete: mk('delete') }, { isAdminReq: q => !!q.admin, completeScheduled: complete });
+    seed([row('x', 1, 'monthly', false, 't1')], []);
+    check('route cancel: non-admin 403, admin 200', [r2['post /api/subscriptions/:id/cancel']({ params: { id: 'x' } }).status, r2['post /api/subscriptions/:id/cancel']({ admin: true, params: { id: 'x' } }).status], [403, 200]);
+    check('route restore 200, delete 200 then 404', [r2['post /api/subscriptions/:id/restore']({ admin: true, params: { id: 'x' } }).status, r2['delete /api/subscriptions/:id']({ admin: true, params: { id: 'x' } }).status, r2['delete /api/subscriptions/:id']({ admin: true, params: { id: 'x' } }).status], [200, 200, 404]);
 
     // unknown id
     seed([row('x', 1, 'monthly', false, 't1')], []);
