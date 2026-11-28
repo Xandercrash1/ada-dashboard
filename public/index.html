@@ -1004,12 +1004,13 @@
             </select>
           </div>
           <div class="not-guest">
-            <label class="block text-xs font-semibold text-gray-300 mb-1" title="The one device this needs. Any = the VPS or your phone can do it.">Device</label>
+            <label class="block text-xs font-semibold text-gray-300 mb-1" title="The device this needs. Any = the VPS or your phone can do it. Any computer = the first of the computers to start it claims it.">Device</label>
             <select id="todo-device" class="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
               <option value="">Any</option>
               <option value="mac">Mac</option>
               <option value="adaone">AdaOne</option>
               <option value="adatwo">AdaTwo</option>
+              <option value="any">Any computer</option>
             </select>
           </div>
         </div>
@@ -1928,7 +1929,7 @@
                 <span class="mr-1">${emoji}</span>${escapeHtml(t.name)}${t.waitsFor ? ` <span class="ml-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/15 text-amber-300 align-middle" title="Hidden until that task is checked off">waits for: ${escapeHtml(((todoAllTasks.find(x => x.id === t.waitsFor) || {}).name) || 'another task')}</span>` : ''}${t.autoKind ? ' <span class="ml-1 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-indigo-500/15 text-indigo-300 align-middle" title="Created and kept up to date automatically (task automation)">auto</span>' : ''}
               </h4>
               <div class="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity absolute right-4 top-3 bg-dark-bg/80 backdrop-blur-sm pl-2 rounded-l-lg z-10">
-                ${t.device ? `<span class="px-2 py-0.5 rounded text-[9px] font-semibold border bg-gray-800 text-gray-300 border-gray-700" title="Needs this device">${escapeHtml(DEVICE_LABELS[t.device] || t.device)}</span>` : ''}
+                ${t.device ? `<span class="px-2 py-0.5 rounded text-[9px] font-semibold border bg-gray-800 text-gray-300 border-gray-700" title="Needs this device">${escapeHtml(DEVICE_LABELS[t.device] || t.device)}</span>` : (t.devices && t.devices.length ? `<span class="px-2 py-0.5 rounded text-[9px] font-semibold border bg-gray-800 text-gray-300 border-gray-700" title="The first of these computers to start it claims it">${escapeHtml(devicesLabel(t.devices))}</span>` : '')}
                 <span class="px-2 py-0.5 rounded text-[9px] font-semibold border ${todoPriorityBadgeClass(t.priority)}">${escapeHtml(t.priority || 'Low')}</span>
                 <button onclick="openEditTodoModal('${escapeHtml(t.id)}')" class="not-guest text-gray-500 hover:text-indigo-400 text-xs p-1 transition-colors" title="Edit">
                   <i class="fa-solid fa-pen"></i>
@@ -2333,7 +2334,12 @@
       document.getElementById('todo-name').value = t.name || '';
       document.getElementById('todo-project').value = t.project || '';
       document.getElementById('todo-priority').value = t.priority || 'Medium';
-      document.getElementById('todo-device').value = t.device || '';
+      const devSel = document.getElementById('todo-device');
+      devSel.querySelectorAll('option[data-multi]').forEach(o => o.remove());   // a task that lists some computers (not all): add its own choice
+      if (t.devices && t.devices.length > 1 && t.devices.length < Object.keys(DEVICE_LABELS).length) {
+        const o = document.createElement('option'); o.value = t.devices.join(','); o.dataset.multi = '1'; o.textContent = devicesLabel(t.devices); devSel.appendChild(o);
+      }
+      devSel.value = t.devices && t.devices.length > 1 ? (t.devices.length >= Object.keys(DEVICE_LABELS).length ? 'any' : t.devices.join(',')) : (t.device || '');
       document.getElementById('todo-notes').value = t.notes || '';
       document.getElementById('todo-type').value = t.type || 'recurring';
       updateTodoTypeVisibility();
@@ -2378,7 +2384,10 @@
         name: document.getElementById('todo-name').value.trim(),
         project: document.getElementById('todo-project').value.trim(),
         priority: document.getElementById('todo-priority').value,
-        device: document.getElementById('todo-device').value || null,
+        // "mac" = one device; "any" or "mac,adaone" = several computers, first to start it claims it (`devices`, device null)
+        ...(/,|^any$/.test(document.getElementById('todo-device').value)
+          ? { device: null, devices: document.getElementById('todo-device').value }
+          : { device: document.getElementById('todo-device').value || null, devices: null }),
         type,
         notes: document.getElementById('todo-notes').value.trim(),
       };
@@ -4497,6 +4506,10 @@ ${escapeHtml(JSON.stringify(t.result, null, 2))}
       return { who: 'none', label: 'UNASSIGNED', cls: U, tip: 'Nobody picks this up on their own. Give it to the builder or the VPS PM.' };
     }
     const DEVICE_LABELS = { mac: 'Mac', adaone: 'AdaOne', adatwo: 'AdaTwo' };
+    // A task listing several computers (`devices`): "Any computer" when it lists all of them, else "Mac or AdaOne".
+    function devicesLabel(list) {
+      return list.length >= Object.keys(DEVICE_LABELS).length ? 'Any computer' : list.map(d => DEVICE_LABELS[d] || d).join(' or ');
+    }
     async function setTicketDevice(id, device) {
       try {
         const res = await fetch(`/api/feedback/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: device || null }) });
