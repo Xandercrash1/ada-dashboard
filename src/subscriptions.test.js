@@ -163,4 +163,90 @@ check('totals: empty', subs.computeTotals([]).autopay, 40);
   }
 }
 
+// --- edit a row (PATCH): validation, plan, and store-backed flows ---
+check('patch validate: empty body rejected', !!subs.validatePatch({}).errors, true);
+check('patch validate: bad name/price/cycle/notes/onCard all rejected',
+  [subs.validatePatch({ name: ' ' }), subs.validatePatch({ price: 'abc' }), subs.validatePatch({ price: -2 }), subs.validatePatch({ cycle: 'weekly' }),
+   subs.validatePatch({ notes: 'x'.repeat(501) }), subs.validatePatch({ notes: 5 }), subs.validatePatch({ onCard: 'yes' })].map(v => !!v.errors),
+  [true, true, true, true, true, true, true]);
+check('patch validate: good fields', subs.validatePatch({ name: ' A ', price: '3.456', cycle: 'yearly', notes: ' hi ', onCard: false }).value,
+  { name: 'A', price: 3.46, cycle: 'yearly', notes: 'hi', onCard: false });
+check('patch validate: price null ok, notes 500 ok', [subs.validatePatch({ price: null }).value.price, !!subs.validatePatch({ notes: 'x'.repeat(500) }).value], [null, true]);
+
+{
+  const fs = require('fs'), path = require('path');
+  const todoStore = require('./todo-store');
+  const files = [subs.SUBS_FILE, path.join(todoStore.DATA_DIR, 'todo_tasks.json'), path.join(todoStore.DATA_DIR, 'todo_completed.json')];
+  const backup = files.map(f => (fs.existsSync(f) ? fs.readFileSync(f) : null));
+  try {
+    const complete = (tasks, task) => {
+      const completed = todoStore.readCompleted();
+      const entry = { id: 'completed-test', taskId: task.id, name: task.name, project: task.project, type: task.type, completedAt: NOW.toISOString(), notes: task.notes || '', tags: [] };
+      completed.unshift(entry); todoStore.writeCompleted(completed);
+      todoStore.writeTasks(subs.onTaskCompleted(task, tasks.filter(t => t.id !== task.id)));
+      return entry;
+    };
+    const seed = (rowsArr, tasksArr, doneArr) => { subs.writeSubscriptions(rowsArr); todoStore.writeTasks(tasksArr); todoStore.writeCompleted(doneArr || []); };
+    const apOf = () => todoStore.readTasks().filter(t => t.autoKind === 'subcard-autopay');
+    const autopayTask = (name) => ({ id: 'ap1', type: 'scheduled', name, project: 'Chores', dueDate: '2026-11-20', autoKind: 'subcard-autopay', notes: '' });
+
+    // edit price -> autopay updated in place
+    seed([row('x', 10, 'monthly', true, 't1')], [autopayTask('old')]);
+    let res = subs.editSubscription('x', { price: 12.5 }, complete);
+    check('edit price: 200, row price, autopay name/id', [res.status, res.body.row.price, apOf().length, apOf()[0].id, apOf()[0].name, res.body.totals.autopay],
+      [200, 12.5, 1, 'ap1', "Set the subscription card's autopay to $52.50", 52.5]);
+    check('edit price: autopay notes list the row', apOf()[0].notes.includes('x: $12.50') && apOf()[0].notes.includes('= $52.50'), true);
+    // notes and cycle
+    res = subs.editSubscription('x', { notes: 'Annual deal', cycle: 'yearly' }, complete);
+    check('edit notes/cycle: saved, yearly leaves autopay at buffer+min', [res.body.row.notes, res.body.row.cycle, apOf()[0].name], ['Annual deal', 'yearly', "Set the subscription card's autopay to $40.00"]);
+    res = subs.editSubscription('x', { notes: '' }, complete);
+    check('edit notes: blank clears', 'notes' in res.body.row, false);
+
+    // Yes -> No, switch task already completed: reopened with same id, off the completed log
+    seed([row('x', 10, 'monthly', true, 't1')], [autopayTask('old')], [{ id: 'c1', taskId: 't1', name: 'Switch x to the subscription card' }]);
+    res = subs.editSubscription('x', { onCard: false }, complete);
+    const t1 = todoStore.readTasks().find(t => t.id === 't1');
+    check('Yes->No: switch task reopened (same id), completed log emptied', [res.body.row.onCard, res.body.row.onCardAt, !!t1, t1 && t1.name, todoStore.readCompleted().length],
+      [false, null, true, 'Switch x to the subscription card', 0]);
+    check('Yes->No: autopay recalculated without the row', apOf()[0].name, "Set the subscription card's autopay to $40.00");
+
+    // Yes -> No, switch task gone entirely: created
+    seed([row('x', 10, 'monthly', true, 'gone')], [autopayTask('old')]);
+    res = subs.editSubscription('x', { onCard: false }, complete);
+    const made = todoStore.readTasks().find(t => t.name === 'Switch x to the subscription card');
+    check('Yes->No: gone task recreated and linked', [!!made, res.body.row.switchTaskId === (made && made.id), made && made.project], [true, true, 'Chores']);
+
+    // No -> Yes: open switch task completed, autopay updated
+    seed([row('x', 10, 'monthly', false, 't1')], [sched('t1', 'Switch x to the subscription card'), autopayTask('old')]);
+    res = subs.editSubscription('x', { onCard: true }, complete);
+    check('No->Yes: switch task completed and logged, row on card, autopay $50.00',
+      [res.body.row.onCard, todoStore.readTasks().some(t => t.id === 't1'), todoStore.readCompleted().map(c => c.taskId), apOf().length, apOf()[0].name],
+      [true, false, ['t1'], 1, "Set the subscription card's autopay to $50.00"]);
+
+    // rename renames the open switch and price tasks
+    seed([row('x', null, 'monthly', false, 't1')], [sched('t1', 'Switch x to the subscription card'), sched('t9', 'Add the price for x to the subscriptions list'), sched('t8', 'Add the price for other to the subscriptions list')]);
+    res = subs.editSubscription('x', { name: 'Newname' }, complete);
+    check('rename: switch and price tasks renamed, others untouched', todoStore.readTasks().map(t => t.name),
+      ['Switch Newname to the subscription card', 'Add the price for Newname to the subscriptions list', 'Add the price for other to the subscriptions list']);
+    check('rename: nothing on card and no autopay task -> none created', apOf().length, 0);
+
+    // route wiring with a fake app: 403 for non-admin, 400 for bad input, 404 for unknown id
+    const routes = {};
+    subs.mount({ get() {}, post() {}, patch(p, g, h) { routes.patch = (req) => { let out; const res = { status(c) { out = { status: c }; return res; }, json(b) { out.body = b; } }; g(req, res, () => h(req, res)); return out; }; } }, { isAdminReq: r => !!r.admin, completeScheduled: complete });
+    seed([row('x', 1, 'monthly', false, 't1')], []);
+    check('route: non-admin -> 403', routes.patch({ params: { id: 'x' }, body: { price: 2 } }).status, 403);
+    check('route: bad input -> 400', routes.patch({ admin: true, params: { id: 'x' }, body: { price: 'abc' } }).status, 400);
+    check('route: empty body -> 400', routes.patch({ admin: true, params: { id: 'x' }, body: {} }).status, 400);
+    check('route: unknown id -> 404', routes.patch({ admin: true, params: { id: 'nope' }, body: { price: 2 } }).status, 404);
+    check('route: good -> 200', routes.patch({ admin: true, params: { id: 'x' }, body: { price: 2 } }).status, 200);
+
+    // unknown id
+    seed([row('x', 1, 'monthly', false, 't1')], []);
+    res = subs.editSubscription('nope', { price: 1 }, complete);
+    check('edit: unknown id -> 404', res.status, 404);
+  } finally {
+    files.forEach((f, i) => { if (backup[i] === null) { try { fs.unlinkSync(f); } catch (e) {} } else fs.writeFileSync(f, backup[i]); });
+  }
+}
+
 console.log(`${passed} checks passed`);

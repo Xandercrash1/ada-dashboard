@@ -61,14 +61,12 @@ function processCompletion(subs, tasks, completedTask, now, today) {
 }
 
 /**
- * applyOnCard(subs, tasks, idx, now, today, sourceLine) -> { subs, tasks, changed:true, autopayTask }
- * Marks subs[idx] onCard and creates (or updates in place) the single autopay task.
- * Shared by processCompletion (task checked off) and the Subscriptions page's on-card route.
+ * upsertAutopay(subs, tasks, nowIso, today, sourceLine) -> { tasks, autopayTask }
+ * The one place the autopay figure and task are computed: finds the single autoKind task and
+ * updates it in place, or creates it. Used by applyOnCard and by the edit route.
  */
-function applyOnCard(subs, tasks, idx, now, today, sourceLine) {
-  const nowIso = now.toISOString();
-  const newSubs = subs.map((s, i) => (i === idx ? { ...s, onCard: true, onCardAt: nowIso } : s));
-  const { items, total } = computeTotal(newSubs);
+function upsertAutopay(subs, tasks, nowIso, today, sourceLine) {
+  const { items, total } = computeTotal(subs);
   const name = `Set the subscription card's autopay to $${money(total)}`;
   const notes = buildNotes(items, total, sourceLine);
 
@@ -103,6 +101,18 @@ function applyOnCard(subs, tasks, idx, now, today, sourceLine) {
     };
     newTasks.push(autopayTask);
   }
+  return { tasks: newTasks, autopayTask };
+}
+
+/**
+ * applyOnCard(subs, tasks, idx, now, today, sourceLine) -> { subs, tasks, changed:true, autopayTask }
+ * Marks subs[idx] onCard and creates (or updates in place) the single autopay task.
+ * Shared by processCompletion (task checked off) and the Subscriptions page's on-card route.
+ */
+function applyOnCard(subs, tasks, idx, now, today, sourceLine) {
+  const nowIso = now.toISOString();
+  const newSubs = subs.map((s, i) => (i === idx ? { ...s, onCard: true, onCardAt: nowIso } : s));
+  const { tasks: newTasks, autopayTask } = upsertAutopay(newSubs, tasks, nowIso, today, sourceLine);
   return { subs: newSubs, tasks: newTasks, changed: true, autopayTask };
 }
 
@@ -206,7 +216,11 @@ function createSubscription(value) {
  * -> { status, body }
  */
 function markOnCard(id, completeScheduled) {
-  return todoStore.withLock(() => {
+  return todoStore.withLock(() => markOnCardLocked(id, completeScheduled));
+}
+// Same, for callers already inside todoStore.withLock (the lock is not reentrant).
+function markOnCardLocked(id, completeScheduled) {
+  {
     const subs = readSubscriptions();
     const idx = subs.findIndex(s => s.id === id);
     if (idx === -1) return { status: 404, body: { error: 'Subscription not found' } };
@@ -225,6 +239,116 @@ function markOnCard(id, completeScheduled) {
     todoStore.writeTasks(r.tasks);
     writeSubscriptions(r.subs);
     return finish(r.subs, r.tasks);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Edit a row (PATCH /api/subscriptions/:id)
+// ---------------------------------------------------------------------------
+
+const MAX_NOTES = 500;
+
+/** validatePatch(body) -> { value:{...only the given fields} } | { errors:[...] } */
+function validatePatch(body) {
+  const b = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const errors = [], value = {};
+  if (b.name !== undefined) {
+    const name = typeof b.name === 'string' ? b.name.trim() : '';
+    if (!name) errors.push('name cannot be empty');
+    else if (name.length > 100) errors.push('name must be 100 characters or fewer');
+    else value.name = name;
+  }
+  if (b.price !== undefined) {
+    if (b.price === null || b.price === '') value.price = null;
+    else {
+      const n = typeof b.price === 'number' ? b.price : (typeof b.price === 'string' && b.price.trim() !== '' ? Number(b.price) : NaN);
+      if (!Number.isFinite(n)) errors.push('price must be a number');
+      else if (n < 0) errors.push('price must be 0 or more');
+      else value.price = r2(n);
+    }
+  }
+  if (b.cycle !== undefined) {
+    if (b.cycle !== 'monthly' && b.cycle !== 'yearly') errors.push('cycle must be monthly or yearly');
+    else value.cycle = b.cycle;
+  }
+  if (b.notes !== undefined) {
+    if (typeof b.notes !== 'string') errors.push('notes must be text');
+    else if (b.notes.trim().length > MAX_NOTES) errors.push(`notes must be ${MAX_NOTES} characters or fewer`);
+    else value.notes = b.notes.trim();
+  }
+  if (b.onCard !== undefined) {
+    if (typeof b.onCard !== 'boolean') errors.push('onCard must be true or false');
+    else value.onCard = b.onCard;
+  }
+  if (!errors.length && !Object.keys(value).length) errors.push('nothing to change');
+  return errors.length ? { errors } : { value };
+}
+
+/**
+ * planEdit(subs, tasks, completed, idx, value, now, today, settings)
+ *   -> { subs, tasks, completed, row, wantsOnCard }
+ * Pure. Applies name/price/cycle/notes, renames the row's open tasks, and takes a row OFF the card
+ * (reopening or recreating its switch task). Putting a row ON the card (wantsOnCard) is left to the
+ * caller, because it must complete the switch task through the shared completion path.
+ */
+function planEdit(subs, tasks, completed, idx, value, now, today, settings = SETTINGS) {
+  const nowIso = now.toISOString();
+  const old = subs[idx];
+  let row = { ...old };
+  for (const k of ['name', 'price', 'cycle']) if (value[k] !== undefined) row[k] = value[k];
+  if (value.notes !== undefined) { if (value.notes) row.notes = value.notes; else delete row.notes; }
+  let newTasks = tasks.slice();
+  let newCompleted = completed;
+
+  if (row.name !== old.name) {
+    newTasks = newTasks.map(t => {
+      if (t.id === old.switchTaskId && t.type !== 'recurring') return { ...t, name: `Switch ${row.name} to the subscription card`, updatedAt: nowIso };
+      if (t.name === `Add the price for ${old.name} to the subscriptions list`) return { ...t, name: `Add the price for ${row.name} to the subscriptions list`, updatedAt: nowIso };
+      return t;
+    });
+  }
+
+  let wantsOnCard = false;
+  if (value.onCard === true && !old.onCard) wantsOnCard = true;
+  if (value.onCard === false && old.onCard) {
+    row.onCard = false; row.onCardAt = null;
+    if (!(row.switchTaskId && newTasks.some(t => t.id === row.switchTaskId))) {
+      const done = row.switchTaskId && completed.find(c => c.taskId === row.switchTaskId);
+      const t = newScheduledTask(`Switch ${row.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
+      if (done) { t.id = done.taskId; newCompleted = completed.filter(c => c !== done); }   // reopen: same id, off the completed log
+      row.switchTaskId = t.id;
+      newTasks.push(t);
+    }
+  }
+  return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: newTasks, completed: newCompleted, row, wantsOnCard };
+}
+
+/** Recalculate the autopay task from the current rows. Skips creating one when nothing is on the card. */
+function recalcAutopay(subs, tasks, now, today, sourceLine) {
+  const exists = tasks.some(t => t.autoKind === AUTO_KIND);
+  if (!exists && !subs.some(s => s.onCard)) return { tasks, autopayTask: null };
+  return upsertAutopay(subs, tasks, now.toISOString(), today, sourceLine);
+}
+
+/** Store-backed edit. One todo-store lock. -> { status, body } */
+function editSubscription(id, value, completeScheduled) {
+  return todoStore.withLock(() => {
+    const subs = readSubscriptions();
+    const idx = subs.findIndex(s => s.id === id);
+    if (idx === -1) return { status: 404, body: { error: 'Subscription not found' } };
+    const now = new Date(), today = todoEngine.todayString();
+    const completed = todoStore.readCompleted();
+    const r = planEdit(subs, todoStore.readTasks(), completed, idx, value, now, today);
+    todoStore.writeTasks(r.tasks);
+    if (r.completed !== completed) todoStore.writeCompleted(r.completed);
+    writeSubscriptions(r.subs);
+    if (r.wantsOnCard) markOnCardLocked(id, completeScheduled);   // completes the switch task; its hook updates autopay
+    const finalSubs = readSubscriptions();
+    const ap = recalcAutopay(finalSubs, todoStore.readTasks(), now, today, `Updated when ${finalSubs[idx].name} was edited on the Subscriptions page.`);
+    if (ap.autopayTask) todoStore.writeTasks(ap.tasks);
+    const tasks = todoStore.readTasks();
+    const apt = tasks.find(t => t.autoKind === AUTO_KIND);
+    return { status: 200, body: { row: finalSubs[idx], totals: computeTotals(finalSubs), autopayTaskId: apt ? apt.id : null } };
   });
 }
 
@@ -244,6 +368,14 @@ function mount(app, { isAdminReq, completeScheduled }) {
       res.status(r.status).json(r.body);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
+  app.patch('/api/subscriptions/:id', guard, (req, res) => {
+    try {
+      const v = validatePatch(req.body);
+      if (v.errors) return res.status(400).json({ error: v.errors.join('; '), errors: v.errors });
+      const r = editSubscription(req.params.id, v.value, completeScheduled);
+      res.status(r.status).json(r.body);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
   app.post('/api/subscriptions', guard, (req, res) => {
     try {
       const v = validateNew(req.body);
@@ -255,4 +387,4 @@ function mount(app, { isAdminReq, completeScheduled }) {
 }
 
 module.exports = { SUBS_FILE, AUTO_KIND, SETTINGS, BUFFER, MIN_PAYMENT, readSubscriptions, writeSubscriptions, computeTotal, processCompletion, applyOnCard, markOnCard, onTaskCompleted,
-  computeTotals, validateNew, switchDueDate, planCreate, createSubscription, mount };
+  computeTotals, validateNew, validatePatch, planEdit, recalcAutopay, editSubscription, upsertAutopay, switchDueDate, planCreate, createSubscription, mount };

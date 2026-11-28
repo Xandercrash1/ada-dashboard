@@ -8,7 +8,7 @@
   const root = () => document.getElementById('subscriptions-root');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = (n) => '$' + Number(n || 0).toFixed(2);
-  const S = { data: null, err: '', msg: '', dialog: false, confirm: null, busy: false, form: { name: '', price: '', cycle: 'monthly' }, formErr: '' };
+  const S = { data: null, err: '', msg: '', dialog: false, confirm: null, busy: false, editId: null, form: { name: '', price: '', cycle: 'monthly', notes: '', onCard: false }, formErr: '' };
   const input = 'w-full rounded-xl bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 px-3 py-2.5 text-base';
   const btn = 'min-h-[44px] px-4 rounded-xl text-sm font-semibold';
   const primary = btn + ' bg-indigo-600 text-white hover:bg-indigo-500';
@@ -48,7 +48,7 @@
       const pill = s.onCard
         ? '<span class="text-xs font-semibold rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">Yes</span>'
         : `<button type="button" class="text-xs font-semibold rounded-full px-2 py-0.5 bg-rose-500/15 text-rose-500 cursor-pointer hover:bg-rose-500/30 focus:outline-none focus:ring-2 focus:ring-rose-500/50" title="Mark as on the card" data-act="oncard" data-id="${esc(s.id)}">No</button>`;
-      return `<tr class="border-t border-black/5 dark:border-white/10">
+      return `<tr class="border-t border-black/5 dark:border-white/10 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" data-act="edit" data-id="${esc(s.id)}" title="Edit">
         <td class="py-2.5 pr-3 font-medium">${esc(s.name)}</td>
         <td class="py-2.5 pr-3 whitespace-nowrap">${s.price == null ? '<span class="text-gray-400">&mdash;</span>' : money(s.price)}</td>
         <td class="py-2.5 pr-3 capitalize">${esc(s.cycle)}</td>
@@ -65,10 +65,12 @@
     const f = S.form;
     return `<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" data-act="backdrop">
       <form data-form="add" class="w-full max-w-md ${card} space-y-3" role="dialog" aria-modal="true" aria-labelledby="subs-add-h">
-        <h3 id="subs-add-h" class="text-lg font-bold">Add subscription</h3>
+        <h3 id="subs-add-h" class="text-lg font-bold">${S.editId ? 'Edit subscription' : 'Add subscription'}</h3>
         <label class="block text-sm">Name<input class="${input} mt-1" data-f="name" maxlength="100" required autocomplete="off" value="${esc(f.name)}"></label>
         <label class="block text-sm">Price (optional)<input class="${input} mt-1" data-f="price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="leave blank if unknown" value="${esc(f.price)}"></label>
         <label class="block text-sm">Cycle<select class="${input} mt-1" data-f="cycle"><option value="monthly"${f.cycle === 'monthly' ? ' selected' : ''}>Monthly</option><option value="yearly"${f.cycle === 'yearly' ? ' selected' : ''}>Yearly</option></select></label>
+        <label class="block text-sm">Notes (optional)<textarea class="${input} mt-1" data-f="notes" maxlength="500" rows="2">${esc(f.notes)}</textarea></label>
+        ${S.editId ? `<label class="flex items-center gap-2 text-sm min-h-[44px]"><input type="checkbox" data-f="onCard" class="h-5 w-5"${f.onCard ? ' checked' : ''}> On the subscription card</label>` : ''}
         ${S.formErr ? `<div class="bg-rose-500/10 text-rose-500 border border-rose-500/30 rounded-xl px-3 py-2 text-sm">${esc(S.formErr)}</div>` : ''}
         <div class="flex gap-2 justify-end"><button type="button" class="${ghost}" data-act="cancel">Cancel</button><button type="submit" class="${primary}"${S.busy ? ' disabled' : ''}>Save</button></div>
       </form></div>`;
@@ -105,7 +107,13 @@
   function onClick(e) {
     const a = e.target.closest('[data-act]'); if (!a) return;
     const act = a.dataset.act;
-    if (act === 'add') { S.dialog = true; S.form = { name: '', price: '', cycle: 'monthly' }; S.formErr = ''; render(); const n = root().querySelector('[data-f="name"]'); if (n) n.focus(); }
+    if (act === 'add') { S.dialog = true; S.editId = null; S.form = { name: '', price: '', cycle: 'monthly', notes: '', onCard: false }; S.formErr = ''; render(); const n = root().querySelector('[data-f="name"]'); if (n) n.focus(); }
+    else if (act === 'edit') {
+      const row = S.data && S.data.rows.find((r) => r.id === a.dataset.id); if (!row) return;
+      S.dialog = true; S.editId = row.id; S.formErr = '';
+      S.form = { name: row.name, price: row.price == null ? '' : String(row.price), cycle: row.cycle, notes: row.notes || '', onCard: !!row.onCard, wasOnCard: !!row.onCard };
+      render(); const n = root().querySelector('[data-f="name"]'); if (n) n.focus();
+    }
     else if (act === 'cancel' || (act === 'backdrop' && e.target === a)) { S.dialog = false; render(); }
     else if (act === 'oncard') {
       const row = S.data && S.data.rows.find((r) => r.id === a.dataset.id); if (!row) return;
@@ -115,7 +123,7 @@
     else if (act === 'confirm-cancel' || (act === 'backdrop-confirm' && e.target === a)) { S.confirm = null; render(); }
     else if (act === 'confirm-ok') doOnCard();
   }
-  function onInput(e) { const f = e.target.dataset && e.target.dataset.f; if (f) S.form[f] = e.target.value; }
+  function onInput(e) { const f = e.target.dataset && e.target.dataset.f; if (f) S.form[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; }
   function onKey(e) {
     if (e.key !== 'Escape') return;
     if (S.confirm) { S.confirm = null; render(); }
@@ -140,6 +148,15 @@
     if (S.busy) return;
     S.busy = true; S.formErr = '';
     try {
+      if (S.editId) {
+        const body = { name: S.form.name, price: S.form.price === '' ? null : S.form.price, cycle: S.form.cycle, notes: S.form.notes };
+        if (S.form.onCard !== S.form.wasOnCard) body.onCard = S.form.onCard;
+        const r = await api({ method: 'PATCH', path: '/' + encodeURIComponent(S.editId), body });
+        S.dialog = false; S.editId = null; S.err = ''; S.busy = false;
+        S.msg = `Saved ${esc(r.row.name)}. Autopay is now ${money(r.totals.autopay)}.`;
+        await load();
+        return;
+      }
       const r = await api({ method: 'POST', body: { name: S.form.name, price: S.form.price === '' ? null : S.form.price, cycle: S.form.cycle } });
       S.dialog = false;
       S.msg = `Added ${esc(r.row.name)}. Created task${r.tasks.length > 1 ? 's' : ''}: ` + r.tasks.map((t) => `${esc(t.name)} (due ${esc(dateLabel(t.dueDate))})`).join('; ');
@@ -155,7 +172,7 @@
   let wired = false;
   function show() {
     const el = root(); if (!el) return;
-    if (!wired) { wired = true; el.addEventListener('click', onClick); el.addEventListener('input', onInput); el.addEventListener('keydown', onKey); el.addEventListener('submit', onSubmit); }
+    if (!wired) { wired = true; el.addEventListener('click', onClick); el.addEventListener('input', onInput); el.addEventListener('change', onInput); el.addEventListener('keydown', onKey); el.addEventListener('submit', onSubmit); }
     S.msg = '';
     render(); load();
   }
