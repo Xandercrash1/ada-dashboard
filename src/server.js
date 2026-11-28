@@ -1281,6 +1281,11 @@ errorReport.mount(app);   // POST /api/client-error: browser errors for the nigh
 subscriptions.mount(app, { isAdminReq, completeScheduled: completeTaskLocked });   // Subscriptions page: admin only, checked on each route (no non-admin allowlist line on purpose)
 moneyApi.mount(app);   // Money page API: alex session only (gate before requireAuth + a second check in money.js); non-admins never reach authorizeRole's allowlist
 require('./trash-pending').create().mount(app, { isAdminReq });   // Server tab > Trash: view, clear and restore Trash Pending
+// Gemini usage counters (rue6): admin-only read. Counts only; the wall is authorizeRole plus this check.
+app.get('/api/gemini-usage', (req, res) => {
+  if (!isAdminReq(req)) return res.status(403).json({ error: 'Not available for your account.' });
+  res.json(geminiUsage.summary());
+});
 require('./backups-status').create().mount(app, { isAdminReq });   // Server tab > Health & Stats: read-only Backups card (filesystem only, no restic)
 require('./project-dash').mount(app, { isAdminReq });   // per-project status dashboards (data/project-dash/<slug>.json; Claude writes via project-dash-cli.js)
 app.post('/api/me/password', (req, res) => {
@@ -1974,6 +1979,7 @@ app.post('/api/widgets/sanitize', (req, res) => {
 
 // --- 5. INTERACTIVE AGENT SESSIONS & CONVERSATION ENGINE ---
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const geminiUsage = require('./gemini-usage');   // per-day call counters (rue6)
 const GEMINI_PROXY_URL = process.env.GEMINI_PROXY_URL || 'https://gemini-proxy.lagasse-alex.workers.dev';
 
 // --- Gemini request-size budget (added 2026-08-26) --------------------------
@@ -3567,6 +3573,7 @@ EDIT, DON'T REBUILD: when asked to change something, re-read the file and change
       return te;
     };
 
+    let lastGeminiModel = geminiApiModels[0];   // model of the latest call, for token counts in readGeminiBody
     const callGemini = async (body) => {
       await paceGeminiRequest(ctrl);
       // Bound the request BEFORE it goes out. Enforcing here rather than at each
@@ -3601,6 +3608,8 @@ EDIT, DON'T REBUILD: when asked to change something, re-read the file and change
               body: JSON.stringify(body),
               signal: ac.signal
             });
+            geminiUsage.record(geminiApiModels[mi], res.status === 429 ? '429' : (res.ok ? 'ok' : 'error'));
+            lastGeminiModel = geminiApiModels[mi];
             if (res.status !== 429 && res.status !== 503) return res;
             const lastOverall = mi === geminiApiModels.length - 1 && attempt === 3;
             if (lastOverall) return res;
@@ -3620,6 +3629,7 @@ EDIT, DON'T REBUILD: when asked to change something, re-read the file and change
         // can say what actually happened. A user-initiated cancel (contract
         // §3) and an actual dead-connection timeout both abort the same
         // AbortController, so ctrl.cancelled is what tells them apart.
+        geminiUsage.record(lastGeminiModel, 'error');
         const tagged = classifyAbort(e);
         if (tagged) throw tagged;
         throw e;
@@ -3659,7 +3669,9 @@ EDIT, DON'T REBUILD: when asked to change something, re-read the file and change
         };
       }
       try {
-        return { data: await res.json(), htmlError: null };
+        const jd = await res.json();
+        if (jd && jd.usageMetadata) geminiUsage.record(lastGeminiModel, null, jd.usageMetadata);   // tokens only, no extra call counted
+        return { data: jd, htmlError: null };
       } catch (e) {
         // Don't let this catch swallow an abort and relabel it "malformed
         // JSON" — a cancel or a timeout would be reported as a parse bug.
