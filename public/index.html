@@ -617,6 +617,15 @@
           <div id="backups-list" class="space-y-2"></div>
           <div id="backups-notes" class="mt-3 pt-3 border-t border-dark-border/50 text-xs text-gray-400 space-y-1 break-words"></div>
         </div>
+        <!-- Gemini usage card: read-only, filled by loadGeminiUsage() from /api/gemini-usage (counts only) -->
+        <div id="gemini-usage-card" class="bg-dark-card border border-dark-border rounded-2xl p-4 min-w-0">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <h3 class="text-white font-bold text-sm"><i class="fa-solid fa-gauge text-indigo-400 mr-2"></i>Gemini usage</h3>
+            <span id="gemini-usage-error" class="text-xs text-rose-400"></span>
+          </div>
+          <div id="gemini-usage-today" class="space-y-1 text-xs text-gray-300"></div>
+          <div id="gemini-usage-week" class="mt-3 pt-3 border-t border-dark-border/50 text-xs text-gray-400 space-y-1 break-words"></div>
+        </div>
 
       </div>
 
@@ -1591,6 +1600,31 @@
     }
     window.__backupsTimer = setInterval(() => { if (!document.hidden && currentServerSubTab === 'health') loadBackups(); }, 60000);
     loadBackups();
+
+    // ===================== GEMINI USAGE CARD (src/gemini-usage.js) =====================
+    async function loadGeminiUsage() {
+      const today = document.getElementById('gemini-usage-today'), week = document.getElementById('gemini-usage-week'), err = document.getElementById('gemini-usage-error');
+      if (!today) return;
+      try {
+        const r = await fetch('/api/gemini-usage');
+        if (r.status === 401 || r.status === 403) { window.__geminiUsageTimer && clearInterval(window.__geminiUsageTimer); return; }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        err.textContent = '';
+        today.replaceChildren();
+        const names = Object.keys(d.today.models);
+        if (!names.length) today.append(backupsEl('p', 'text-gray-500', 'No Gemini calls recorded today (' + d.today.date + ').'));
+        for (const n of names) {
+          const c = d.today.models[n];
+          today.append(backupsEl('p', '', `${n}: ${c.calls} call${c.calls === 1 ? '' : 's'}, ${c.rate429} rate-limited (429), ${c.errors} other errors`));
+        }
+        week.replaceChildren(backupsEl('p', '', 'Last 7 days (calls / 429s): ' + d.days.slice().reverse().map(x => `${x.date.slice(5)} ${x.calls}/${x.rate429}`).join(' · ')));
+      } catch (e) {
+        err.textContent = 'Could not load Gemini usage.';
+      }
+    }
+    window.__geminiUsageTimer = setInterval(() => { if (!document.hidden && currentServerSubTab === 'health') loadGeminiUsage(); }, 60000);
+    loadGeminiUsage();
 
     // ===================== TRASH PENDING (src/trash-pending.js) =====================
     let trashNames = [];

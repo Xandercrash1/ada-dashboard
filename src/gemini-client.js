@@ -14,6 +14,7 @@
 // without that file has no key and generate() throws NO_KEY.
 const fs = require('fs');
 const path = require('path');
+const usage = require('./gemini-usage');
 
 const PROXY_URL = process.env.GEMINI_PROXY_URL || 'https://gemini-proxy.lagasse-alex.workers.dev';
 // 2026-11-01 (Alex, 2026-10-26: "I don't want it maxing out my daily limit on
@@ -50,15 +51,19 @@ async function generate({ prompt, json = false, models = DEFAULT_CHAIN, timeoutM
         const res = await fetch(`${PROXY_URL}/v1beta/models/${model}:generateContent?key=${key}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ac.signal
         });
+        if (res.status === 429) usage.record(model, '429');
+        else if (RETRYABLE.has(res.status)) usage.record(model, 'error');
         if (RETRYABLE.has(res.status)) { lastErr = new Error(`${model}: HTTP ${res.status}`); log(`[gemini] ${lastErr.message}, attempt ${attempt + 1}`); continue; }
         const ctype = (res.headers.get('content-type') || '').toLowerCase();
-        if (!ctype.includes('json')) { lastErr = new Error(`${model}: non-JSON HTTP ${res.status}`); break; } // not retryable: next model
+        if (!ctype.includes('json')) { usage.record(model, 'error'); lastErr = new Error(`${model}: non-JSON HTTP ${res.status}`); break; } // not retryable: next model
         const data = await res.json();
-        if (!res.ok) { lastErr = new Error(`${model}: HTTP ${res.status} ${(data.error && data.error.message || '').slice(0, 200)}`); break; }
+        if (!res.ok) { usage.record(model, 'error'); lastErr = new Error(`${model}: HTTP ${res.status} ${(data.error && data.error.message || '').slice(0, 200)}`); break; }
         const text = (((data.candidates || [])[0] || {}).content || {}).parts?.map(p => p.text || '').join('') || '';
-        if (!text) { lastErr = new Error(`${model}: empty response`); continue; }
+        if (!text) { usage.record(model, 'error', data.usageMetadata); lastErr = new Error(`${model}: empty response`); continue; }
+        usage.record(model, 'ok', data.usageMetadata);
         return { text, model };
       } catch (e) {
+        usage.record(model, 'error');
         lastErr = new Error(`${model}: ${e.name === 'AbortError' ? `no response in ${timeoutMs / 1000}s` : e.message}`);
         log(`[gemini] ${lastErr.message}, attempt ${attempt + 1}`);
       } finally { clearTimeout(timer); }
