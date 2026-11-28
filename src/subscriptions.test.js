@@ -203,13 +203,86 @@ check('patch validate: price null ok, notes 500 ok', [subs.validatePatch({ price
     res = subs.editSubscription('x', { notes: '' }, complete);
     check('edit notes: blank clears', 'notes' in res.body.row, false);
 
-    // Yes -> No, switch task already completed: reopened with same id, off the completed log
+    // Yes -> No, switch task already completed: a NEW task (new id), the completed log is left alone
     seed([row('x', 10, 'monthly', true, 't1')], [autopayTask('old')], [{ id: 'c1', taskId: 't1', name: 'Switch x to the subscription card' }]);
     res = subs.editSubscription('x', { onCard: false }, complete);
-    const t1 = todoStore.readTasks().find(t => t.id === 't1');
-    check('Yes->No: switch task reopened (same id), completed log emptied', [res.body.row.onCard, res.body.row.onCardAt, !!t1, t1 && t1.name, todoStore.readCompleted().length],
-      [false, null, true, 'Switch x to the subscription card', 0]);
+    const t1 = todoStore.readTasks().find(t => t.id === res.body.row.switchTaskId);
+    check('Yes->No: new switch task with a new id, completed log untouched', [res.body.row.onCard, res.body.row.onCardAt, !!t1, t1 && t1.name, t1 && t1.id !== 't1', todoStore.readCompleted().map(c => c.taskId)],
+      [false, null, true, 'Switch x to the subscription card', true, ['t1']]);
     check('Yes->No: autopay recalculated without the row', apOf()[0].name, "Set the subscription card's autopay to $40.00");
+
+    // Fix 1, the real path: on -> off -> on through task-automation.completeLocked (which skips a job key it already ran)
+    {
+      const taskAuto = require('./task-automation');
+      const tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'subs-auto-'));
+      taskAuto.register('subcard-autopay', { onComplete: (task, tasks) => subs.onTaskCompleted(task, tasks) });
+      const auto = taskAuto.create({ store: todoStore, engine: todoEngine, dataDir: tmpDir });
+      const realComplete = (tasks, task) => auto.completeLocked(tasks, task, { source: 'user' }).body.completedEntry;
+      try {
+        seed([row('x', 10, 'monthly', false, 't1')], [sched('t1', 'Switch x to the subscription card')]);
+        let rr = subs.editSubscription('x', { onCard: true }, realComplete);
+        check('real path: No->Yes puts the row on the card', rr.body.row.onCard, true);
+        rr = subs.editSubscription('x', { onCard: false }, realComplete);
+        const sw2 = rr.body.row.switchTaskId;
+        const doneIds = todoStore.readCompleted().map(c => c.taskId);
+        const doneKeys = new Set(JSON.parse(fs.readFileSync(path.join(tmpDir, 'automation-log.json'), 'utf8')).filter(l => l.result === 'done').map(l => l.key));
+        check('real path: Yes->No makes a new id, not in the completed log, job key not already done', [rr.body.row.onCard, doneIds.includes(sw2), doneKeys.has(`subcard-autopay:${sw2}`), todoStore.readTasks().some(t => t.id === sw2)], [false, false, false, true]);
+        rr = subs.editSubscription('x', { onCard: true }, realComplete);
+        check('real path: on -> off -> on ends ON the card', [rr.status, rr.body.row.onCard, subs.readSubscriptions()[0].onCard, todoStore.readTasks().some(t => t.id === sw2)], [200, true, true, false]);
+        // ticking the new switch task in the Tasks tab (not the page) also works
+        rr = subs.editSubscription('x', { onCard: false }, realComplete);
+        const sw3 = rr.body.row.switchTaskId;
+        todoStore.withLock(() => { const tl = todoStore.readTasks(); realComplete(tl, tl.find(t => t.id === sw3)); });
+        check('real path: ticking the reopened task in the Tasks tab puts it back on the card', [subs.readSubscriptions()[0].onCard, sw3 !== sw2], [true, true]);
+      } finally { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { /* none */ } }
+    }
+
+    // Fix 2: autopay only touched when the figure changes
+    {
+      const ap = (name, due) => ({ ...autopayTask(name), dueDate: due });
+      seed([row('x', 10, 'monthly', true, 't1')], [ap("Set the subscription card's autopay to $50.00", '2026-11-20')]);
+      subs.editSubscription('x', { notes: 'hi' }, complete);
+      check('autopay: unchanged figure leaves the open task (due date too) alone', [apOf().length, apOf()[0].dueDate, apOf()[0].updatedAt], [1, '2026-11-20', undefined]);
+      seed([row('x', 10, 'monthly', true, 't1')], [], [{ id: 'c9', taskId: 'ap0', name: "Set the subscription card's autopay to $50.00", autoKind: 'subcard-autopay' }]);
+      subs.editSubscription('x', { notes: 'hi' }, complete);
+      check('autopay: unchanged figure, old one completed -> not recreated', apOf().length, 0);
+      subs.editSubscription('x', { price: 20 }, complete);
+      check('autopay: changed figure, old one completed -> a new one', [apOf().length, apOf()[0].name], [1, "Set the subscription card's autopay to $60.00"]);
+    }
+
+    // Fix 3: cancelled still-to-find row can't be converted; a stray switch task of a cancelled row is ignored
+    {
+      seed([{ ...row('m', null, 'monthly', false, null), toFind: true, status: 'cancelled' }], []);
+      let r3 = subs.editSubscription('m', { price: 5 }, complete);
+      check('cancelled toFind + price -> 409, nothing created', [r3.status, r3.body.error, todoStore.readTasks().length, subs.readSubscriptions()[0].toFind], [409, 'Restore it first', 0, true]);
+      r3 = subs.editSubscription('m', { toFind: false }, complete);
+      check('cancelled toFind + untick -> 409', r3.status, 409);
+      const pc = subs.processCompletion([{ ...row('c', 5, 'monthly', false, 't1'), status: 'cancelled' }], [], sched('t1', 'Switch c'), NOW, TODAY);
+      check('processCompletion ignores a cancelled row', [pc.changed, pc.subs[0].onCard], [false, false]);
+      seed([{ ...row('c', 5, 'monthly', false, 't1'), status: 'cancelled' }], [sched('t1', 'Switch c')]);
+      todoStore.withLock(() => { const tl = todoStore.readTasks(); complete(tl, tl[0]); });
+      check('onTaskCompleted: stray switch task of a cancelled row stays off the card', [subs.readSubscriptions()[0].onCard, apOf().length], [false, 0]);
+    }
+
+    // Fix 5: ids never equal a route word
+    {
+      const pl = subs.planCreate([], [], { name: 'Settings', price: 3, cycle: 'monthly' }, NOW, TODAY, { cardArrival: '2026-12-09', cap: 300 });
+      check('id: "Settings" gets a suffix', pl.row.id, 'settings-2');
+    }
+
+    // Fix 6: cancel/delete take only this row's price task
+    {
+      const pr = (id, taskId) => ({ ...row(id, null, 'monthly', false, 's-' + id), priceTaskId: taskId });
+      const tk = [sched('s-a', 'Switch a'), sched('s-b', 'Switch b'), sched('pa', 'Add the price for Same to the subscriptions list'), sched('pb', 'Add the price for Same to the subscriptions list')];
+      const dup = [{ ...pr('a', 'pa'), name: 'Same' }, { ...pr('b', 'pb'), name: 'Same' }];
+      check('cancel: only the linked price task goes', subs.planCancel(dup, tk, 0, NOW).tasks.map(t => t.id), ['s-b', 'pb']);
+      check('delete: only the linked price task goes', subs.planDelete(dup, tk, 1).tasks.map(t => t.id), ['s-a', 'pa']);
+      const old1 = [{ ...row('a', null, 'monthly', false, 's-a'), name: 'Same' }, { ...row('b', null, 'monthly', false, 's-b'), name: 'Same' }];
+      check('cancel: old row (no priceTaskId), another row has the name -> name match not used', subs.planCancel(old1, tk, 0, NOW).tasks.map(t => t.id), ['s-b', 'pa', 'pb']);
+      check('cancel: old row, unique name -> name fallback works', subs.planCancel([old1[0]], tk, 0, NOW).tasks.map(t => t.id), ['s-b']);
+      const pc = subs.planCreate([], [], { name: 'Nop', price: null, cycle: 'monthly' }, NOW, TODAY, { cardArrival: '2026-12-09', cap: 300 });
+      check('create: price task linked by id', pc.row.priceTaskId === pc.createdTasks.find(t => t.name.startsWith('Add the price')).id, true);
+    }
 
     // Yes -> No, switch task gone entirely: created
     seed([row('x', 10, 'monthly', true, 'gone')], [autopayTask('old')]);
@@ -322,13 +395,32 @@ check('patch validate: price null ok, notes 500 ok', [subs.validatePatch({ price
     // arrival change moves OPEN switch tasks linked from rows only
     const mkTask = (id, name, due, created) => ({ ...sched(id, name), dueDate: due, createdAt: created });
     seed([row('x', 5, 'monthly', false, 't1'), row('y', 5, 'monthly', true, 't2'), row('z', 5, 'monthly', false, 't3')],
-      [mkTask('t1', 'Switch x to the subscription card', '2026-12-09', '2026-11-24T15:00:00.000Z'), mkTask('t3', 'Switch z to the subscription card', '2026-12-09', '2026-12-15T15:00:00.000Z'), mkTask('p1', 'Switch x to the subscription card', '2026-12-09', '2026-11-24T15:00:00.000Z'), mkTask('o1', 'Other task', '2026-12-09', '2026-11-24T15:00:00.000Z')]);
+      [mkTask('t1', 'Switch x to the subscription card', '2026-12-09', '2026-11-24T15:00:00.000Z'), mkTask('t3', 'Switch z to the subscription card', '2026-12-16', '2026-12-15T15:00:00.000Z'), mkTask('p1', 'Switch x to the subscription card', '2026-12-09', '2026-11-24T15:00:00.000Z'), mkTask('o1', 'Other task', '2026-12-09', '2026-11-24T15:00:00.000Z')]);
     res = subs.saveSettings({ cardArrival: '2026-12-30' });
     const dueOf = id => todoStore.readTasks().find(t => t.id === id).dueDate;
     check('arrival change: open linked switch tasks moved, unlinked/other untouched', [res.status, res.body.movedTasks, dueOf('t1'), dueOf('t3'), dueOf('p1'), dueOf('o1')], [200, 2, '2026-12-30', '2026-12-30', '2026-12-09', '2026-12-09']);
     check('arrival change: persisted, getSettings and totals follow', [subs.getSettings().cardArrival, subs.getSettings().cap, res.body.totals.cardArrival], ['2026-12-30', 300, '2026-12-30']);
     res = subs.saveSettings({ cardArrival: '2026-11-01' });
-    check('arrival in the past: due the day after the task was made (or later)', [dueOf('t1'), dueOf('t3')], ['2026-11-25', '2026-12-16']);
+    const todayStr = todoEngine.todayString(), later = d => (d < todayStr ? todayStr : d);
+    check('arrival in the past: due the day after the task was made, never before today', [dueOf('t1'), dueOf('t3')], [later('2026-11-25'), later('2026-12-16')]);
+    // hand-edited due dates stay; a move never lands before today
+    const settingsKeep = fs.readFileSync(subs.SETTINGS_FILE);
+    seed([row('x', 5, 'monthly', false, 't1'), row('y', 5, 'monthly', false, 't2')],
+      [mkTask('t1', 'Switch x to the subscription card', '2027-02-02', '2026-11-24T15:00:00.000Z'), mkTask('t2', 'Switch y to the subscription card', '2026-12-09', '2026-11-24T15:00:00.000Z')]);
+    try { fs.unlinkSync(subs.SETTINGS_FILE); } catch (e) { /* none */ }
+    res = subs.saveSettings({ cardArrival: '2020-01-01' });
+    check('arrival change: hand-set date left alone; auto date moves but not before today', [res.body.movedTasks, dueOf('t1'), dueOf('t2')], [1, '2027-02-02', later('2020-01-02')]);
+    // fix 8: tasks are written before the settings, so a failed task write leaves the date unchanged
+    {
+      const realWrite = todoStore.writeTasks;
+      try { fs.unlinkSync(subs.SETTINGS_FILE); } catch (e) { /* none */ }
+      seed([row('x', 5, 'monthly', false, 't1')], [mkTask('t1', 'Switch x to the subscription card', '2026-12-09', '2026-11-24T15:00:00.000Z')]);
+      todoStore.writeTasks = () => { throw new Error('disk full'); };
+      let threw = false;
+      try { subs.saveSettings({ cardArrival: '2027-03-03' }); } catch (e) { threw = true; } finally { todoStore.writeTasks = realWrite; }
+      check('saveSettings: failed task write leaves the arrival date unchanged', [threw, subs.getSettings().cardArrival, dueOf('t1')], [true, '2026-12-09', '2026-12-09']);
+    }
+    fs.writeFileSync(subs.SETTINGS_FILE, settingsKeep);
     res = subs.saveSettings({ cap: 450 });
     check('cap change only: no tasks moved, persisted next to arrival', [res.body.movedTasks, subs.getSettings()], [0, { cardArrival: '2026-11-01', cap: 450 }]);
     check('computeTotals uses saved settings', [subs.computeTotals([]).cap, subs.computeTotals([]).cardArrival], [450, '2026-11-01']);

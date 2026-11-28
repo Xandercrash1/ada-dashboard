@@ -53,12 +53,14 @@ function buildNotes(items, total, sourceLine) {
  *   -> { subs, tasks, changed, autopayTask }
  * Mutates nothing it was given; returns fresh arrays.
  */
-function processCompletion(subs, tasks, completedTask, now, today) {
+function processCompletion(subs, tasks, completedTask, now, today, completed = []) {
   const idx = subs.findIndex(s => s.switchTaskId && s.switchTaskId === completedTask.id);
   if (idx === -1 || completedTask.type === 'recurring') return { subs, tasks, changed: false, autopayTask: null };
+  // A cancelled row never goes on the card, even if a stray switch task of it gets ticked.
+  if (subs[idx].status === 'cancelled') return { subs, tasks, changed: false, autopayTask: null };
   // Already on the card (e.g. a task-automation retry after the autopay task was done): nothing to do. Mac PM OK, 2026-11-24.
   if (subs[idx].onCard) return { subs, tasks, changed: false, autopayTask: null };
-  return applyOnCard(subs, tasks, idx, now, today, `Generated when '${completedTask.name}' was checked off.`);
+  return applyOnCard(subs, tasks, idx, now, today, `Generated when '${completedTask.name}' was checked off.`, completed);
 }
 
 /**
@@ -66,7 +68,7 @@ function processCompletion(subs, tasks, completedTask, now, today) {
  * The one place the autopay figure and task are computed: finds the single autoKind task and
  * updates it in place, or creates it. Used by applyOnCard and by the edit route.
  */
-function upsertAutopay(subs, tasks, nowIso, today, sourceLine) {
+function upsertAutopay(subs, tasks, nowIso, today, sourceLine, completed = []) {
   const { items, total } = computeTotal(subs);
   const name = `Set the subscription card's autopay to $${money(total)}`;
   const notes = buildNotes(items, total, sourceLine);
@@ -75,9 +77,14 @@ function upsertAutopay(subs, tasks, nowIso, today, sourceLine) {
   const openIdx = newTasks.findIndex(t => t.autoKind === AUTO_KIND);
   let autopayTask;
   if (openIdx !== -1) {
+    // Same figure: leave the open task exactly as it is (no new due date, no new notes).
+    if (newTasks[openIdx].name === name) return { tasks: newTasks, autopayTask: newTasks[openIdx] };
     autopayTask = { ...newTasks[openIdx], name, notes, dueDate: today, updatedAt: nowIso };
     newTasks[openIdx] = autopayTask;
   } else {
+    // No open one: if the one Alex already completed says the same figure, there is nothing to set again.
+    const last = completed.find(c => c.autoKind === AUTO_KIND);
+    if (last && last.name === name) return { tasks: newTasks, autopayTask: null };
     autopayTask = {
       id: todoEngine.generateId(),
       type: 'scheduled',
@@ -110,10 +117,10 @@ function upsertAutopay(subs, tasks, nowIso, today, sourceLine) {
  * Marks subs[idx] onCard and creates (or updates in place) the single autopay task.
  * Shared by processCompletion (task checked off) and the Subscriptions page's on-card route.
  */
-function applyOnCard(subs, tasks, idx, now, today, sourceLine) {
+function applyOnCard(subs, tasks, idx, now, today, sourceLine, completed = []) {
   const nowIso = now.toISOString();
   const newSubs = subs.map((s, i) => (i === idx ? { ...s, onCard: true, onCardAt: nowIso } : s));
-  const { tasks: newTasks, autopayTask } = upsertAutopay(newSubs, tasks, nowIso, today, sourceLine);
+  const { tasks: newTasks, autopayTask } = upsertAutopay(newSubs, tasks, nowIso, today, sourceLine, completed);
   return { subs: newSubs, tasks: newTasks, changed: true, autopayTask };
 }
 
@@ -125,7 +132,7 @@ function applyOnCard(subs, tasks, idx, now, today, sourceLine) {
 function onTaskCompleted(completedTask, tasks) {
   const subs = readSubscriptions();
   if (!Array.isArray(subs) || !subs.length) return tasks;
-  const r = processCompletion(subs, tasks, completedTask, new Date(), todoEngine.todayString());
+  const r = processCompletion(subs, tasks, completedTask, new Date(), todoEngine.todayString(), todoStore.readCompleted());
   if (!r.changed) return tasks;
   writeSubscriptions(r.subs);
   return r.tasks;
@@ -168,13 +175,16 @@ function validateSettings(body) {
  * Every OPEN switch task linked from a row moves to switchDueDate(the day the task was made, newArrival):
  * due on arrival, or the day after it was made if later. Done, cancelled and unlinked tasks are left alone.
  */
-function planArrivalMove(subs, tasks, newArrival, today, nowIso) {
+function planArrivalMove(subs, tasks, newArrival, today, nowIso, oldArrival = getSettings().cardArrival) {
   const linked = new Set(subs.filter(s => s.status !== 'cancelled' && !s.toFind && s.switchTaskId).map(s => s.switchTaskId));
   let moved = 0;
   const out = tasks.map(t => {
     if (!linked.has(t.id) || t.type === 'recurring') return t;
     const made = t.createdAt && !Number.isNaN(Date.parse(t.createdAt)) ? todoEngine.todayString(new Date(t.createdAt)) : today;
-    const due = switchDueDate(made, newArrival);
+    // Only a task still on the date the old arrival gave it moves; a hand-set date stays.
+    if (t.dueDate !== switchDueDate(made, oldArrival)) return t;
+    let due = switchDueDate(made, newArrival);
+    if (due < today) due = today;   // never into the past
     if (t.dueDate === due) return t;
     moved++;
     return { ...t, dueDate: due, updatedAt: nowIso };
@@ -187,13 +197,13 @@ function saveSettings(value) {
   return todoStore.withLock(() => {
     const old = getSettings();
     const next = { ...old, ...value };
-    todoStore.atomicWriteJson(SETTINGS_FILE, next);
     let moved = 0;
     if (value.cardArrival !== undefined && value.cardArrival !== old.cardArrival) {
-      const r = planArrivalMove(readSubscriptions(), todoStore.readTasks(), next.cardArrival, todoEngine.todayString(), new Date().toISOString());
-      if (r.moved) todoStore.writeTasks(r.tasks);
+      const r = planArrivalMove(readSubscriptions(), todoStore.readTasks(), next.cardArrival, todoEngine.todayString(), new Date().toISOString(), old.cardArrival);
+      if (r.moved) todoStore.writeTasks(r.tasks);   // tasks first: if this throws, the date has not changed
       moved = r.moved;
     }
+    todoStore.atomicWriteJson(SETTINGS_FILE, next);
     return { status: 200, body: { settings: next, totals: computeTotals(readSubscriptions(), next), movedTasks: moved } };
   });
 }
@@ -278,6 +288,9 @@ function syncRenew(row, tasks, today, nowIso, moved) {
   return { row: r, tasks: out };
 }
 
+// Fixed route words under /api/subscriptions/: a row id equal to one would be shadowed by that route.
+const RESERVED_IDS = new Set(['settings']);
+
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'subscription';
 }
@@ -294,12 +307,16 @@ function planCreate(subs, tasks, value, now, today, settings = getSettings()) {
   const createdTasks = [];
   const switchTask = value.toFind ? null : newScheduledTask(`Switch ${value.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
   if (switchTask) createdTasks.push(switchTask);
+  let priceTask = null;
   if (value.price === null && !value.toFind) {
-    createdTasks.push(newScheduledTask(`Add the price for ${value.name} to the subscriptions list`, todoEngine.addDays(today, 1), nowIso));
+    priceTask = newScheduledTask(priceTaskName(value.name), todoEngine.addDays(today, 1), nowIso);
+    createdTasks.push(priceTask);
   }
+  // Never a word the routes use (/api/subscriptions/settings): such a slug gets a suffix.
   let id = slugify(value.name), n = 2;
-  while (subs.some(s => s.id === id)) id = `${slugify(value.name)}-${n++}`;
+  while (subs.some(s => s.id === id) || RESERVED_IDS.has(id)) id = `${slugify(value.name)}-${n++}`;
   let row = { id, name: value.name, price: value.price, cycle: value.cycle, onCard: false, onCardAt: null, switchTaskId: switchTask ? switchTask.id : null };
+  if (priceTask) row.priceTaskId = priceTask.id;
   if (value.toFind) row.toFind = true;
   if (value.renewsOn) row.renewsOn = value.renewsOn;
   const rn = syncRenew(row, [], today, nowIso, true);
@@ -346,7 +363,7 @@ function markOnCardLocked(id, completeScheduled) {
       completeScheduled(tasks, sw);   // fires onTaskCompleted -> flips onCard, creates/updates autopay
       return finish(readSubscriptions(), todoStore.readTasks());
     }
-    const r = applyOnCard(subs, tasks, idx, new Date(), todoEngine.todayString(), `Generated when ${subs[idx].name} was marked on the card on the Subscriptions page.`);
+    const r = applyOnCard(subs, tasks, idx, new Date(), todoEngine.todayString(), `Generated when ${subs[idx].name} was marked on the card on the Subscriptions page.`, todoStore.readCompleted());
     todoStore.writeTasks(r.tasks);
     writeSubscriptions(r.subs);
     return finish(r.subs, r.tasks);
@@ -422,19 +439,19 @@ function planEdit(subs, tasks, completed, idx, value, now, today, settings = get
   let newCompleted = completed;
 
   // A still-to-find row turns into a normal one once it gets a price or its box is unticked: it gets the tasks the add route makes.
-  const converting = !!old.toFind && (value.toFind === false || (value.toFind !== true && value.price != null));
+  const converting = !!old.toFind && old.status !== 'cancelled' && (value.toFind === false || (value.toFind !== true && value.price != null));
   if (converting) {
     delete row.toFind;
     const sw = newScheduledTask(`Switch ${row.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
     row.switchTaskId = sw.id;
     newTasks.push(sw);
-    if (row.price == null) newTasks.push(newScheduledTask(priceTaskName(row.name), todoEngine.addDays(today, 1), nowIso));
+    if (row.price == null) { const pt = newScheduledTask(priceTaskName(row.name), todoEngine.addDays(today, 1), nowIso); row.priceTaskId = pt.id; newTasks.push(pt); }
   }
 
   if (row.name !== old.name) {
     newTasks = newTasks.map(t => {
       if (t.id === old.switchTaskId && t.type !== 'recurring') return { ...t, name: `Switch ${row.name} to the subscription card`, updatedAt: nowIso };
-      if (t.name === `Add the price for ${old.name} to the subscriptions list`) return { ...t, name: `Add the price for ${row.name} to the subscriptions list`, updatedAt: nowIso };
+      if (isPriceTask(old, t, subs)) return { ...t, name: priceTaskName(row.name), updatedAt: nowIso };
       return t;
     });
   }
@@ -444,9 +461,8 @@ function planEdit(subs, tasks, completed, idx, value, now, today, settings = get
   if (value.onCard === false && old.onCard) {
     row.onCard = false; row.onCardAt = null;
     if (!(row.switchTaskId && newTasks.some(t => t.id === row.switchTaskId))) {
-      const done = row.switchTaskId && completed.find(c => c.taskId === row.switchTaskId);
+      // Always a NEW task (new id): the automation never runs the same job key twice, and the completed log stays as it was.
       const t = newScheduledTask(`Switch ${row.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
-      if (done) { t.id = done.taskId; newCompleted = completed.filter(c => c !== done); }   // reopen: same id, off the completed log
       row.switchTaskId = t.id;
       newTasks.push(t);
     }
@@ -458,10 +474,10 @@ function planEdit(subs, tasks, completed, idx, value, now, today, settings = get
 }
 
 /** Recalculate the autopay task from the current rows. Skips creating one when nothing is on the card. */
-function recalcAutopay(subs, tasks, now, today, sourceLine) {
+function recalcAutopay(subs, tasks, now, today, sourceLine, completed = []) {
   const exists = tasks.some(t => t.autoKind === AUTO_KIND);
   if (!exists && !subs.some(s => s.onCard)) return { tasks, autopayTask: null };
-  return upsertAutopay(subs, tasks, now.toISOString(), today, sourceLine);
+  return upsertAutopay(subs, tasks, now.toISOString(), today, sourceLine, completed);
 }
 
 /** Store-backed edit. One todo-store lock. -> { status, body } */
@@ -471,6 +487,7 @@ function editSubscription(id, value, completeScheduled) {
     const idx = subs.findIndex(s => s.id === id);
     if (idx === -1) return { status: 404, body: { error: 'Subscription not found' } };
     if (value.onCard === true && subs[idx].status === 'cancelled') return { status: 409, body: { error: 'Restore it first' } };
+    if (subs[idx].toFind && subs[idx].status === 'cancelled' && (value.toFind === false || (value.toFind !== true && value.price != null))) return { status: 409, body: { error: 'Restore it first' } };
     if (value.toFind === true && !subs[idx].toFind) return { status: 409, body: { error: 'Only a row added as still-to-find can be one' } };
     if (value.toFind === true && value.price != null) return { status: 400, body: { error: 'a still-to-find row has no price yet' } };
     if (value.onCard === true && subs[idx].toFind && value.toFind !== false && value.price == null) return { status: 409, body: { error: 'Still to find: add its price first' } };
@@ -483,12 +500,12 @@ function editSubscription(id, value, completeScheduled) {
     // A blank price filled in: its "Add the price" task is done (completed the normal way, so it's logged).
     if (subs[idx].price == null && r.row.price != null) {
       const cur = todoStore.readTasks();
-      const pt = cur.find(t => t.type !== 'recurring' && t.name === `Add the price for ${r.row.name} to the subscriptions list`);
+      const pt = findPriceTask(r.row, r.subs, cur);
       if (pt) completeScheduled(cur, pt);
     }
     if (r.wantsOnCard) markOnCardLocked(id, completeScheduled);   // completes the switch task; its hook updates autopay
     const finalSubs = readSubscriptions();
-    const ap = recalcAutopay(finalSubs, todoStore.readTasks(), now, today, `Updated when ${finalSubs[idx].name} was edited on the Subscriptions page.`);
+    const ap = recalcAutopay(finalSubs, todoStore.readTasks(), now, today, `Updated when ${finalSubs[idx].name} was edited on the Subscriptions page.`, todoStore.readCompleted());
     if (ap.autopayTask) todoStore.writeTasks(ap.tasks);
     const tasks = todoStore.readTasks();
     const apt = tasks.find(t => t.autoKind === AUTO_KIND);
@@ -501,15 +518,20 @@ function editSubscription(id, value, completeScheduled) {
 // ---------------------------------------------------------------------------
 
 const priceTaskName = name => `Add the price for ${name} to the subscriptions list`;
-const isRowOpenTask = (row, t) => (t.type !== 'recurring' && t.id === row.switchTaskId) || t.name === priceTaskName(row.name) || (!!row.renewTaskId && t.id === row.renewTaskId);
+// A row's price task is found by id (row.priceTaskId). Rows from before that field fall back to the name, but only
+// when no other row has the same name, so one row's task is never taken for another's.
+const isPriceTask = (row, t, subs) => t.type !== 'recurring' && (row.priceTaskId ? t.id === row.priceTaskId
+  : (t.name === priceTaskName(row.name) && !subs.some(s => s.id !== row.id && s.name === row.name)));
+const findPriceTask = (row, subs, tasks) => tasks.find(t => isPriceTask(row, t, subs));
+const isRowOpenTask = (row, t, subs) => (t.type !== 'recurring' && t.id === row.switchTaskId) || isPriceTask(row, t, subs) || (!!row.renewTaskId && t.id === row.renewTaskId);
 
 /** planCancel(subs, tasks, idx, now) -> { subs, tasks, row, changed }. Pure. Open switch/price tasks are removed, not completed. */
 function planCancel(subs, tasks, idx, now) {
   const old = subs[idx];
   if (old.status === 'cancelled') return { subs, tasks, row: old, changed: false };
   const row = { ...old, status: 'cancelled', cancelledAt: now.toISOString(), onCard: false, onCardAt: null };
-  delete row.renewTaskId;
-  return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: tasks.filter(t => !isRowOpenTask(old, t)), row, changed: true };
+  delete row.renewTaskId; delete row.priceTaskId;
+  return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: tasks.filter(t => !isRowOpenTask(old, t, subs)), row, changed: true };
 }
 
 /** planRestore(subs, tasks, idx, now, today, settings) -> { subs, tasks, row, changed }. Pure. Back off the card, so a switch task (and a price task when price is blank) is created. */
@@ -523,8 +545,9 @@ function planRestore(subs, tasks, idx, now, today, settings = getSettings()) {
   }
   const sw = newScheduledTask(`Switch ${old.name} to the subscription card`, switchDueDate(today, settings.cardArrival), nowIso);
   let row = { ...rest, onCard: false, onCardAt: null, switchTaskId: sw.id };
+  delete row.priceTaskId;
   const added = [sw];
-  if (old.price == null || !Number.isFinite(Number(old.price))) added.push(newScheduledTask(priceTaskName(old.name), todoEngine.addDays(today, 1), nowIso));
+  if (old.price == null || !Number.isFinite(Number(old.price))) { const pt = newScheduledTask(priceTaskName(old.name), todoEngine.addDays(today, 1), nowIso); row.priceTaskId = pt.id; added.push(pt); }
   const rn = syncRenew(row, tasks.concat(added), today, nowIso, true);
   row = rn.row;
   return { subs: subs.map((s, i) => (i === idx ? row : s)), tasks: rn.tasks, row, changed: true };
@@ -533,7 +556,7 @@ function planRestore(subs, tasks, idx, now, today, settings = getSettings()) {
 /** planDelete(subs, tasks, idx) -> { subs, tasks }. Pure. */
 function planDelete(subs, tasks, idx) {
   const old = subs[idx];
-  return { subs: subs.filter((_, i) => i !== idx), tasks: tasks.filter(t => !isRowOpenTask(old, t)) };
+  return { subs: subs.filter((_, i) => i !== idx), tasks: tasks.filter(t => !isRowOpenTask(old, t, subs)) };
 }
 
 function finishBody(subs, row) {
@@ -555,7 +578,7 @@ function changeRow(id, kind) {
     else r = planDelete(subs, todoStore.readTasks(), idx);
     if (r.changed === false) return { status: 200, body: finishBody(subs, subs[idx]) };
     const line = `Updated when ${name} was ${kind === 'cancel' ? 'cancelled' : kind === 'restore' ? 'restored' : 'deleted'} on the Subscriptions page.`;
-    const ap = recalcAutopay(r.subs, r.tasks, now, today, line);
+    const ap = recalcAutopay(r.subs, r.tasks, now, today, line, todoStore.readCompleted());
     todoStore.writeTasks(ap.tasks);
     writeSubscriptions(r.subs);
     return { status: 200, body: finishBody(r.subs, kind === 'delete' ? null : r.row) };
